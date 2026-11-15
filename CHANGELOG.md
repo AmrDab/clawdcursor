@@ -5,6 +5,13 @@ All notable changes to Clawd Cursor will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **The beam is back on the screen's edge, on every monitor** (#392). The border beam goes round the whole display
+  again, not the agent's window: on each monitor, from the moment the overlay starts, the gold `pulse-inner` beam
+  (unchanged: radius 23, 3.9 s, glow 28 px deep) lies just inside the screen's edge. It tracks no window, so it can no
+  longer frame a hidden window, be left around a closed one, or sit behind a full-screen one; the drawer lays it out
+  again when a monitor is plugged in or out or changes resolution. While a pause asks you for a step it is blue and
+  still, as before. `TARGET` lines on the outline's stdin are ignored. This replaces the window-following outline
+  described in the next entry, on Windows, macOS and Linux.
 - **Testing clawdcursor on its own: `clawdcursor task`, `clawdcursor logs` and `clawdcursor doctor --setup`.** For
   developers who want to see an agent work with clawdcursor as its only tool. Two optional add-ons, downloaded from npm
   on first use and only after asking: `clawdcursor-agent` and `clawdcursor-doctor`, installed into
@@ -25,27 +32,34 @@ All notable changes to Clawd Cursor will be documented in this file.
   - The day log's lines now carry the `pid` of the server that wrote them, and a session file's header carries the
     `task` run that started its server, so `logs --session` and `logs --run` can tell servers apart.
 - **The outline is a border beam, and the pill has a thinking orb** (#392). The border around the agent's window is
-  now the Border Beam of [libraries.dev](https://libraries.dev/beam), in clawdcursor's colours: an **amber** beam that
-  goes round the window's edge every two seconds while the agent works, with a thin bright stroke and a soft glow just
-  inside it; and while the agent waits for you, the library's "pulse" in **blue**: the whole edge, held steady. The
-  running pill shows the "working" Thinking Orb (particles on tilted orbits, in amber) in place of the blinking dot.
-  - On a light window (a white document) the beam is stronger, with a dark highlight, so it is not lost (Windows).
+  now the Border Beam of [libraries.dev](https://libraries.dev/beam) as `<BorderBeam size="pulse-inner"
+  colorVariant="gold" borderRadius={23} duration={3.9} hueRange={46}>`, with the library's defaults for the rest (dark
+  theme): while the agent works, golden blobs **inside** the window's edge - a glow 28 px deep, a thin ring and a bloom
+  on it - that breathe in size, place and brightness while their colours turn the whole wheel every 16 s (`hueRange`
+  does nothing for the pulse sizes, in the web library or its React Native port); while the agent waits for
+  you, the same in the library's "ocean" **blues**, held still. The running pill shows the "working" Thinking Orb
+  (particles on tilted orbits, in amber) in place of the blinking dot.
+  - The beam lies over the window's edge, 28 px deep, and nothing over the rest of it, so it shows the same on a
+    normal, a maximized and a full-screen window. The ring's corners have a radius of 23, rounder than a
+    window's own (8 px on Windows 11), so at each corner the ring cuts across the window's corner.
+  - The library's blobs keep their size in px whatever the box, at places in % of it: on a large window they light
+    patches of the edge (about where the library puts them on a card), not all of it.
   - When the agent's window is the desktop itself (a click on the desktop), the beam goes around the monitor the
-    pointer is on (Windows and macOS). Nothing is drawn when the agent is idle or has no window, as before.
-  - Where the system is set to reduce motion (Windows "Animation effects" off, macOS Reduce Motion), the beam is one
-    still frame and the orb does not move.
-  - Still click-through, never focused, and out of the agent's screenshots. The glow reaches about 28 px into the
-    window's edge.
-  - Windows and macOS. On Linux the border stays a plain steady one for now.
-  - On macOS the beam is drawn for power (#414): a thin amber ring with a brighter run going round it, in plain Core
-    Animation layers along the edge, so its GPU cost follows the edge and not the window's area; paused, a still blue
-    ring. The orb moves about 10 times a second on both systems.
-  - **Credit:** the look is a port of **Border Beam** and **Thinking Orbs** by Jakub Antalik
+    pointer is on (Windows and macOS).
+  - Where the system is set to reduce motion (Windows "Animation effects" off, macOS Reduce Motion, GTK animations off),
+    the beam is one still frame and the orb does not move.
+  - Still click-through, never focused, and out of the agent's screenshots. Nothing is drawn when the agent is idle or
+    has no window, as before.
+  - Drawn for power: on Windows eight small layered windows round the edge, 12.5 frames a second, worked out and
+    redrawn only where a blob is, about half a percent of a core whatever the window's size; on macOS small Core
+    Animation gradient layers along the edge (no masks, blurs or window-sized layers, #414), at most 15 frames a
+    second, no code running per frame; on Linux cairo gradients over the edge band, 10 frames a second. Paused, nothing
+    moves and nothing is redrawn.
+  - **Credit:** the look follows **Border Beam** and **Thinking Orbs** by Jakub Antalik
     ([github.com/Jakubantalik/Libraries.dev](https://github.com/Jakubantalik/Libraries.dev), `packages/border-beam`
-    and `packages/thinking-orbs`), MIT License, Copyright (c) 2026 Jakub Antalik. The beam uses the library's default
-    preset (its layers, gradient stops, opacities and timings) with an amber colour variant of ours and its "ocean"
-    blues, redrawn natively: layered windows on Windows, Core Animation on macOS. The MIT notice is in
-    `scripts/window-outline.ps1`.
+    and `packages/thinking-orbs`), MIT License, Copyright (c) 2026 Jakub Antalik. The beam uses the library's
+    pulse-inner values (its blobs, palettes, opacities, oscillators and timings), redrawn natively: layered windows on
+    Windows, Core Animation on macOS, cairo on Linux. The MIT notice is in `scripts/window-outline.ps1`.
 
 ### Fixed
 - **Windows: `open_app` starts apps directly again, not through the Start menu (10–12 s per launch).** The PowerShell that runs

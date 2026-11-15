@@ -103,7 +103,7 @@ In tool terms:
 - **OCR:** text recognition, reading the words in a picture of the screen. It runs on your computer.
 - **Playwright and CDP:** Playwright is a library that controls Chrome and Edge from the inside, over the Chrome DevTools Protocol (CDP), the browser's own debugging connection. Apps built on a browser engine (Electron or WebView2) can be reached the same way; `system detect_webview` finds them.
 - **Compact tools:** the six tools your AI sees with `--compact`. Without it there are 89 smaller tools, one per action. See [The tools](#the-tools).
-- **The pill and the outline:** while your AI is working, a pill on screen says what it is doing ("Typing in Edge") and a border marks the window it is working in: an amber beam that runs round its edge while your AI works, steady blue while it waits for you. Clicks go through it, and it stays out of your AI's screenshots.
+- **The pill and the outline:** while your AI is working, a pill on screen says what it is doing ("Typing in Edge") and a beam runs round the edge of your screen (every monitor): gold while your AI works, steady blue while it waits for you. Clicks go through it, and it stays out of your AI's screenshots.
 
 ---
 
@@ -335,7 +335,7 @@ Restart the host afterwards so it starts the new server. `clawdcursor versions` 
 
 Earlier releases are in the [changelog](CHANGELOG.md).
 
-**Next: 2.1.** One standard benchmark across app types, OSes and models becomes the release gate, with five general mechanisms behind it: honest results, target resolution, perception without a tree, screen geometry and timing. The first three are merged, and so are an opt-in confirm mode ([#373](https://github.com/AmrDab/clawdcursor/issues/373)), `clawdcursor update`, anonymous error reports and an amber beam around the agent's window in place of the thin outline. See the [2.1 milestone](https://github.com/AmrDab/clawdcursor/milestone/1).
+**Next: 2.1.** One standard benchmark across app types, OSes and models becomes the release gate, with five general mechanisms behind it: honest results, target resolution, perception without a tree, screen geometry and timing. The first three are merged, and so are an opt-in confirm mode ([#373](https://github.com/AmrDab/clawdcursor/issues/373)), `clawdcursor update`, anonymous error reports and a gold beam along the edges of every monitor in place of the thin outline, blue and still while a pause asks the user. See the [2.1 milestone](https://github.com/AmrDab/clawdcursor/milestone/1).
 
 ---
 
@@ -475,6 +475,13 @@ MIT. See [LICENSE](LICENSE).
 ## Acknowledgments
 
 Built on the Model Context Protocol SDK, nut-js, Playwright, sharp, and the AT-SPI, UI Automation and AX accessibility APIs.
+
+The beam around the edge of the display follows **Border Beam** (size `pulse-inner`, `gold` palette) and the pill's orb
+**Thinking Orbs**, both by Jakub Antalik ([libraries.dev](https://libraries.dev),
+[github.com/Jakubantalik/Libraries.dev](https://github.com/Jakubantalik/Libraries.dev)), MIT License, Copyright (c) 2026
+Jakub Antalik. Their values (palettes, timings, opacities) are used in `scripts/window-outline.ps1`,
+`scripts/mac/overlay.swift` and `scripts/linux/overlay.py`; the full MIT notice is at the top of
+`scripts/window-outline.ps1`.
 
 ---
 

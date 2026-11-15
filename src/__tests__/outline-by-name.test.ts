@@ -1,5 +1,5 @@
 /**
- * The outline and the pill's "…in <app>" follow by-name acts too (1.6.0): an agent on the blind pipeline (accessibility
+ * The working window and the pill's "…in <app>" follow by-name acts too (1.6.0): an agent on the blind pipeline (accessibility
  * invoke / set_value / toggle / select, never a mouse or a key) got no outline at all, because only mouse and keyboard
  * input set the window they read (control.ts workingWindow / workingIn).
  */
@@ -55,14 +55,14 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('the outline follows by-name acts', () => {
-  it('a by-name invoke with no mouse or keyboard input before it: the outline goes around the window in front', async () => {
+describe('the working window follows by-name acts (the beam is on the display and is told nothing)', () => {
+  it('a by-name invoke with no mouse or keyboard input before it: the working window is the one in front', async () => {
     const d = fakeDesktop();
     expect(workingWindow()).toBeUndefined();
     await d.invokeElement({ name: 'Save' });
     expect(workingWindow()).toEqual({ processId: 100, handle: 0x5a0 });
     expect(workingIn()?.processName).toBe('msedge');
-    expect(outlines[0].written).toEqual(['TARGET 1440 100']);
+    expect(outlines[0].written).toEqual([]);  // the beam is on the display: nothing is sent
   });
 
   it('every by-name action moves it, with or without the processId of the window in front; reading a value does not', async () => {
@@ -74,18 +74,18 @@ describe('the outline follows by-name acts', () => {
       await d.invokeElement({ name: 'Field', action, processId: action === 'toggle' ? fg.processId : undefined });
       expect(workingWindow()).toEqual({ processId: fg.processId, handle: fg.handle });
     }
-    expect(outlines[0].written).toEqual(['TARGET', 'TARGET 1970 300', 'TARGET 1440 100', 'TARGET 1970 300', 'TARGET 1440 100']);
+    expect(outlines[0].written).toEqual([]);  // the beam is on the display: nothing is sent
   });
 
   it('a by-name act on a process that is not in front leaves the outline where it was', async () => {
     const d = fakeDesktop();
     await d.invokeElement({ name: 'OK', processId: NOTEPAD.processId });
     expect(workingWindow()).toBeUndefined();
-    expect(outlines[0].written).toEqual(['TARGET']);  // no window: the outline draws nothing
+    expect(outlines[0].written).toEqual([]);  // the beam is on the display: nothing is sent
     await d.invokeElement({ name: 'Save' });
     await d.invokeElement({ name: 'OK', processId: NOTEPAD.processId });
     expect(workingWindow()).toEqual({ processId: 100, handle: 0x5a0 });
-    expect(outlines[0].written).toEqual(['TARGET', 'TARGET 1440 100']);
+    expect(outlines[0].written).toEqual([]);  // the beam is on the display: nothing is sent
   });
 
   it('a refused by-name act (an AI assistant nobody focused) does not move it', async () => {
@@ -94,7 +94,7 @@ describe('the outline follows by-name acts', () => {
     fg = CLAUDE;
     await expect(d.invokeElement({ name: 'Message', action: 'set-value' })).rejects.toThrow(/an AI assistant/);
     expect(workingWindow()).toEqual({ processId: 100, handle: 0x5a0 });
-    expect(outlines[0].written).toEqual(['TARGET 1440 100']);
+    expect(outlines[0].written).toEqual([]);  // the beam is on the display: nothing is sent
   });
 
   it('input after a by-name act works as before: it binds to the window in front, and a later switch by the user is still refused', async () => {
@@ -105,7 +105,7 @@ describe('the outline follows by-name acts', () => {
     fg = NOTEPAD;
     await d.keyPress('a');
     expect(workingWindow()).toEqual({ processId: 300, handle: 0x7b2 });
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300']);
+    expect(outlines[0].written).toEqual([]);  // the beam is on the display: nothing is sent
     // A by-name act elsewhere moves the outline, not the lease: the input lease is still Notepad's.
     vi.advanceTimersByTime(30_000);
     fg = EDGE;

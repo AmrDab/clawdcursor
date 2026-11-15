@@ -1,64 +1,66 @@
-# window-outline.ps1 - the "border beam" around the window the agent is working in.
+# window-outline.ps1 - the "border beam" around the edge of the display (every monitor).
 #
-# Spawned/killed by src/core/banner.ts in lockstep with the control-banner pill. It draws ONLY along the frame: four
-# strip windows (top, right, bottom, left), each as deep as the beam's inner glow, so nothing lies over the middle of
-# the window and nothing on the rest of the screen.
+# Spawned/killed by src/core/banner.ts in lockstep with the control-banner pill. It draws ONLY along the screen's edge:
+# on each monitor, eight strip windows (four sides, four corners) just INSIDE the monitor's edge, 28 px deep, over
+# whatever is on screen there. Nothing lies over the middle of the screen. No window is tracked: the beam is up on
+# every monitor for as long as this process runs.
 #
-# THE LOOK IS A PORT of Border Beam by Jakub Antalik (libraries.dev, github.com/Jakubantalik/Libraries.dev,
-# packages/border-beam, MIT - notice below): the default preset the site shows (type rotate, size md, dark theme),
-# in OUR colours: amber while the agent works, blue while it waits for you. The colours are a variant made the way the
-# library makes its own ("colorful", "ocean", "sunset": nine blob colours, the same places, the same filter).
-# The numbers are its own, from spec/beam-spec.json (S), src/styles.ts (C) and the shader
-# ports/react-native/border-beam-native/src/rotateShader.ts (R), which mirrors ports/ios/.../BeamShaders.metal:
+# THE LOOK IS Border Beam by Jakub Antalik (libraries.dev, github.com/Jakubantalik/Libraries.dev, packages/border-beam,
+# MIT - notice below) as <BorderBeam size="pulse-inner" colorVariant="gold" borderRadius={23} duration={3.9}
+# hueRange={46}>: everything else the library's default for that size, theme "dark". The numbers are the library's own
+# (dist/index.es.js: po() the pulse-inner CSS, ao()/to()/Re() its layers' blobs, fe() a blob, ge() its timings, so()
+# the oscillators, io() the hue turn, G.gold / G.ocean the palettes, pe["pulse-inner"].dark the opacities).
+# hueRange does nothing for the pulse sizes: io() (web 1.4.1, still the latest on npm and on GitHub) and the React
+# Native port (border-beam-native: PulseBeam is not given it, pulseHueDegrees() turns the full circle) both turn the
+# hue a whole 360 degrees every 16 s, whatever hueRange is.
 #
-#   what                      value                                                                source
-#   ------------------------  -------------------------------------------------------------------  -----------------
-#   turn                      a conic gradient about the centre, 0 at the top, clockwise; 1.96 s   S:35, R:44-48
-#                             a turn, linear
-#   beam window (mask)        0 until 30%, .1 at 36%, .35 at 44%, 1 from 52% to 80%, .35 at 86%,   S:1940, C:1803
-#                             .1 at 92%, 0 from 95%
-#   stroke ring               1 px band at the edge, opacity .26: the colour blobs under a white   S:92, C:1801-1838
-#                             conic highlight (0 until 54%, .1 .3 .6 .75 .6 .3 .1 every 3%, 0      S:1736
-#                             from 78%), inside the beam window
-#   colour blobs              nine radial gradients, colour at the centre to clear at the radius,  S:1271, R:126-140
-#                             the first on top, at fixed places on the edge. OURS, "amber" (around
-#                             #f59e0b, from gold to orange as the library's variants range):
-#                             (255,170,30) (255,200,60) (245,130,10) (255,215,90) (245,158,11)
-#                             (255,190,50) (250,120,20) (255,205,70) (235,140,5)
-#   inner glow                the whole rounded rect, opacity .42: the same blobs at .9 size and   S:2024-2033
-#                             alpha .45, inside the beam window, fading out 28 px in from each     C:1840-1877
-#                             edge; an inset white shadow, alpha .27, over 9 px                    R:150-156
-#   bloom                     the 1 px ring with a second white conic (peak .85 at 70-70.5%),      S:1830, S:2034
-#                             blurred 8 px (gaussian), opacity .24, clipped to the frame           C:1879-1900
-#   colour filter             hue-rotate(-10..+10 deg, ease in and out over 12 s; the library's    S:37-44, C:1697-1707
-#                             default is 30, which would take amber to green) brightness(1.3)
-#                             saturate(1.2): the feColorMatrix arithmetic of colorMatrix.ts
-#   fade                      in over .6 s when it appears (out over .5 s)                         S:41-42
-#   pulse (our paused form)   no turn: the whole ring, stroke opacity .94, glow .34, brightness    S:124-143
-#                             1.9, held still (#392: "blue and steady"; the library breathes it).  S:5187 (bop-*)
-#                             "ocean" blobs: (100,80,220)                                          S:1401
-#                             (60,120,255) (80,100,200) (50,140,220) (120,80,255) (70,130,255)
-#                             (140,100,240) (90,110,230) (130,70,255); colours do not shift
+#   what              value
+#   ----------------  ----------------------------------------------------------------------------------------------
+#   ring              the inner 1 px of the frame, corners of radius 23, opacity 1.54 (a CSS opacity: 1): nine
+#                     radial-gradient blobs, one per colour of the palette at its place and size (ao(); colour at the
+#                     centre to clear at the radius, the first on top), each breathing in size and place, with an
+#                     opacity that pulses between .52 and 1 with its quarter
+#   inner glow        the same nine blobs with the inner sizes (to(): 65x35 55x30 35x65 15x30 173x28 80x22 69x28 22x38
+#                     47x44) over four white ones at the corners (radius 60, alpha .18 times the quarter's pulse, clear
+#                     at 70%), opacity .44, shown only near the edge: a mask from 1 at each edge to 0 28 px in (the
+#                     four added), clipped to the radius 23
+#   bloom             seven blobs (eo: 84x48 72x42 48x84 216x38 102x31 89x38 62x58 at their colours' places) at alpha
+#                     .76 (1 - .48 / 2) that do not breathe, blurred 8 px, then clipped and masked to the same 1 px
+#                     ring (a browser blurs before it clips or masks), opacity .66, on top
+#   colour filter     hue-rotate (a full turn every 16 s, continuous, as io() sets for the pulse sizes) brightness(.75)
+#                     saturate(1.2)
+#   breathing         sizes x(1 -/+ .28), places +/-33 px, the glow's height x(1 -/+ .34), opacities 1 -> .52, each a
+#                     cosine between two values; periods (duration / 2.3 = 3.9 / 2.3) x 1.9, 2.6 and 2.4 s (3.22, 4.41 and
+#                     4.07 s) times the library's
+#                     factors (so(): .9, 1.26, 1.6, 1.1, .81, 1.88, .98, 1.4, 1.45, 1.32, .84, 1.58)
+#   blob sizes        in px as given, whatever the frame's size (pulse-inner does not scale them); places in % of it
+#   gold              (240,190,60) (255,210,90) (225,165,40) (250,200,70) (255,225,120) (230,175,50) (245,205,85)
+#                     (215,155,35) (255,215,100), at (33%,-7.4%) (12%,-5%) (2.1%,68.3%) (2.1%,68.3%) (74.4%,100%)
+#                     (55%,100%) (93.9%,0%) (100%,27.1%) (100%,27.1%), ring sizes 70x40 60x35 40x70 20x35 180x32 85x26
+#                     74x32 26x42 52x48
+#   ocean (paused)    (100,80,220) (60,120,255) (80,100,200) (50,140,220) (120,80,255) (70,130,255) (140,100,240)
+#                     (90,110,230) (130,70,255)
+#   fade              in over .6 s when it appears
 #
 # What is ours, because this is a desktop overlay and not a card on a page:
-#   - Pixels are filled on the CPU into per-pixel-alpha layered windows (UpdateLayeredWindow); the desktop compositor
-#     blends them. A frame fills only the lines where the beam window's edges are, and the thin rows under the white
-#     highlight; a line's colours are filtered again (the hue shift) each time the beam has left it.
-#   - The blobs were laid out for a card of about 350 x 140 px (the library's reference size, S: referenceSize). Here
-#     each keeps its place and its reach ALONG its edge in proportion to the frame, and its reach ACROSS the edge in px,
-#     so a window of any size has the card's colours all the way round and the card's glow depth.
-#   - px above are CSS px. The strips are windows that are not DPI aware, so they are filled in CSS px and Windows
-#     draws them at the monitor's scale (as a page at that zoom is): at 150% under half the pixels, at 225% a fifth.
-#   - About 22 frames a second for a small window, 16 for the rest. The white highlight on the ring, which is what
-#     the eye follows, moves on every frame; for all but a small window the glow behind it and the glow ahead of it
-#     take turns (one, the other, neither), so a frame changes about two strips and not all four.
-#   - The corners follow the window's own radius (the card's is 16).
-#   - On a light window (one line of pixels across its middle is read every ten seconds, and nothing is kept of it)
-#     the beam is the library's light theme - the highlight and the inset shadow dark instead of white (S:1736 light,
-#     S:99), saturate 1.5 - with the stroke and the glow at .6 and .7: the library's .12 and .26 are for a card that
-#     is the only thing on its page, and an amber glow that faint is lost on a white document.
-#   - The paused form is the library's pulse-outside held still: its blobs do not drift and it does not breathe.
-#   - Where Windows is set to show no animations (SPI_GETCLIENTAREAANIMATION off): one still frame, the whole ring.
+#   - The monitor is the library's element and the screen its card: the beam is drawn over the screen's content along
+#     its edge, as the library draws its layers over the card's. One beam per monitor, each laid out at that monitor's
+#     bounds and zoom; the monitors are looked at again every 100 ms, so one plugged in or out, or a new resolution,
+#     is laid out again.
+#   - The ring's corners have the owner's radius 23: at each corner the ring curves in across the screen's own corner.
+#   - The bloom's blur is worked out once per size, not per frame (its blobs do not move; only its colour turns): at
+#     each point along the edge, the inside half of a gaussian of 8 px across it (sampled every 2 px in), then a
+#     gaussian of 8 px along the edge.
+#   - px are CSS px. The strips are windows that are not DPI aware, so they are filled in CSS px and Windows draws them
+#     at the monitor's scale (as a page at that zoom is).
+#   - 12.5 frames a second (the motion is slow). A frame works out the ring's and the bloom's colours along the edge
+#     (a value every 4 px) and the inner glow's at eight depths (every 4 px in), then fills each pixel of a side by
+#     blending the two values either side of it, from fixed weights; the corners pixel by pixel. Only the points of a
+#     side a blob reaches (or reached the frame before) are worked out and drawn, as deep as they are lit, and only the
+#     span from the first to the last is handed to Windows (the blobs keep their size in px, so on a large screen most
+#     of the edge is dark).
+#   - Paused: the same shape in the library's "ocean" blues, still (drawn once). Where Windows is set to show no
+#     animations (SPI_GETCLIENTAREAANIMATION off): one still frame in gold.
 #
 # Border Beam - MIT License - Copyright (c) 2026 Jakub Antalik
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
@@ -73,13 +75,10 @@
 # OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 # stdin, from the parent:
-#   TARGET <hwnd> <pid>   the window to outline (the pid is for the macOS drawer; ignored here)
-#   TARGET                draw nothing
 #   HIDE <ms>             step aside for a screen capture (only sent after OUTLINE_CAPTURABLE)
-# The beam is shown while that window is the one in front and not minimized, and follows it as it moves or resizes
-# (polled every 100 ms). A target that is the desktop itself (Progman / WorkerW) is outlined as the monitor.
-# It starts with no window. The parent kills this process to remove it; when stdin closes (the parent is gone without
-# doing so) it exits by itself.
+#   TARGET ...            ignored (an older parent sent the window to outline; the beam is on the whole display now)
+# The beam is up from the start, on every monitor, until the parent kills this process to remove it; when stdin
+# closes (the parent is gone without doing so) it exits by itself.
 #
 # stdout: OUTLINE_CAPTURABLE, once, where Windows cannot keep this window out of a capture (before Windows 10 2004).
 #
@@ -88,17 +87,20 @@
 #   WS_EX_TRANSPARENT  0x00000020  click-through
 #   WS_EX_NOACTIVATE   0x08000000  never steals focus (agent keeps typing)
 #   WS_EX_TOOLWINDOW   0x00000080  no taskbar / alt-tab entry
-#   WS_EX_TOPMOST      0x00000008  stays above the window it outlines. (Only an always-on-top window can be put over
-#                                  the window in front by another process: placed just above it, or at the top of the
-#                                  ordinary windows, the border ended up behind that window's own popups or was
-#                                  re-placed on every poll - measured 2026-11-10.) The pill raises itself again on
-#                                  its own clock, so it stays above the beam where the two meet.
+#   WS_EX_TOPMOST      0x00000008  stays above the windows on screen (only an always-on-top window can be put over
+#                                  the window in front by another process). The strips span the whole monitor, taskbar
+#                                  included, and the taskbar or another always-on-top window goes above them when it is
+#                                  activated: so every 100 ms a strip with a visible foreign window above it is raised
+#                                  again (SetWindowPos HWND_TOPMOST, no size, no move, no activation, no show). The pill
+#                                  (banner.ps1) raises itself over any "clawdcursor beam" above it, so windows of the
+#                                  pill's process (CLAWD_PILL_PID, set by the parent) do not count as foreign: the beam
+#                                  stays under the pill where the two meet, and the two never swap.
 #
 # The Windows drawer; macOS and Linux use scripts/mac/overlay.swift and scripts/linux/overlay.py (`outline`).
 
 param(
-    [string]$Color = '',   # accepted for the caller's sake (the Linux drawer takes the colour); the beam has its own
-    [switch]$Paused        # the paused form: the whole ring, still, in blue tones
+    [string]$Color = '',   # accepted for the caller's sake; the beam has its own colours (gold, or ocean paused)
+    [switch]$Paused        # the paused form: the same glow, still, in blue tones
 )
 
 $ErrorActionPreference = 'Stop'
@@ -107,16 +109,15 @@ Add-Type -AssemblyName System.Drawing
 
 $source = @'
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
-// One side of the beam: a layered window whose pixels are set with UpdateLayeredWindow.
+// One piece of the beam: a layered window whose pixels are set with UpdateLayeredWindow.
 public class BeamStrip : Form {
-    [StructLayout(LayoutKind.Sequential)] struct PT { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] struct BMI {
         public int Size, Width, Height; public short Planes, BitCount; public int Compression, SizeImage, XPpm, YPpm, ClrUsed, ClrImportant;
     }
@@ -131,6 +132,7 @@ public class BeamStrip : Form {
     [DllImport("gdi32.dll")] static extern IntPtr CreateDIBSection(IntPtr dc, ref BMI info, uint usage, out IntPtr bits, IntPtr section, uint offset);
     [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc, IntPtr o);
     [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr o);
+    [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr dc);
 
     public static bool Capturable;   // Windows could not keep a strip out of captures
 
@@ -161,59 +163,51 @@ public class BeamStrip : Form {
         if (!excluded) Capturable = true;
     }
 
-    // Where the strip is, relative to the outlined frame, and its size; a zero size: not used.
+    // Where the strip is, relative to the outlined frame, and its size (CSS px); a zero size: not used.
     public int X, Y, W, H;
-    // Per pixel, made once per size (WindowOutline.Layout):
-    public int[] Raw;        // the beam's colour before the colour filter (0xRRGGBB, not premultiplied)
-    public byte[] Alpha;     // its opacity with the beam window fully open
-    public byte[] Ring;      // how much of the white highlight it takes (the stroke ring, times its opacity)
-    public ushort[] Bloom;   // how much of the bloom (of 65535)
-    public ushort[] Turn;    // its place on the conic turn, 0..4095 (0: straight up from the centre, then clockwise)
-    public int[] Base;       // Raw through the colour filter, premultiplied by Alpha
-    public int[] Pixels;     // what is on screen: premultiplied ARGB
-    // Per line across the edge (a column of the top and bottom strips, a row of the side ones):
-    public int[] From, To;   // the part of the turn it lies on
-    public int[] Near, Far;  // its first and last pixel that is part of the beam, counted across the edge
-    public int[] RingNear, RingFar;   // ...that is on the stroke ring
-    public int[] HaloNear, HaloFar;   // ...that the bloom reaches (the ring is within it)
-    public byte[] State;     // what the last frame left there: 0 clear, 1 partly lit, 2 fully lit, 3 fully lit with bloom
-    IntPtr dc, bitmap, bits, native;
+    IntPtr dc, bitmap, bits, native, stock;   // stock: the bitmap the DC came with
 
     public void SetSize(int x, int y, int w, int h) {
         X = x; Y = y;
+        w = Math.Max(0, w); h = Math.Max(0, h);
         if (w == W && h == H) return;
-        W = Math.Max(0, w); H = Math.Max(0, h);
+        W = w; H = h;
         if (dc == IntPtr.Zero) { dc = CreateCompatibleDC(IntPtr.Zero); native = Marshal.AllocHGlobal(64); }
-        int n = W * H, lines = Math.Max(W, H);
-        Raw = new int[n]; Alpha = new byte[n]; Ring = new byte[n]; Bloom = new ushort[n]; Turn = new ushort[n];
-        Base = new int[n]; Pixels = new int[n];
-        From = new int[lines]; To = new int[lines]; State = new byte[lines];
-        Near = new int[lines]; Far = new int[lines]; RingNear = new int[lines]; RingFar = new int[lines];
-        HaloNear = new int[lines]; HaloFar = new int[lines];
         IntPtr old = bitmap;
         bitmap = IntPtr.Zero; bits = IntPtr.Zero;
-        if (n > 0) {
+        if (W * H > 0) {
             BMI info = new BMI();
             info.Size = 40; info.Width = W; info.Height = -H; info.Planes = 1; info.BitCount = 32;   // top-down, 32-bit
             bitmap = CreateDIBSection(dc, ref info, 0, out bits, IntPtr.Zero, 0);
-            if (bitmap != IntPtr.Zero) SelectObject(dc, bitmap);
+            if (bitmap != IntPtr.Zero) { IntPtr was = SelectObject(dc, bitmap); if (stock == IntPtr.Zero) stock = was; }
         }
         if (old != IntPtr.Zero) DeleteObject(old);
+    }
+
+    // The DC, the bitmap and the buffer are ours to free (a monitor unplugged disposes its strips).
+    protected override void Dispose(bool disposing) {
+        if (dc != IntPtr.Zero) {
+            if (stock != IntPtr.Zero) SelectObject(dc, stock);   // the bitmap must not be selected when it is deleted
+            if (bitmap != IntPtr.Zero) DeleteObject(bitmap);
+            DeleteDC(dc);
+            dc = IntPtr.Zero; bitmap = IntPtr.Zero; bits = IntPtr.Zero; stock = IntPtr.Zero;
+        }
+        if (native != IntPtr.Zero) { Marshal.FreeHGlobal(native); native = IntPtr.Zero; }
+        base.Dispose(disposing);
     }
 
     // The strip to its place on screen, in physical pixels (the caller is per-monitor aware; Windows turns the point
     // into this window's own units). SWP_NOSIZE 0x01 | SWP_NOZORDER 0x04 | SWP_NOACTIVATE 0x10.
     public void MoveTo(int x, int y) { SetWindowPos(Handle, IntPtr.Zero, x, y, 0, 0, 0x0015); }
 
-    // Put the pixels of the rectangle x0..x1, y0..y1 (inclusive) on screen, at this opacity, where the strip is. Only
-    // that rectangle is composed again. The size is in the strip's own units (CSS px): set as a window that is not
-    // DPI aware, which Windows then draws at the monitor's scale.
-    public void Push(byte alpha, int x0, int y0, int x1, int y1) {
-        if (bits == IntPtr.Zero || x1 < x0 || y1 < y0) return;
-        // A side strip (narrow, with many rows): whole rows in one go - a copy per row costs more than the pixels it
-        // saves. The top and bottom strips (a few long rows): only the part of each row that changed.
-        if (H >= W || (x0 == 0 && x1 == W - 1)) Marshal.Copy(Pixels, y0 * W, new IntPtr(bits.ToInt64() + 4L * y0 * W), (y1 - y0 + 1) * W);
-        else for (int y = y0; y <= y1; y++) Marshal.Copy(Pixels, y * W + x0, new IntPtr(bits.ToInt64() + 4L * (y * W + x0)), x1 - x0 + 1);
+    // Put these pixels (premultiplied ARGB, W x H) on screen at this opacity; only the rectangle x0..x1, y0..y1
+    // (inclusive) changed, and only it is composed again. The size is in the strip's own units (CSS px): set as a
+    // window that is not DPI aware, which Windows then draws at the monitor's scale.
+    public void Push(int[] pixels, byte alpha, int x0, int y0, int x1, int y1) {
+        if (bits == IntPtr.Zero || pixels == null || pixels.Length != W * H || x1 < x0 || y1 < y0) return;
+        // Whole rows in one go (a side strip: all of it - a copy per row costs more than the pixels it saves).
+        if (x0 == 0 && x1 == W - 1) Marshal.Copy(pixels, y0 * W, new IntPtr(bits.ToInt64() + 4L * y0 * W), (y1 - y0 + 1) * W);
+        else Marshal.Copy(pixels, 0, bits, pixels.Length);
         Marshal.WriteInt32(native, 8, W); Marshal.WriteInt32(native, 12, H);                // size
         Marshal.WriteInt32(native, 16, 0); Marshal.WriteInt32(native, 20, 0);               // from (0, 0) of the bitmap
         Marshal.WriteInt32(native, 24, (alpha << 16) | (1 << 24));                          // AC_SRC_OVER, alpha, AC_SRC_ALPHA
@@ -230,115 +224,472 @@ public class BeamStrip : Form {
     }
 }
 
+// The beam's pixels, apart from any window: Layout lays out the eight strips for a monitor of a size, Paint fills them
+// for a moment. All in CSS px, the frame's top-left corner at (0, 0).
+public class Beam {
+    // -- Border Beam, pulse-inner, gold, radius 23, 3.9 s, dark theme (see the table at the top of this file) --
+    public const double Duration = 3.9, Radius = 23, HueSeconds = 16, FadeInSeconds = 0.6;
+    const double SP = 0.28, DR = 33, OP = 0.48, GH = 0.34;
+    const double BS = 1.9 * Duration / 2.3, SS = 2.6 * Duration / 2.3, GHS = 2.4 * Duration / 2.3;
+    const double StrokeOpacity = 1.54, InnerOpacity = 0.44, BloomOpacity = 0.66, Brightness = 0.75, Saturation = 1.2;
+    const double BloomAlpha = 1 - OP * 0.5, BloomBlur = 8, CornerAlpha = 0.18, CornerReach = 60 * 0.7;
+    public const int Band = 28;   // the inner glow's mask: 1 at the edge, 0 this far in
+
+    // The oscillators (so()): from, to, period, delay. Per blob region 1..3: width, height, x, y; then the glow's height
+    // and the opacity of each quarter (top-left, top-right, bottom-left, bottom-right).
+    static readonly double[] Osc = {
+        1 - SP, 1 + SP * 1.1, SS * 0.9, 0,   1 + SP * 0.9, 1 - SP * 0.85, SS * 1.26, 0,   -DR, DR * 0.9, BS * 1.6, 0,   DR * 0.55, -DR * 0.7, BS * 1.6, 0,
+        1 + SP, 1 - SP * 0.85, SS * 1.1, 0,   1 - SP * 0.8, 1 + SP * 1.05, SS * 0.81, 0,   DR * 0.8, -DR * 0.9, BS * 1.88, 0,   -DR, DR * 0.65, BS * 1.88, 0,
+        1 - SP * 0.6, 1 + SP * 1.15, SS * 0.98, 0,   1 + SP * 0.75, 1 - SP, SS * 1.4, 0,   -DR * 0.6, DR, BS * 1.45, 0,   -DR * 0.85, DR * 0.45, BS * 1.45, 0,
+        1 - GH, 1 + GH, GHS, 0,
+        1 - OP, 1, BS, 0,   1 - OP, 1, BS * 1.32, BS * 0.28,   1 - OP, 1, BS * 0.84, BS * 0.55,   1 - OP, 1, BS * 1.58, BS * 0.83 };
+    // The palette's blobs, one per colour in its order (G.*.border with Fe and Je): place x, y (% of the box), the ring's
+    // reach x, y (px), the inner glow's, region (1..3), quarter (0 tl, 1 tr, 2 bl, 3 br).
+    static readonly double[] Blob = {
+        33, -7.4, 70, 40, 65, 35, 1, 0,     12, -5, 60, 35, 55, 30, 2, 0,       2.1, 68.3, 40, 70, 35, 65, 3, 2,
+        2.1, 68.3, 20, 35, 15, 30, 1, 2,    74.4, 100, 180, 32, 173, 28, 2, 3,  55, 100, 85, 26, 80, 22, 3, 3,
+        93.9, 0, 74, 32, 69, 28, 1, 1,      100, 27.1, 26, 42, 22, 38, 2, 1,    100, 27.1, 52, 48, 47, 44, 3, 1 };
+    // The bloom's blobs (eo): colour, reach x, y (px), at that colour's place. They do not breathe.
+    static readonly double[] Bloom = { 0, 84, 48,   1, 72, 42,   2, 48, 84,   4, 216, 38,   5, 102, 31,   6, 89, 38,   8, 62, 58 };
+    public static readonly int[] Gold = { 240, 190, 60,  255, 210, 90,  225, 165, 40,  250, 200, 70,  255, 225, 120,  230, 175, 50,  245, 205, 85,  215, 155, 35,  255, 215, 100 };
+    public static readonly int[] Ocean = { 100, 80, 220,  60, 120, 255,  80, 100, 200,  50, 140, 220,  120, 80, 255,  70, 130, 255,  140, 100, 240,  90, 110, 230,  130, 70, 255 };
+
+    public bool Paused;
+    // The strips (the four corners - top-left, top-right, bottom-right, bottom-left - then the top, right, bottom and
+    // left sides), relative to the frame, and what each shows (premultiplied ARGB).
+    public int[] X = new int[8], Y = new int[8], W = new int[8], H = new int[8];
+    public int[][] Pixels = new int[8][];
+    public int[] Dirty = new int[32];   // what the last Paint changed in each strip: x0, y0, x1, y1 (inclusive)
+    // A corner, per lit pixel: where in the strip, where in the frame, its place on the edge, and how much of the inner
+    // glow and of the ring (and the bloom on it) it takes (of 256).
+    int[][] at = new int[8][], index = new int[8][];
+    float[][] atX = new float[8][], atY = new float[8][];
+    ushort[][] innerW = new ushort[8][], ringW = new ushort[8][];
+    // A side: per pixel along it, the value along the edge before it and how much of the one after (of 256); per line
+    // across it (its depth, 0 at the edge), the weights, which are the same all along it.
+    int[][] below = new int[8][];
+    ushort[][] blend = new ushort[8][];
+
+    const double Step = 4;   // px between the values worked out along the edge
+    const int na = 8;        // values on each corner
+    const int Layers = 8;    // the inner glow along the sides at depths .5, 4.5, ... 28.5 px
+    int fw, fh, n, depth, nx, ny;
+    double rc;
+    double[] px, py, nxs, nys;          // the edge, every `Step` px: a point on it and the outward normal there
+    int[] part;                         // which part of the band each point is in (0..3 the sides, 4..7 the corners)
+    double[,] parts = new double[8, 4]; // those parts: x0, y0, x1, y1
+    double[] bloomR, bloomG, bloomB, bloomA;   // the bloom along the edge, blurred, before its colour filter
+    int[] ringP, bloomP, grid, table;   // this frame: along the edge; the inner glow by layer; per point and depth
+    byte[] lit, was;                    // per point on the sides, how many lines from the edge in are lit (now, before)
+    int ringDepth;                      // the lines the ring takes
+    // This frame's blobs: the ring's nine, then the inner glow's nine and its four white corners. Centre, reach,
+    // 1 / reach, alpha, colour; and per part of the band, which of them reach it.
+    const int Blobs = 22;
+    double[] bx = new double[Blobs], by = new double[Blobs], brx = new double[Blobs], bry = new double[Blobs];
+    double[] bix = new double[Blobs], biy = new double[Blobs], bal = new double[Blobs];
+    double[] bcr = new double[Blobs], bcg = new double[Blobs], bcb = new double[Blobs];
+    int[][] ringIn = new int[8][], innerIn = new int[8][];
+    int[] ringCount = new int[8], innerCount = new int[8];
+
+    static double Clamp01(double v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+    // Distance to the edge of a rounded rectangle centred on the origin: negative inside it.
+    static double Sdf(double x, double y, double halfW, double halfH, double radius) {
+        radius = Math.Max(0, Math.Min(radius, Math.Min(halfW, halfH)));
+        double qx = Math.Abs(x) - halfW + radius, qy = Math.Abs(y) - halfH + radius;
+        double ox = Math.Max(qx, 0), oy = Math.Max(qy, 0);
+        return Math.Sqrt(ox * ox + oy * oy) + Math.Min(Math.Max(qx, qy), 0) - radius;
+    }
+    // How much of a pixel whose centre is this far from an edge is inside it.
+    static double Cover(double sdf) { return Clamp01(0.5 - sdf); }
+
+    // The eight strips for a w x h frame, the edge, the bloom along it, and for each pixel its place on the edge and
+    // how much of the inner glow and the ring it takes.
+    public void Layout(int w, int h) {
+        fw = w; fh = h;
+        rc = Math.Min(Radius, Math.Min(w, h) / 2.0);
+        int c = depth = Math.Max(1, Math.Min(Band, Math.Min(w, h) / 2));
+        int[] r = { 0, 0, c, c,   w - c, 0, c, c,   w - c, h - c, c, c,   0, h - c, c, c,
+                    c, 0, w - 2 * c, c,   w - c, c, c, h - 2 * c,   c, h - c, w - 2 * c, c,   0, c, c, h - 2 * c };
+        double[] box = { 0, 0, w, c,   w - c, 0, w, h,   0, h - c, w, h,   0, 0, c, h,
+                         w - c, 0, w, c,   w - c, h - c, w, h,   0, h - c, c, h,   0, 0, c, c };   // sides; corners tr, br, bl, tl
+        for (int k = 0; k < 8; k++) for (int i = 0; i < 4; i++) parts[k, i] = box[4 * k + i];
+
+        // The edge: top, top-right corner, right, bottom-right, bottom, bottom-left, left, top-left; a value every 4 px.
+        double lx = Math.Max(0, w - 2 * rc), ly = Math.Max(0, h - 2 * rc);
+        nx = (int)Math.Ceiling(lx / Step) + 1; ny = (int)Math.Ceiling(ly / Step) + 1;
+        n = 2 * nx + 2 * ny + 4 * na;
+        px = new double[n]; py = new double[n]; nxs = new double[n]; nys = new double[n]; part = new int[n];
+        int s = 0;
+        for (int side = 0; side < 4; side++) {
+            int count = side % 2 == 0 ? nx : ny;
+            for (int k = 0; k < count; k++, s++) {
+                double f = count > 1 ? (double)k / (count - 1) : 0.5;
+                part[s] = side;
+                if (side == 0) { px[s] = rc + lx * f; py[s] = 0; nxs[s] = 0; nys[s] = -1; }
+                else if (side == 1) { px[s] = w; py[s] = rc + ly * f; nxs[s] = 1; nys[s] = 0; }
+                else if (side == 2) { px[s] = w - rc - lx * f; py[s] = h; nxs[s] = 0; nys[s] = 1; }
+                else { px[s] = 0; py[s] = h - rc - ly * f; nxs[s] = -1; nys[s] = 0; }
+            }
+            // The corner after this side: its centre, and the angle it starts at (y grows downward).
+            double cx = side == 0 || side == 1 ? w - rc : rc, cy = side == 0 || side == 3 ? rc : h - rc, a0 = -90 + 90 * side;
+            for (int k = 0; k < na; k++, s++) {
+                double a = (a0 + 90.0 * k / (na - 1)) * Math.PI / 180;
+                part[s] = 4 + side;
+                nxs[s] = Math.Cos(a); nys[s] = Math.Sin(a); px[s] = cx + rc * nxs[s]; py[s] = cy + rc * nys[s];
+            }
+        }
+        ringP = new int[n]; bloomP = new int[n]; grid = new int[n * Layers]; table = new int[n * c];
+        lit = new byte[n]; was = new byte[n];
+
+        // The bloom, once: its blobs do not move (only its colour turns, after the blur). At each point, the inside half
+        // of a gaussian across the edge (there is nothing outside the screen to blur in), every 2 px in ...
+        int[] pal = Paused ? Ocean : Gold;
+        int nb = Bloom.Length / 3;
+        bloomR = new double[n]; bloomG = new double[n]; bloomB = new double[n]; bloomA = new double[n];
+        double[] sr = new double[n], sg = new double[n], sb = new double[n], sa = new double[n];
+        for (int k = 0; k < n; k++) {
+            for (double d = 1; d < 3 * BloomBlur; d += 2) {
+                double x = px[k] - d * nxs[k], y = py[k] - d * nys[k];
+                if (Sdf(x - w / 2.0, y - h / 2.0, w / 2.0, h / 2.0, rc) > 0) continue;
+                double z = (d - 0.5) / BloomBlur, weight = 2 * Math.Exp(-z * z / 2) / (Math.Sqrt(2 * Math.PI) * BloomBlur);
+                double cr = 0, cg = 0, cb = 0, ca = 0;
+                for (int j = nb - 1; j >= 0; j--) {   // the first blob on top
+                    int ci = (int)Bloom[3 * j];
+                    double dx = (x - Blob[8 * ci] / 100 * w) / Bloom[3 * j + 1], dy = (y - Blob[8 * ci + 1] / 100 * h) / Bloom[3 * j + 2];
+                    double d2 = dx * dx + dy * dy;
+                    if (d2 >= 1) continue;
+                    double v = (1 - Math.Sqrt(d2)) * BloomAlpha, keep = 1 - v;
+                    cr = pal[3 * ci] / 255.0 * v + cr * keep; cg = pal[3 * ci + 1] / 255.0 * v + cg * keep;
+                    cb = pal[3 * ci + 2] / 255.0 * v + cb * keep; ca = v + ca * keep;
+                }
+                sr[k] += cr * weight; sg[k] += cg * weight; sb[k] += cb * weight; sa[k] += ca * weight;
+            }
+        }
+        // ... then a gaussian along it (the values are about 4 px apart, round the closed edge).
+        int reach = (int)Math.Ceiling(3 * BloomBlur / Step);
+        double[] kernel = new double[reach + 1];
+        double total = 0;
+        for (int i = 0; i <= reach; i++) { double z = i * Step / BloomBlur; kernel[i] = Math.Exp(-z * z / 2); total += i == 0 ? kernel[i] : 2 * kernel[i]; }
+        for (int k = 0; k < n; k++) {
+            for (int i = -reach; i <= reach; i++) {
+                int j = ((k + i) % n + n) % n;
+                double f = kernel[Math.Abs(i)] / total;
+                bloomR[k] += sr[j] * f; bloomG[k] += sg[j] * f; bloomB[k] += sb[j] * f; bloomA[k] += sa[j] * f;
+            }
+        }
+
+        for (int k = 0; k < 8; k++) {
+            X[k] = r[4 * k]; Y[k] = r[4 * k + 1]; W[k] = Math.Max(0, r[4 * k + 2]); H[k] = Math.Max(0, r[4 * k + 3]);
+            Pixels[k] = new int[W[k] * H[k]];
+            if (k >= 4) {
+                // A side: across it by the middle of its length (depth 0 at the edge), along it by its place.
+                int side = k - 4;
+                bool rows = side % 2 == 0;   // the top and the bottom: a row of pixels runs along the edge
+                int length = rows ? W[k] : H[k];
+                innerW[k] = new ushort[c]; ringW[k] = new ushort[c];
+                for (int d = 0; d < c; d++) {
+                    double x = side == 1 ? w - d - 0.5 : side == 3 ? d + 0.5 : w / 2.0, y = side == 0 ? d + 0.5 : side == 2 ? h - d - 0.5 : h / 2.0;
+                    Weigh(x, y, out innerW[k][d], out ringW[k][d]);
+                }
+                if (side == 0) { ringDepth = 0; for (int d = 0; d < c; d++) if (ringW[k][d] != 0) ringDepth = d + 1; }
+                below[k] = new int[length]; blend[k] = new ushort[length];
+                int first = side == 0 ? 0 : side == 1 ? nx + na : side == 2 ? nx + ny + 2 * na : 2 * nx + ny + 3 * na, count = rows ? nx : ny;
+                double span = Math.Max(1e-9, (rows ? w : h) - 2 * rc);
+                for (int i = 0; i < length; i++) {
+                    double a = rows ? Math.Max(rc, Math.Min(w - rc, X[k] + i + 0.5)) : Math.Max(rc, Math.Min(h - rc, Y[k] + i + 0.5));
+                    double pos = (side == 0 || side == 1 ? a - rc : (rows ? w : h) - rc - a) / span * (count - 1);
+                    int lo = Math.Max(0, Math.Min((int)Math.Floor(pos), count - 2));
+                    below[k][i] = first + lo; blend[k][i] = (ushort)Math.Round(256 * Clamp01(pos - lo));
+                }
+                continue;
+            }
+            List<int> spots = new List<int>(), where = new List<int>();
+            List<float> lx0 = new List<float>(), ly0 = new List<float>();
+            List<ushort> wi = new List<ushort>(), wr = new List<ushort>();
+            for (int j = 0; j < H[k]; j++) {
+                for (int i = 0; i < W[k]; i++) {
+                    double x = X[k] + i + 0.5, y = Y[k] + j + 0.5;
+                    ushort vi, vr;
+                    Weigh(x, y, out vi, out vr);
+                    if ((vi | vr) == 0) continue;
+                    spots.Add(j * W[k] + i); where.Add(Place(x, y)); lx0.Add((float)x); ly0.Add((float)y); wi.Add(vi); wr.Add(vr);
+                }
+            }
+            at[k] = spots.ToArray(); index[k] = where.ToArray(); atX[k] = lx0.ToArray(); atY[k] = ly0.ToArray();
+            innerW[k] = wi.ToArray(); ringW[k] = wr.ToArray();
+        }
+    }
+
+    // How much of the inner glow and of the ring (of 256) the pixel at (x, y) takes: the glow's mask (1 at each edge
+    // to 0 28 px in, the four added) and the ring (the inner 1 px), both inside the frame's rounded edge.
+    void Weigh(double x, double y, out ushort vi, out ushort vr) {
+        double qx = x - fw / 2.0, qy = y - fh / 2.0;
+        double cover = Cover(Sdf(qx, qy, fw / 2.0, fh / 2.0, rc));
+        double ring = cover - Cover(Sdf(qx, qy, fw / 2.0 - 1, fh / 2.0 - 1, rc - 1));
+        double mv = Clamp01(Math.Max(1 - y / Band, 1 - (fh - y) / Band)), mh = Clamp01(Math.Max(1 - x / Band, 1 - (fw - x) / Band));
+        vi = (ushort)Math.Round(256 * cover * (1 - (1 - mv) * (1 - mh))); vr = (ushort)Math.Round(256 * Clamp01(ring));
+    }
+
+    // The value along the edge nearest this point (frame coordinates, inside it).
+    int Place(double x, double y) {
+        double cx = Math.Max(rc, Math.Min(fw - rc, x)), cy = Math.Max(rc, Math.Min(fh - rc, y));
+        int top = 0, right = nx + na, bottom = right + ny + na, left = bottom + nx + na;
+        if (x != cx && y != cy) {   // in a corner's curve: by its angle
+            int corner = y < cy ? (x > cx ? 0 : 3) : (x > cx ? 1 : 2);
+            double a = Math.Atan2(y - cy, x - cx) * 180 / Math.PI - (-90 + 90 * corner);
+            while (a < -1e-9) a += 360;
+            while (a > 360) a -= 360;
+            int k = (int)Math.Round(Math.Min(90, a) / 90 * (na - 1));
+            int start = corner == 0 ? right - na : corner == 1 ? bottom - na : corner == 2 ? left - na : n - na;
+            return start + k;
+        }
+        double lx = Math.Max(1e-9, fw - 2 * rc), ly = Math.Max(1e-9, fh - 2 * rc);
+        int sideOf;
+        if (x == cx && y == cy) {   // off the corners' curves: the nearest side
+            double least = Math.Min(Math.Min(y, fh - y), Math.Min(x, fw - x));
+            sideOf = least == y ? 0 : least == fw - x ? 1 : least == fh - y ? 2 : 3;
+        } else sideOf = y < cy ? 0 : x > cx ? 1 : y > cy ? 2 : 3;
+        if (sideOf == 0) return top + (int)Math.Round((cx - rc) / lx * (nx - 1));
+        if (sideOf == 1) return right + (int)Math.Round((cy - rc) / ly * (ny - 1));
+        if (sideOf == 2) return bottom + (int)Math.Round((fw - rc - cx) / lx * (nx - 1));
+        return left + (int)Math.Round((fh - rc - cy) / ly * (ny - 1));
+    }
+
+    // hue-rotate(deg) brightness(b) saturate(s), each step clamped as a browser does, on a colour of 0..1; c and s are
+    // the cosine and the sine of the hue's angle.
+    static void Filter(double[] rgb, int o, double c, double s) {
+        double t = Saturation;
+        double r = rgb[o], g = rgb[o + 1], b = rgb[o + 2];
+        double r1 = Clamp01((0.213 + c * 0.787 - s * 0.213) * r + (0.715 - c * 0.715 - s * 0.715) * g + (0.072 - c * 0.072 + s * 0.928) * b);
+        double g1 = Clamp01((0.213 - c * 0.213 + s * 0.143) * r + (0.715 + c * 0.285 + s * 0.140) * g + (0.072 - c * 0.072 - s * 0.283) * b);
+        double b1 = Clamp01((0.213 - c * 0.213 - s * 0.787) * r + (0.715 - c * 0.715 + s * 0.715) * g + (0.072 + c * 0.928 + s * 0.072) * b);
+        r1 = Clamp01(r1 * Brightness); g1 = Clamp01(g1 * Brightness); b1 = Clamp01(b1 * Brightness);
+        rgb[o] = Clamp01((0.213 + 0.787 * t) * r1 + (0.715 - 0.715 * t) * g1 + (0.072 - 0.072 * t) * b1);
+        rgb[o + 1] = Clamp01((0.213 - 0.213 * t) * r1 + (0.715 + 0.285 * t) * g1 + (0.072 - 0.072 * t) * b1);
+        rgb[o + 2] = Clamp01((0.213 - 0.213 * t) * r1 + (0.715 - 0.715 * t) * g1 + (0.072 + 0.928 * t) * b1);
+    }
+
+    static int Pack(double r, double g, double b, double a) {
+        int ia = (int)(255 * Clamp01(a) + 0.5);
+        int ir = Math.Min(ia, (int)(255 * Clamp01(r) + 0.5)), ig = Math.Min(ia, (int)(255 * Clamp01(g) + 0.5)), ib = Math.Min(ia, (int)(255 * Clamp01(b) + 0.5));
+        return (ia << 24) | (ir << 16) | (ig << 8) | ib;
+    }
+
+    static uint Scale(uint c, uint w) {
+        return (((c & 0x00FF00FF) * w >> 8) & 0x00FF00FF) | ((((c >> 8) & 0x00FF00FF) * w) & 0xFF00FF00);
+    }
+
+    // This frame's blob j: centre, reach, alpha and colour (an index into the filtered colours).
+    void SetBlob(int j, double x, double y, double rx, double ry, double alpha, double[] col, int ci) {
+        bx[j] = x; by[j] = y; brx[j] = rx; bry[j] = ry; bix[j] = 1 / rx; biy[j] = 1 / ry; bal[j] = alpha;
+        bcr[j] = col[3 * ci]; bcg[j] = col[3 * ci + 1]; bcb[j] = col[3 * ci + 2];
+    }
+
+    // Which of the blobs from..to-1 reach each part of the band, in their order.
+    void Reaching(int from, int to, int[][] lists, int[] counts) {
+        for (int p = 0; p < 8; p++) {
+            if (lists[p] == null) lists[p] = new int[Blobs];
+            counts[p] = 0;
+            for (int j = from; j < to; j++)
+                if (bx[j] + brx[j] > parts[p, 0] && bx[j] - brx[j] < parts[p, 2] && by[j] + bry[j] > parts[p, 1] && by[j] - bry[j] < parts[p, 3])
+                    lists[p][counts[p]++] = j;
+        }
+    }
+
+    // The blobs in `list` at (x, y), the first on top: premultiplied ARGB, times `opacity`.
+    int At(double x, double y, int[] list, int count, double opacity) {
+        double r = 0, g = 0, b = 0, a = 0;
+        for (int i = count - 1; i >= 0; i--) {
+            int j = list[i];
+            double dx = (x - bx[j]) * bix[j];
+            if (dx >= 1 || dx <= -1) continue;
+            double dy = (y - by[j]) * biy[j];
+            if (dy >= 1 || dy <= -1) continue;
+            double d2 = dx * dx + dy * dy;
+            if (d2 >= 1) continue;
+            double v = (1 - Math.Sqrt(d2)) * bal[j], keep = 1 - v;
+            r = bcr[j] * v + r * keep; g = bcg[j] * v + g * keep; b = bcb[j] * v + b * keep; a = v + a * keep;
+        }
+        return Pack(r * opacity, g * opacity, b * opacity, a * opacity);
+    }
+
+    // A pixel's colour: the inner glow (already weighed), the ring over it and the bloom over both, `wr` of each.
+    uint Compose(uint inner, int e, uint wr) {
+        if (wr == 0) return inner;
+        uint ring = Scale((uint)ringP[e], wr);
+        uint glow = ring + Scale(inner, 256 - (ring >> 24));
+        uint bloom = Scale((uint)bloomP[e], wr);
+        return bloom + Scale(glow, 256 - (bloom >> 24));
+    }
+
+    // The first point of each side along the edge.
+    int First(int side) { return side == 0 ? 0 : side == 1 ? nx + na : side == 2 ? nx + ny + 2 * na : 2 * nx + ny + 3 * na; }
+
+    // The points of a side whose place along it (x on the top and bottom, y on the sides) is within lo..hi: lit `lines`
+    // in from the edge.
+    void Mark(int side, double lo, double hi, int lines) {
+        bool rows = side % 2 == 0;
+        int count = rows ? nx : ny, first = First(side);
+        double length = rows ? fw : fh, span = Math.Max(1e-9, length - 2 * rc);
+        double f0 = side < 2 ? lo - rc : length - rc - hi, f1 = side < 2 ? hi - rc : length - rc - lo;
+        int i0 = Math.Max(0, (int)Math.Floor(f0 / span * (count - 1))), i1 = Math.Min(count - 1, (int)Math.Ceiling(f1 / span * (count - 1)));
+        for (int i = i0; i <= i1; i++) if (lit[first + i] < lines) lit[first + i] = (byte)lines;
+    }
+
+    // The strips at `seconds`: everything breathing as it is then. `moving` false: the still frame (the start).
+    // `full` false: Dirty says only where the sides changed (the corners always do: their white blobs pulse).
+    public void Paint(double seconds, bool moving, bool full) {
+        // The colours turn the whole wheel every 16 s (hueRange does nothing for the pulse sizes).
+        double t = moving ? seconds : 0, hue = moving ? 2 * Math.PI * (seconds / HueSeconds % 1) : 0;
+        double hc = Math.Cos(hue), hs = Math.Sin(hue);
+        double[] o = new double[17];
+        for (int k = 0; k < 17; k++) {
+            double a = Osc[4 * k], b = Osc[4 * k + 1], p = (t - Osc[4 * k + 3]) / Osc[4 * k + 2];
+            o[k] = a + (b - a) * (1 - Math.Cos(2 * Math.PI * p)) / 2;
+        }
+        int[] pal = Paused ? Ocean : Gold;
+        double[] col = new double[30];
+        for (int k = 0; k < 27; k++) col[k] = pal[k] / 255.0;
+        col[27] = col[28] = col[29] = 1;   // the corners' white
+        for (int k = 0; k < 10; k++) Filter(col, 3 * k, hc, hs);
+
+        for (int ci = 0; ci < 9; ci++) {
+            int reg = (int)Blob[8 * ci + 6] - 1, q = (int)Blob[8 * ci + 7];
+            double x = Blob[8 * ci] / 100 * fw + o[reg * 4 + 2], y = Blob[8 * ci + 1] / 100 * fh + o[reg * 4 + 3];
+            SetBlob(ci, x, y, Blob[8 * ci + 2] * o[reg * 4], Blob[8 * ci + 3] * o[reg * 4 + 1] * o[12], o[13 + q], col, ci);
+            SetBlob(9 + ci, x, y, Blob[8 * ci + 4] * o[reg * 4], Blob[8 * ci + 5] * o[reg * 4 + 1] * o[12], o[13 + q], col, ci);
+        }
+        for (int q = 0; q < 4; q++) SetBlob(18 + q, q % 2 == 1 ? fw : 0, q >= 2 ? fh : 0, CornerReach, CornerReach, CornerAlpha * o[13 + q], col, 9);
+        Reaching(0, 9, ringIn, ringCount);
+        Reaching(9, Blobs, innerIn, innerCount);
+
+        // How far in the sides are lit, point by point: the whole band where an inner glow's blob reaches, the ring's
+        // line where only the ring's blobs or the bloom (which stays) do. Only that is worked out and drawn.
+        byte[] swap = was; was = lit; lit = swap;
+        Array.Clear(lit, 0, n);
+        for (int p = 0; p < 4; p++) {
+            for (int i = 0; i < ringCount[p] + innerCount[p]; i++) {
+                int j = i < ringCount[p] ? ringIn[p][i] : innerIn[p][i - ringCount[p]], lines = i < ringCount[p] ? ringDepth : depth;
+                if (p % 2 == 0) Mark(p, bx[j] - brx[j], bx[j] + brx[j], lines); else Mark(p, by[j] - bry[j], by[j] + bry[j], lines);
+            }
+        }
+
+        // Along the edge: the ring, and the bloom (its blur done once, its colour filtered now).
+        double stroke = Math.Min(1, StrokeOpacity);   // (a CSS opacity is at most 1)
+        double[] rgb = new double[3];
+        for (int k = 0; k < n; k++) {
+            int p = part[k];
+            ringP[k] = At(px[k], py[k], ringIn[p], ringCount[p], stroke);
+            double a = bloomA[k];
+            if (a > 1e-4) {
+                rgb[0] = bloomR[k] / a; rgb[1] = bloomG[k] / a; rgb[2] = bloomB[k] / a;
+                Filter(rgb, 0, hc, hs);
+                a *= BloomOpacity;
+                bloomP[k] = Pack(rgb[0] * a, rgb[1] * a, rgb[2] * a, a);
+                if (p < 4 && lit[k] < ringDepth) lit[k] = (byte)ringDepth;
+            } else bloomP[k] = 0;
+        }
+        // Where the sides are lit, the inner glow at each layer; then per point and depth, the three composed.
+        // (A line lit before and not now is worked out once more, clear.)
+        for (int k = 0; k < n; k++) {
+            int p = part[k], lines = Math.Max(lit[k], was[k]);
+            if (p >= 4 || lines == 0) continue;
+            bool glow = lit[k] == depth;
+            if (glow) {
+                for (int l = 0; l < Layers; l++) {
+                    double d = 0.5 + 4 * l;
+                    grid[k * Layers + l] = At(px[k] - d * nxs[k], py[k] - d * nys[k], innerIn[p], innerCount[p], InnerOpacity);
+                }
+            }
+            ushort[] wi = innerW[4 + p], wr = ringW[4 + p];
+            for (int d = 0; d < lines; d++) {
+                uint inner = 0;
+                if (glow) {
+                    int l = k * Layers + (d >> 2);
+                    uint f = (uint)(d & 3) * 64;
+                    inner = Scale(Scale((uint)grid[l], 256 - f) + Scale((uint)grid[l + 1], f), wi[d]);
+                }
+                table[k * depth + d] = (int)Compose(inner, k, wr[d]);
+            }
+        }
+
+        for (int k = 0; k < 4; k++) {   // the corners: pixel by pixel
+            int[] pix = Pixels[k], where = at[k], idx = index[k];
+            float[] xs = atX[k], ys = atY[k];
+            ushort[] wi = innerW[k], wr = ringW[k];
+            int p = k == 0 ? 7 : 3 + k;   // top-left, top-right, bottom-right, bottom-left
+            for (int i = 0; i < where.Length; i++) {
+                uint inner = Scale((uint)At(xs[i], ys[i], innerIn[p], innerCount[p], InnerOpacity), wi[i]);
+                pix[where[i]] = (int)Compose(inner, idx[i], wr[i]);
+            }
+            Dirty[4 * k] = 0; Dirty[4 * k + 1] = 0; Dirty[4 * k + 2] = W[k] - 1; Dirty[4 * k + 3] = H[k] - 1;
+        }
+        for (int k = 4; k < 8; k++) {   // the sides: per pixel, the two values either side of it along the edge
+            int[] pix = Pixels[k], lo = below[k];
+            ushort[] mix = blend[k];
+            int side = k - 4, length = lo.Length, c = side % 2 == 0 ? H[k] : W[k], from = length, to = -1;
+            // A pixel's line in from the edge d: at `first` + d * `next` from where its place along the side starts.
+            int first = side == 0 || side == 3 ? 0 : c - 1, next = side == 0 || side == 3 ? 1 : -1;
+            int along = side % 2 == 0 ? 1 : c, across = side % 2 == 0 ? length : 1;
+            for (int i = 0; i < length; i++) {
+                int e = lo[i], lines = Math.Max(Math.Max(lit[e], lit[e + 1]), Math.Max(was[e], was[e + 1]));
+                if (lines == 0) continue;
+                if (from == length) from = i;
+                to = i;
+                int e0 = e * depth, e1 = e0 + depth, at0 = i * along + first * across, step = next * across;
+                uint m = mix[i], keep = 256 - m;
+                for (int d = 0; d < lines; d++)
+                    pix[at0 + d * step] = (int)(Scale((uint)table[e0 + d], keep) + Scale((uint)table[e1 + d], m));
+            }
+            if (full) { from = 0; to = length - 1; }
+            if (side % 2 == 0) { Dirty[4 * k] = from; Dirty[4 * k + 1] = 0; Dirty[4 * k + 2] = to; Dirty[4 * k + 3] = c - 1; }
+            else { Dirty[4 * k] = 0; Dirty[4 * k + 1] = from; Dirty[4 * k + 2] = c - 1; Dirty[4 * k + 3] = to; }
+        }
+    }
+}
+
+// One monitor's beam: its eight strips and the pixels for them.
+public class Display {
+    public Beam Beam = new Beam();
+    public BeamStrip[] Strips = new BeamStrip[8];
+    public double Zoom = 1;       // physical pixels to a CSS px on this monitor
+    public double ShownAt;        // when the beam came up here (for the fade in)
+    public string Layout = "";    // what the strips were laid out for
+    public bool Shown;
+    public int Left, Top, Right, Bottom;
+}
+
 public class WindowOutline {
     [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
-    [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
-    [StructLayout(LayoutKind.Sequential)] struct MONITORINFO { public int Size; public RECT Monitor, Work; public int Flags; }
+    delegate bool MonitorEnumProc(IntPtr monitor, IntPtr dc, ref RECT rect, IntPtr data);
     [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr c);
-    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
-    [DllImport("user32.dll")] static extern IntPtr GetShellWindow();
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hWnd, StringBuilder name, int max);
-    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hWnd, uint cmd);
-    [DllImport("user32.dll")] static extern bool IsIconic(IntPtr hWnd);
-    [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr hWnd);
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hWnd, int cmd);
     [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
-    [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hWnd, int flags);
-    [DllImport("user32.dll")] static extern IntPtr MonitorFromPoint(POINT p, int flags);
-    [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
-    [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT p);
+    [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr dc, IntPtr clip, MonitorEnumProc proc, IntPtr data);
     [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint action, uint param, out bool value, uint flags);
-    [DllImport("shcore.dll")] static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint x, out uint y);
-    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hWnd, int attr, out RECT rect, int size);
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hWnd, uint cmd);
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hWnd, int attr, out int value, int size);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int max);
+    [DllImport("shcore.dll")] static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint x, out uint y);
 
-    // Windows 11 (build 22000 and later) rounds the corners of its windows; Windows 10 has square ones.
-    static readonly bool roundedWindows = Environment.OSVersion.Version.Build >= 22000;
-
-    // The corner radius of the target window, in px at 100% scaling: 8 on Windows 11, 0 (square) for a maximized
-    // window and one that asked not to be rounded. DWMWA_WINDOW_CORNER_PREFERENCE (33) is read where Windows gives
-    // it (1 = DONOTROUND, 3 = ROUNDSMALL, a 4 px radius); where the read fails the window has the default.
-    static int CornerRadiusAt96(IntPtr t) {
-        if (!roundedWindows || IsZoomed(t)) return 0;
-        int pref;
-        if (DwmGetWindowAttribute(t, 33, out pref, 4) != 0) return 8;
-        return pref == 1 ? 0 : pref == 3 ? 4 : 8;
-    }
-
-    // The desktop itself: clicking it puts Progman (or the WorkerW that holds the icons) in front. There is no window
-    // to go around, so the monitor is outlined.
-    static bool IsDesktop(IntPtr t) {
-        if (t == GetShellWindow()) return true;
-        StringBuilder name = new StringBuilder(32);
-        GetClassName(t, name, 32);
-        string c = name.ToString();
-        return c == "Progman" || c == "WorkerW";
-    }
-
-    // ── The recipe (Border Beam; see the table at the top of this file) ──
-    const double TurnSeconds = 1.96, HueSeconds = 12, HueRange = 10, FadeInSeconds = 0.6;
-    const double EdgeFade = 28, ShadowBlur = 9, ShadowAlpha = 0.27, BloomBlur = 8, BloomOpacity = 0.24;
-    const double InnerScale = 0.9, InnerAlpha = 0.45, CardW = 350, CardH = 140;
-    static readonly double[] BeamMask = { 0, 0, 30, 0, 36, .1, 44, .35, 52, 1, 80, 1, 86, .35, 92, .1, 95, 0, 100, 0 };
-    static readonly double[] WhiteStops = { 0, 0, 54, 0, 57, .1, 60, .3, 63, .6, 66, .75, 69, .6, 72, .3, 75, .1, 78, 0, 100, 0 };
-    static readonly double[] DarkStops = { 0, 0, 54, 0, 57, .08, 60, .2, 63, .4, 66, .55, 69, .4, 72, .2, 75, .08, 78, 0, 100, 0 };   // the light theme's highlight
-    static readonly double[] BloomStops = { 0, 0, 58, 0, 62, .03, 65, .08, 67, .2, 69, .45, 70, .85, 70.5, .85, 71.5, .45, 73, .2, 75, .08, 78, .03, 82, 0 };
-    // The nine blobs: where on the card (% of its width, % of its height) and how far they reach (px), then the
-    // colours of the two palettes used here, in the same order.
-    static readonly double[] BlobPlace = { 33, -7.4, 70, 40,  12, -5, 60, 35,  2.1, 68.3, 40, 70,  2.1, 68.3, 20, 35,  74.4, 100, 180, 32,
-                                           55, 100, 85, 26,  93.9, 0, 74, 32,  100, 27.1, 26, 42,  100, 27.1, 52, 48 };
-    static readonly int[] Amber = { 255, 170, 30,  255, 200, 60,  245, 130, 10,  255, 215, 90,  245, 158, 11,  255, 190, 50,  250, 120, 20,  255, 205, 70,  235, 140, 5 };
-    static readonly int[] Ocean = { 100, 80, 220,  60, 120, 255,  80, 100, 200,  50, 140, 220,  120, 80, 255,  70, 130, 255,  140, 100, 240,  90, 110, 230,  130, 70, 255 };
-
-    const int Q = 4096;   // steps in a turn
-    // The three conic gradients, a value (0..256) for each step of the turn from where the beam is.
-    static readonly int[] maskAt = Conic(BeamMask), whiteAt = Conic(WhiteStops), darkAt = Conic(DarkStops), bloomAt = Conic(BloomStops);
-    static int[] Conic(double[] stops) {
-        int[] at = new int[Q];
-        for (int q = 0; q < Q; q++) {
-            double t = 100.0 * q / Q, v = stops[1];
-            for (int i = 2; i < stops.Length; i += 2) {
-                if (t <= stops[i - 2]) break;
-                double p0 = stops[i - 2], p1 = stops[i];
-                double f = p1 > p0 ? Math.Min(1, (t - p0) / (p1 - p0)) : 1;
-                v = stops[i - 1] + (stops[i + 1] - stops[i - 1]) * f;
-            }
-            at[q] = (int)Math.Round(256 * v);
-        }
-        return at;
-    }
-
-    volatile IntPtr target = IntPtr.Zero;   // written by the stdin thread, read by the timer
+    static readonly uint ownPid = (uint)Process.GetCurrentProcess().Id;
+    static readonly uint pillPid = ReadPillPid();   // the pill's process (CLAWD_PILL_PID), 0 when not given
+    static uint ReadPillPid() { uint n; return uint.TryParse(Environment.GetEnvironmentVariable("CLAWD_PILL_PID"), out n) ? n : 0; }
     long hideUntil;                         // DateTime ticks (UTC); written by the stdin thread
-    RECT last;
-    bool shown;
     bool paused;
     bool still;                 // Windows is set to show no animations: one still frame
-    bool light;                 // what the beam lies on is light: the light theme
-    int looks;                  // polls since that was last looked at
-    IntPtr lookedAt;            // ...and on which window
-    string layout = "";         // what the tables were made for
-    double zoom = 1;            // physical pixels to a CSS px on the frame's monitor
-    double shownAt;             // when the beam came up (for the fade in)
-    BeamStrip[] strips = new BeamStrip[4];   // top, right, bottom, left
+    bool turning;               // the beam breathes: not paused, not still
+    List<Display> displays = new List<Display>();   // one per monitor, in the order Windows lists them
+    Control sync;               // a window of no size, so the stdin thread can hand work to this one
     Stopwatch clock = Stopwatch.StartNew();
     System.Windows.Forms.Timer poll, frame;
 
-    IntPtr Handle { get { return strips[0].Handle; } }
-    void BeginInvoke(Action a) { strips[0].BeginInvoke(a); }
-
     public void Start(bool pausedForm) {
         paused = pausedForm;
-        // The strips are windows that are NOT DPI aware: their pixels are CSS px, and the desktop compositor draws
-        // them at the monitor's scale. At 150% that is less than half the pixels to fill, at 225% a fifth; the beam is
-        // soft, and loses nothing a card on a page at that zoom would have.
-        IntPtr aware = SetThreadDpiAwarenessContext(new IntPtr(-1));   // DPI_AWARENESS_CONTEXT_UNAWARE
-        for (int i = 0; i < 4; i++) {
-            strips[i] = new BeamStrip();
-            IntPtr created = strips[i].Handle;   // the windows exist (hidden) before the timers or stdin touch them
-        }
-        SetThreadDpiAwarenessContext(aware);
-        if (BeamStrip.Capturable) { try { Console.Out.WriteLine("OUTLINE_CAPTURABLE"); Console.Out.Flush(); } catch { } }
+        sync = new Control();
+        IntPtr made = sync.Handle;
         var t = new Thread(() => {
             try {
                 string line;
@@ -347,25 +698,29 @@ public class WindowOutline {
                     long n = 0;
                     if (p.Length > 1) long.TryParse(p[1], out n);
                     // EndsWith: a parent that puts a byte-order mark in front of its first line must not lose it.
-                    if (p[0].EndsWith("TARGET")) target = new IntPtr(n);
-                    else if (p[0].EndsWith("HIDE")) Interlocked.Exchange(ref hideUntil, DateTime.UtcNow.AddMilliseconds(Math.Max(50, Math.Min(n, 10000))).Ticks);
+                    // (A TARGET line, from an older parent, is ignored: the beam is on every monitor.)
+                    if (p[0].EndsWith("HIDE")) Interlocked.Exchange(ref hideUntil, DateTime.UtcNow.AddMilliseconds(Math.Max(50, Math.Min(n, 10000))).Ticks);
                     else continue;
                     // At once, not on the next poll: the parent waits only 90 ms after HIDE before it captures.
-                    try { BeginInvoke((Action)Follow); } catch { }
+                    try { sync.BeginInvoke((Action)Follow); } catch { }
                 }
                 Environment.Exit(0);   // stdin closed: the parent is gone, and a beam must not outlive it
             } catch { }
         });
         t.IsBackground = true;
         t.Start();
+        Follow();
+        if (BeamStrip.Capturable) { try { Console.Out.WriteLine("OUTLINE_CAPTURABLE"); Console.Out.Flush(); } catch { } }
+        // The monitors are looked at again every 100 ms: one plugged in or out, or a new resolution, is laid out again.
         poll = new System.Windows.Forms.Timer();
         poll.Interval = 100;
         poll.Tick += (s, e) => Follow();
         poll.Start();
-        // Only while the beam is on screen and moving (Layout sets how often).
+        // 12.5 frames a second, only while the beam is on screen and breathing (the paused and the still forms are
+        // drawn once, when they are laid out).
         frame = new System.Windows.Forms.Timer();
-        frame.Interval = 45;
-        frame.Tick += (s, e) => { if (shown && !still && !paused) Paint(false); };   // the paused ring is still
+        frame.Interval = 80;
+        frame.Tick += (s, e) => { if (turning) foreach (Display d in displays) if (d.Shown) Paint(d, false); };
         frame.Start();
     }
 
@@ -376,482 +731,142 @@ public class WindowOutline {
         return dpi / 96.0;
     }
 
-    // Is this window somewhere above `t` in the z-order? (Walks up from `t`: few windows are above the one in front;
-    // the cap is for a z-order that changes under the walk.)
-    bool Above(IntPtr t) {
-        IntPtr h = GetWindow(t, 3); // GW_HWNDPREV
-        for (int i = 0; h != IntPtr.Zero && i < 1000; i++, h = GetWindow(h, 3)) if (h == Handle) return true;
-        return false;
-    }
-
-    // Where the frame is, in physical pixels: per-monitor aware for as long as this runs.
+    // The monitors, in physical pixels: per-monitor aware for as long as this runs.
     void Follow() {
         IntPtr aware = SetThreadDpiAwarenessContext(new IntPtr(-4));   // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
         try { Place(); } finally { SetThreadDpiAwarenessContext(aware); }
     }
 
+    // A display with its strips. They are windows that are NOT DPI aware: their pixels are CSS px, and the desktop
+    // compositor draws them at the monitor's scale. At 150% that is less than half the pixels to fill, at 225% a
+    // fifth; the beam is soft, and loses nothing a card on a page at that zoom would have.
+    Display NewDisplay() {
+        Display d = new Display();
+        d.Beam.Paused = paused;
+        IntPtr aware = SetThreadDpiAwarenessContext(new IntPtr(-1));   // DPI_AWARENESS_CONTEXT_UNAWARE
+        try {
+            for (int i = 0; i < d.Strips.Length; i++) {
+                d.Strips[i] = new BeamStrip();
+                IntPtr created = d.Strips[i].Handle;   // the windows exist (hidden) before anything touches them
+            }
+        } finally { SetThreadDpiAwarenessContext(aware); }
+        return d;
+    }
+
+    void Hide(Display d) {
+        if (!d.Shown) return;
+        foreach (BeamStrip s in d.Strips) ShowWindow(s.Handle, 0); // SW_HIDE
+        d.Shown = false;
+    }
+
     void Place() {
-        IntPtr t = target;
-        RECT r = new RECT();
-        IntPtr screen = IntPtr.Zero;
-        bool on = DateTime.UtcNow.Ticks >= Interlocked.Read(ref hideUntil);
-        // The desktop in front: the monitor the pointer is on, where the agent's last click went.
-        bool desk = on && t != IntPtr.Zero && GetForegroundWindow() == t && IsDesktop(t);
-        if (desk) {
-            POINT at;
-            MONITORINFO info = new MONITORINFO();
-            info.Size = 40;
-            on = GetCursorPos(out at) && GetMonitorInfo(screen = MonitorFromPoint(at, 2), ref info); // MONITOR_DEFAULTTONEAREST
-            r = info.Monitor;
-        } else {
-            // The visible frame (DWMWA_EXTENDED_FRAME_BOUNDS = 9), not GetWindowRect, which includes invisible resize borders.
-            on = on && t != IntPtr.Zero && GetForegroundWindow() == t && !IsIconic(t)
-                && DwmGetWindowAttribute(t, 9, out r, 16) == 0;
-            if (on) screen = MonitorFromWindow(t, 2);
+        bool on = DateTime.UtcNow.Ticks >= Interlocked.Read(ref hideUntil);   // not stepping aside for a capture
+        List<IntPtr> screens = new List<IntPtr>();
+        List<RECT> rects = new List<RECT>();
+        if (on) {
+            EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr m, IntPtr dc, ref RECT r, IntPtr data) => {
+                if (r.Right > r.Left && r.Bottom > r.Top) { screens.Add(m); rects.Add(r); }
+                return true;
+            }, IntPtr.Zero);
         }
-        on = on && r.Right > r.Left && r.Bottom > r.Top;
-        if (!on) {
-            if (shown) { foreach (BeamStrip s in strips) ShowWindow(s.Handle, 0); shown = false; } // SW_HIDE
-            return;
+        if (rects.Count == 0) { foreach (Display h in displays) Hide(h); return; }
+        while (displays.Count > rects.Count) {   // a monitor unplugged
+            Display gone = displays[displays.Count - 1];
+            displays.RemoveAt(displays.Count - 1);
+            foreach (BeamStrip s in gone.Strips) s.Dispose();   // Close() would leave a strip that was never shown undisposed
         }
+        while (displays.Count < rects.Count) displays.Add(NewDisplay());
+        for (int i = rects.Count; i < displays.Count; i++) Hide(displays[i]);
+
         bool animate;
         bool wasStill = still;
         still = SystemParametersInfo(0x1042, 0, out animate, 0) && !animate;   // SPI_GETCLIENTAREAANIMATION
-        bool placed = desk ? shown : Above(t);
-        bool moved = !shown || still != wasStill || r.Left != last.Left || r.Top != last.Top || r.Right != last.Right || r.Bottom != last.Bottom;
-        // A window that became rounded or not (maximized, say) at the same size: the tables are made again.
-        int radius = desk ? 0 : CornerRadiusAt96(t);
-        if (!layout.EndsWith("r" + radius)) moved = true;
-        if (moved) zoom = ZoomOf(screen);
-        // Light or dark under it: looked at when the beam comes up or goes to another window, and every ten seconds.
-        if (!shown || t != lookedAt || ++looks >= 100) {
-            looks = 0;
-            lookedAt = t;
-            bool now = Light(r, light);
-            if (now != light) { light = now; moved = true; }
-        }
-        if (placed && !moved) return;
-        if (moved) {
-            if (!shown) shownAt = clock.Elapsed.TotalSeconds;
-            // In CSS px from here: the frame as a page at this zoom would measure it.
-            Layout(Math.Max(1, (int)Math.Round((r.Right - r.Left) / zoom)), Math.Max(1, (int)Math.Round((r.Bottom - r.Top) / zoom)), radius);
-            last = r;
-            foreach (BeamStrip s in strips) s.MoveTo(r.Left + (int)Math.Round(s.X * zoom), r.Top + (int)Math.Round(s.Y * zoom));
-            Paint(true);
-        }
-        // HWND_TOPMOST (-1), raised again only when the target (itself always-on-top, then) has come over it.
-        // SWP_NOSIZE 0x01 | SWP_NOMOVE 0x02 | SWP_NOACTIVATE 0x10 | SWP_SHOWWINDOW 0x40, and SWP_NOZORDER 0x04 when it
-        // is already above the target. (The strips are already where they belong.)
-        foreach (BeamStrip s in strips) {
-            if (s.W > 0 && s.H > 0) SetWindowPos(s.Handle, new IntPtr(-1), 0, 0, 0, 0, placed ? 0x0057u : 0x0053u);
-            else ShowWindow(s.Handle, 0);
-        }
-        shown = true;
-    }
-
-    [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hWnd);
-    [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hWnd, IntPtr dc);
-    [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr dc);
-    [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleBitmap(IntPtr dc, int w, int h);
-    [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc, IntPtr o);
-    [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr o);
-    [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr dc);
-    [DllImport("gdi32.dll")] static extern bool BitBlt(IntPtr dst, int x, int y, int w, int h, IntPtr src, int sx, int sy, uint rop);
-    [DllImport("gdi32.dll")] static extern uint GetPixel(IntPtr dc, int x, int y);
-
-    // Is what the beam lies on light? One line of the screen, a pixel high, across the middle of the frame, read in
-    // one go (reading the screen is slow, and slower a pixel at a time): the brightness of sixteen points on it, and
-    // nothing else, is used. A beam that was on a light window stays the light one until it is clearly dark, and the
-    // other way round.
-    bool Light(RECT r, bool was) {
-        int inset = (int)(48 * zoom), w = r.Right - r.Left - 2 * inset, h = r.Bottom - r.Top;
-        if (w < 2 * inset || h < 4 * inset) return was;
-        IntPtr screen = GetDC(IntPtr.Zero);
-        if (screen == IntPtr.Zero) return was;
-        IntPtr dc = CreateCompatibleDC(screen), line = CreateCompatibleBitmap(screen, w, 1), before = SelectObject(dc, line);
-        double sum = 0;
-        int n = 0;
-        if (BitBlt(dc, 0, 0, w, 1, screen, r.Left + inset, r.Top + h / 2, 0x00CC0020)) {   // SRCCOPY
-            for (int i = 0; i < 16; i++) {
-                uint c = GetPixel(dc, w * (2 * i + 1) / 32, 0);   // 0x00BBGGRR
-                if (c == 0xFFFFFFFF) continue;
-                sum += (0.213 * (c & 255) + 0.715 * ((c >> 8) & 255) + 0.072 * ((c >> 16) & 255)) / 255;
-                n++;
-            }
-        }
-        SelectObject(dc, before); DeleteObject(line); DeleteDC(dc); ReleaseDC(IntPtr.Zero, screen);
-        return n == 0 ? was : sum / n > (was ? 0.45 : 0.6);
-    }
-
-    static double Clamp01(double v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
-    // Distance to the edge of a rounded rectangle centred on the origin: negative inside it.
-    static double Sdf(double x, double y, double halfW, double halfH, double radius) {
-        double qx = Math.Abs(x) - halfW + radius, qy = Math.Abs(y) - halfH + radius;
-        double ox = Math.Max(qx, 0), oy = Math.Max(qy, 0);
-        return Math.Sqrt(ox * ox + oy * oy) + Math.Min(Math.Max(qx, qy), 0) - radius;
-    }
-    // How much of a pixel is inside an edge at this distance (one pixel of smoothing, as the shader has).
-    static double Cover(double sdf) { double t = Clamp01(sdf + 1); return 1 - t * t * (3 - 2 * t); }
-
-    // The four strips for a w x h frame, and for each of their pixels what the beam is there with its window fully
-    // open: the inner glow under the stroke ring (colour and opacity), its share of the white highlight and of the
-    // bloom, and its place on the turn. All in CSS px (the strips are drawn at the monitor's scale by Windows).
-    void Layout(int w, int h, int radiusAt96) {
-        string key = (light ? "light" : "dark") + w + "x" + h + "r" + radiusAt96;
-        if (key == layout) return;
-        layout = key;
-        const double s = 1;
-        int ring = Math.Max(1, (int)Math.Round(s));                       // the 1 px stroke
-        int deep = Math.Min((int)Math.Ceiling(EdgeFade * s), Math.Min(w, h) / 2);   // how far in the glow reaches
-        double rad = Math.Min(Math.Round(radiusAt96 * s), Math.Min(w, h) / 2.0);
-        strips[0].SetSize(0, 0, w, deep);
-        strips[1].SetSize(w - deep, deep, deep, h - 2 * deep);
-        strips[2].SetSize(0, h - deep, w, deep);
-        strips[3].SetSize(0, deep, deep, h - 2 * deep);
-
-        // The blobs for this frame: centre and reach in device px, colour, for the stroke and (smaller, fainter) the
-        // glow. A blob on the top or bottom edge keeps its place and reach along it in proportion to the width, and
-        // its distance from the edge and reach across it in px; one on a side edge the other way round.
-        int[] tones = paused ? Ocean : Amber;
-        double[] bx = new double[9], by = new double[9], brx = new double[9], bry = new double[9], irx = new double[9], iry = new double[9];
-        for (int i = 0; i < 9; i++) {
-            double fx = BlobPlace[4 * i] / 100, fy = BlobPlace[4 * i + 1] / 100, rx = BlobPlace[4 * i + 2], ry = BlobPlace[4 * i + 3];
-            double smallX = Math.Round(rx * InnerScale), smallY = Math.Round(ry * InnerScale);
-            if (fx <= 0.05 || fx >= 0.95) {
-                bx[i] = fx < 0.5 ? fx * CardW * s : w - (1 - fx) * CardW * s; by[i] = fy * h;
-                brx[i] = rx * s; bry[i] = ry * h / CardH; irx[i] = smallX * s; iry[i] = smallY * h / CardH;
-            } else {
-                bx[i] = fx * w; by[i] = fy < 0.5 ? fy * CardH * s : h - (1 - fy) * CardH * s;
-                brx[i] = rx * w / CardW; bry[i] = ry * s; irx[i] = smallX * w / CardW; iry[i] = smallY * s;
-            }
-        }
-        double strokeOpacity = paused ? 0.94 : light ? 0.6 : 0.26, innerOpacity = light ? 0.7 : paused ? 0.34 : 0.42;
-        // The inset shadow: white .27 on a dark window, black .14 on a light one.
-        double shade = light ? 0 : 1, shadeAlpha = light ? 0.14 : ShadowAlpha;
-        double sigma = BloomBlur * s, edge = EdgeFade * s, shadow = (ShadowBlur + 1) * s;
-        double halfW = w / 2.0, halfH = h / 2.0;
-        for (int k = 0; k < 4; k++) {
-            BeamStrip strip = strips[k];
-            for (int l = 0; l < strip.From.Length; l++) {
-                strip.From[l] = int.MaxValue; strip.To[l] = -1; strip.State[l] = 0;
-                strip.Near[l] = int.MaxValue; strip.Far[l] = -1; strip.RingNear[l] = int.MaxValue; strip.RingFar[l] = -1;
-                strip.HaloNear[l] = int.MaxValue; strip.HaloFar[l] = -1;
-            }
-            Array.Clear(strip.Alpha, 0, strip.Alpha.Length); Array.Clear(strip.Ring, 0, strip.Ring.Length); Array.Clear(strip.Bloom, 0, strip.Bloom.Length);
-            Array.Clear(strip.Pixels, 0, strip.Pixels.Length);
-            for (int j = 0; j < strip.H; j++) {
-                for (int i = 0; i < strip.W; i++) {
-                    double x = strip.X + i + 0.5, y = strip.Y + j + 0.5;
-                    double sdf = Sdf(x - halfW, y - halfH, halfW, halfH, rad);
-                    double inside = Cover(sdf);
-                    int at = j * strip.W + i;
-                    if (inside <= 0) continue;
-                    double band = inside - Cover(Sdf(x - halfW, y - halfH, halfW - ring, halfH - ring, Math.Max(rad - ring, 0)));
-                    // The glow: its blobs (the first on top), the inset shadow over them, fading in from the edges.
-                    double fade = Clamp01(Math.Max(Math.Max(1 - y / edge, 1 - (h - y) / edge), 0) + Math.Max(Math.Max(1 - x / edge, 1 - (w - x) / edge), 0));
-                    double r = 0, g = 0, b = 0, a = 0;
-                    if (fade > 0) {
-                        for (int n = 8; n >= 0; n--) {
-                            double dx = (x - bx[n]) / irx[n], dy = (y - by[n]) / iry[n];
-                            double v = InnerAlpha * (1 - Math.Sqrt(dx * dx + dy * dy));
-                            if (v <= 0) continue;
-                            r = tones[3 * n] / 255.0 * v + r * (1 - v); g = tones[3 * n + 1] / 255.0 * v + g * (1 - v); b = tones[3 * n + 2] / 255.0 * v + b * (1 - v); a = v + a * (1 - v);
-                        }
-                        double fall = Clamp01(1 + sdf / shadow), cast = shadeAlpha * fall * fall;
-                        r = shade * cast + r * (1 - cast); g = shade * cast + g * (1 - cast); b = shade * cast + b * (1 - cast); a = cast + a * (1 - cast);
-                        double part = inside * fade * innerOpacity;
-                        r *= part; g *= part; b *= part; a *= part;
-                    }
-                    // The stroke ring over it: its blobs at full strength.
-                    if (band > 0) {
-                        double sr = 0, sg = 0, sb = 0, sa = 0;
-                        for (int n = 8; n >= 0; n--) {
-                            double dx = (x - bx[n]) / brx[n], dy = (y - by[n]) / bry[n];
-                            double v = 1 - Math.Sqrt(dx * dx + dy * dy);
-                            if (v <= 0) continue;
-                            sr = tones[3 * n] / 255.0 * v + sr * (1 - v); sg = tones[3 * n + 1] / 255.0 * v + sg * (1 - v); sb = tones[3 * n + 2] / 255.0 * v + sb * (1 - v); sa = v + sa * (1 - v);
-                        }
-                        double part = Math.Min(1, strokeOpacity) * band;
-                        sr *= part; sg *= part; sb *= part; sa *= part;
-                        r = sr + r * (1 - sa); g = sg + g * (1 - sa); b = sb + b * (1 - sa); a = sa + a * (1 - sa);
-                        strip.Ring[at] = (byte)Math.Round(255 * part);
-                    }
-                    // The bloom: the ring blurred across the edge (a gaussian), clipped to the frame.
-                    double off = -sdf - ring / 2.0;
-                    double halo = inside * BloomOpacity * ring / (sigma * 2.5066) * Math.Exp(-off * off / (2 * sigma * sigma));
-                    strip.Bloom[at] = paused ? (ushort)0 : (ushort)Math.Round(65535 * halo);
-                    if (a > 0.002) {
-                        strip.Alpha[at] = (byte)Math.Round(255 * Math.Min(1, a));
-                        strip.Raw[at] = ((int)Math.Round(255 * Clamp01(r / a)) << 16) | ((int)Math.Round(255 * Clamp01(g / a)) << 8) | (int)Math.Round(255 * Clamp01(b / a));
-                    }
-                    if (strip.Alpha[at] == 0 && strip.Ring[at] == 0 && strip.Bloom[at] < 300) { strip.Bloom[at] = 0; continue; }
-                    // Where on the turn: 0 straight up from the centre, then clockwise.
-                    double turn = Math.Atan2(x - halfW, halfH - y) / (2 * Math.PI);
-                    int step = (int)((turn - Math.Floor(turn)) * Q) & (Q - 1);
-                    strip.Turn[at] = (ushort)step;
-                    int line = k % 2 == 0 ? i : j, across = k % 2 == 0 ? j : i;
-                    if (step < strip.From[line]) strip.From[line] = step;
-                    if (step > strip.To[line]) strip.To[line] = step;
-                    if (across < strip.Near[line]) strip.Near[line] = across;
-                    if (across > strip.Far[line]) strip.Far[line] = across;
-                    if (strip.Ring[at] != 0) {
-                        if (across < strip.RingNear[line]) strip.RingNear[line] = across;
-                        if (across > strip.RingFar[line]) strip.RingFar[line] = across;
-                    }
-                    if (strip.Ring[at] != 0 || strip.Bloom[at] != 0) {
-                        if (across < strip.HaloNear[line]) strip.HaloNear[line] = across;
-                        if (across > strip.HaloFar[line]) strip.HaloFar[line] = across;
-                    }
-                }
-            }
-        }
-        // About 22 frames a second (43 to a turn) for a small window, 16 for the rest; and what a frame does besides the
-        // highlight (Paint): everything, one side of the beam window, or on every third frame nothing.
-        int total = 0;
-        foreach (BeamStrip strip in strips) total += strip.W * strip.H;
-        frame.Interval = total > 60000 ? 62 : 45;
-        glowEvery = total > 60000 ? 3 : 1;
-    }
-
-    // hue-rotate(deg) brightness(b) saturate(s) as one matrix on RGB (the feColorMatrix arithmetic browsers use;
-    // colorMatrix.ts composedFilterMatrix), in 1/1024ths.
-    static int[] Filter(double degrees, double brightness, double saturation) {
-        double c = Math.Cos(degrees * Math.PI / 180), s = Math.Sin(degrees * Math.PI / 180), b = brightness, t = saturation;
-        double[] hue = {
-            (0.213 + c * 0.787 - s * 0.213) * b, (0.715 - c * 0.715 - s * 0.715) * b, (0.072 - c * 0.072 + s * 0.928) * b,
-            (0.213 - c * 0.213 + s * 0.143) * b, (0.715 + c * 0.285 + s * 0.140) * b, (0.072 - c * 0.072 - s * 0.283) * b,
-            (0.213 - c * 0.213 - s * 0.787) * b, (0.715 - c * 0.715 + s * 0.715) * b, (0.072 + c * 0.928 + s * 0.072) * b };
-        double[] sat = {
-            0.213 + 0.787 * t, 0.715 - 0.715 * t, 0.072 - 0.072 * t,
-            0.213 - 0.213 * t, 0.715 + 0.285 * t, 0.072 - 0.072 * t,
-            0.213 - 0.213 * t, 0.715 - 0.715 * t, 0.072 + 0.928 * t };
-        int[] m = new int[9];
-        for (int row = 0; row < 3; row++)
-            for (int col = 0; col < 3; col++) {
-                double sum = 0;
-                for (int n = 0; n < 3; n++) sum += sat[row * 3 + n] * hue[n * 3 + col];
-                m[row * 3 + col] = (int)Math.Round(1024 * sum);
-            }
-        return m;
-    }
-
-    // One frame. `all`: every pixel (a new size, a new place, the first frame). Otherwise, for each line across the
-    // edge: nothing where the beam window is closed and was; the whole line where its edges are passing; only the
-    // ring's pixels (the white highlight) where it is fully open and was; the whole line again where the bloom is.
-    // A line the window has just left is cleared, and its colours are filtered again for the next pass (the hue shift).
-    void Paint(bool all) {
-        double now = clock.Elapsed.TotalSeconds;
         turning = !still && !paused;
-        // Where the beam is, and the colour filter now.
-        beam = turning ? (int)(now / TurnSeconds % 1 * Q) : 0;
-        double swing = (1 - Math.Cos(2 * Math.PI * now / HueSeconds)) / 2;
-        filter = Filter(turning ? -HueRange + 2 * HueRange * swing : 0, paused ? 1.9 : 1.3, light ? 1.5 : 1.2);
-        // The highlight and the bloom: white over a dark window, dark over a light one.
-        glare = light ? darkAt : whiteAt;
-        spark = light ? 0x01000000 : 0x01010101;
-        // Coming up: from clear to full over .6 s.
-        double risen = Clamp01((now - shownAt) / FadeInSeconds);
-        byte opacity = (byte)(255 * (turning ? risen * risen * (3 - 2 * risen) : 1));   // a still ring is drawn once: no fade
-        bool rising = risen < 1;
-        // The white highlight on the ring (the bright part, which the eye follows) is lit on every frame. The rest - the
-        // glow and the ring where the beam window opens and closes - only for a small window: otherwise the side
-        // behind the highlight on one frame, the side ahead of it on the next and neither on the third, so a frame
-        // changes about two strips, not all four.
-        int turnOf = all || rising || glowEvery == 1 ? -1 : tick++ % glowEvery;
-        bool behind = turnOf <= 0, ahead = turnOf < 0 || turnOf == 1, glow = behind || ahead;
-        int middle = (int)(0.66 * Q);
-        int[] mask = maskAt;
-        // The beam window, in steps after the beam: closed from 95% round to 30%, fully open from 52% to 80%.
-        int closedFrom = (int)(0.95 * Q) + 2, closedTo = Q + (int)(0.30 * Q) - 2, openFrom = (int)(0.52 * Q) + 2, openTo = (int)(0.80 * Q) - 2;
-        int shineFrom = (int)(0.54 * Q) - 2, shineTo = (int)(0.78 * Q) + 2;
-        for (int k = 0; k < 4; k++) {
-            BeamStrip s = strips[k];
-            int w = s.W, h = s.H;
-            if (w == 0 || h == 0) continue;
-            bool rows = k % 2 == 1;   // a side strip: its lines are rows
-            int lines = rows ? h : w, first = lines, final = -1, topFirst = int.MaxValue, topLast = -1, runCount = 0, runAct = 0;
-            int[] from = s.From, to = s.To, near = s.Near, far = s.Far, topNear = tops, topFar = tope;
-            byte[] state = s.State;
-            // What to do with each line:
-            //   0 nothing
-            //   1 the glow at the window's opacity there, and the ring exactly
-            //   2 the ring only (the window is fully open and was: the glow is as it is)
-            //   3 clear it and filter its colours again
-            //   4 every pixel exactly
-            //   5 the ring and the bloom's reach only
-            if (does.Length < lines) { does = new byte[lines]; level = new int[lines]; glint = new int[lines]; runs = new int[5 * lines + 5]; tops = topNear = new int[lines]; tope = topFar = new int[lines]; }
-            byte[] todo = does;
-            int[] open = level, shine = glint;   // per line: the beam window's opacity there, and the highlight's through it
-            for (int l = 0; l < lines; l++) {
-                int f = from[l], t = to[l];
-                byte act;
-                if (t < f) act = 0;                                   // nothing of the beam on this line
-                else if (all) { act = 4; state[l] = 1; }
-                else if (t - f > Q / 2) act = glow ? (byte)4 : (byte)2;   // the line straight up from the centre: both ends of the turn
-                else if (((f - beam) & (Q - 1)) >= middle && ((f - beam) & (Q - 1)) < closedFrom ? !ahead : !behind) {
-                    // Not this side's frame: the ring only, and only where the white highlight is (54% to 78% after
-                    // the beam).
-                    int after = (f - beam) & (Q - 1);
-                    act = after + (t - f) >= shineFrom && after <= shineTo ? (byte)2 : (byte)0;
-                    open[l] = mask[((f + t) / 2 - beam) & (Q - 1)];
-                }
-                else {
-                    int after = (f - beam) & (Q - 1), until = after + (t - f);
-                    if (after < closedTo - Q) { after += Q; until += Q; }
-                    if (after >= closedFrom && until <= closedTo) { act = state[l] == 0 ? (byte)0 : (byte)3; state[l] = 0; }
-                    else if (after >= openFrom && until <= openTo) {
-                        bool halo = until >= bloomFrom && after <= bloomTo;
-                        act = state[l] < 2 ? (byte)1 : halo || state[l] == 3 ? (byte)5 : (byte)2;
-                        state[l] = halo && act == 5 ? (byte)3 : (byte)2;
-                    }
-                    else { act = 1; state[l] = 1; }
-                    open[l] = mask[((f + t) / 2 - beam) & (Q - 1)];
-                }
-                todo[l] = act;
-                if (act == 1 || act == 2) shine[l] = (glare[((f + t) / 2 - beam) & (Q - 1)] * open[l]) >> 8;
-                // The part of the line to go over exactly, after its run: the ring, or the bloom's reach.
-                if (act == 1 || act == 2 || act == 5) {
-                    topNear[l] = act == 5 ? s.HaloNear[l] : s.RingNear[l];
-                    topFar[l] = act == 5 ? s.HaloFar[l] : s.RingFar[l];
-                    if (topNear[l] < topFirst) topFirst = topNear[l];
-                    if (topFar[l] > topLast) topLast = topFar[l];
-                }
-                if (act != 0) { if (l < first) first = l; final = l; }
-                // Runs of lines with the same thing to do to their whole depth (1, 3 or 4), 128 lines at most:
-                // first, last, what, and the nearest and farthest pixel of the beam on any of them.
-                int deep = act == 1 || act == 3 || act == 4 ? act : 0;
-                if (deep != runAct || (l & 127) == 0) {
-                    if (runAct != 0) { runs[5 * runCount + 1] = l - 1; runCount++; }
-                    if (deep != 0) { runs[5 * runCount] = l; runs[5 * runCount + 2] = deep; runs[5 * runCount + 3] = int.MaxValue; runs[5 * runCount + 4] = -1; }
-                    runAct = deep;
-                }
-                if (deep != 0) {
-                    if (near[l] < runs[5 * runCount + 3]) runs[5 * runCount + 3] = near[l];
-                    if (far[l] > runs[5 * runCount + 4]) runs[5 * runCount + 4] = far[l];
-                }
+        for (int i = 0; i < displays.Count; i++) {
+            Display d = displays[i];
+            RECT r = rects[i];
+            double zoom = ZoomOf(screens[i]);   // a scale change with the same resolution lays out again too
+            bool moved = !d.Shown || still != wasStill || zoom != d.Zoom || r.Left != d.Left || r.Top != d.Top || r.Right != d.Right || r.Bottom != d.Bottom;
+            if (!moved) { RaiseIfCovered(d); continue; }
+            if (!d.Shown) d.ShownAt = clock.Elapsed.TotalSeconds;
+            d.Zoom = zoom;
+            // In CSS px from here: the monitor as a page at this zoom would measure it.
+            int w = Math.Max(1, (int)Math.Round((r.Right - r.Left) / d.Zoom)), h = Math.Max(1, (int)Math.Round((r.Bottom - r.Top) / d.Zoom));
+            string key = w + "x" + h;
+            if (key != d.Layout) {
+                d.Layout = key;
+                d.Beam.Layout(w, h);
+                for (int k = 0; k < d.Strips.Length; k++) d.Strips[k].SetSize(d.Beam.X[k], d.Beam.Y[k], d.Beam.W[k], d.Beam.H[k]);
             }
-            if (runAct != 0) { runs[5 * runCount + 1] = lines - 1; runCount++; }
-            if (final < 0) continue;
-            int[] bas = s.Base, px = s.Pixels;
-            byte[] ringOf = s.Ring;
-            bool plain = turning && !all;   // the glow is its filtered colour at the window's opacity there
-            if (rows) {
-                for (int y = first; y <= final; y++) {
-                    int act = todo[y];
-                    if (act == 0) continue;
-                    int i0 = y * w;
-                    if (act == 3 && plain) { Refilter(s, i0 + near[y], far[y] - near[y] + 1, 1); continue; }
-                    if (act == 1 && plain) {
-                        uint part = (uint)open[y];
-                        for (int x = near[y], i = i0 + x; x <= far[y]; x++, i++) {
-                            uint c = (uint)bas[i];
-                            px[i] = (int)((((c & 0x00FF00FF) * part >> 8) & 0x00FF00FF) | (((c >> 8) & 0x00FF00FF) * part & 0xFF00FF00));
-                        }
-                    } else if (act == 3 || act == 4 || act == 1) {
-                        for (int x = near[y]; x <= far[y]; x++) Exact(s, i0 + x, act, all);
-                    }
-                    if (!plain || act == 4) continue;
-                    if (act == 5) { for (int x = topNear[y]; x <= topFar[y]; x++) Lit(s, i0 + x); continue; }
-                    // The ring: the white highlight over the colour, both through the beam window.
-                    int m = open[y], lineShine = shine[y];
-                    for (int x = topNear[y], i = i0 + x; x <= topFar[y]; x++, i++) {
-                        int over = (ringOf[i] * lineShine) >> 8;
-                        uint part = (uint)((m * (256 - over)) >> 8), c = (uint)bas[i];
-                        px[i] = (int)((((c & 0x00FF00FF) * part >> 8) & 0x00FF00FF) | (((c >> 8) & 0x00FF00FF) * part & 0xFF00FF00)) + over * spark;
-                    }
-                }
-            } else {
-                // The lines the beam has left, each down its own column.
-                if (plain) for (int n = 0; n < runCount; n++) {
-                    if (runs[5 * n + 2] != 3) continue;
-                    for (int x = runs[5 * n]; x <= runs[5 * n + 1]; x++) if (far[x] >= near[x]) Refilter(s, near[x] * w + x, far[x] - near[x] + 1, w);
-                }
-                // Row by row (as the pixels lie in memory): the runs first, then the ring and the bloom.
-                for (int y = 0; y < h; y++) {
-                    int i0 = y * w;
-                    for (int n = 0; n < runCount; n++) {
-                        if (y < runs[5 * n + 3] || y > runs[5 * n + 4]) continue;
-                        int x0 = runs[5 * n], x1 = runs[5 * n + 1], act = runs[5 * n + 2];
-                        if (act == 1 && plain) {
-                            // (A pixel that is not part of the beam is clear, and stays clear.)
-                            for (int x = x0, i = i0 + x0; x <= x1; x++, i++) {
-                                uint c = (uint)bas[i], part = (uint)open[x];
-                                px[i] = (int)((((c & 0x00FF00FF) * part >> 8) & 0x00FF00FF) | (((c >> 8) & 0x00FF00FF) * part & 0xFF00FF00));
-                            }
-                        } else if (act != 3 || !plain) {
-                            for (int x = x0; x <= x1; x++) if (y >= near[x] && y <= far[x]) Exact(s, i0 + x, act, all);
-                        }
-                    }
-                    if (!plain || y < topFirst || y > topLast) continue;
-                    for (int x = first, i = i0 + first; x <= final; x++, i++) {
-                        int act = todo[x];
-                        if (act == 0 || act >= 3 && act != 5 || y < topNear[x] || y > topFar[x]) continue;
-                        if (act == 5) { Lit(s, i); continue; }
-                        int m = open[x], over = (ringOf[i] * shine[x]) >> 8;
-                        uint part = (uint)((m * (256 - over)) >> 8), c = (uint)bas[i];
-                        px[i] = (int)((((c & 0x00FF00FF) * part >> 8) & 0x00FF00FF) | (((c >> 8) & 0x00FF00FF) * part & 0xFF00FF00)) + over * spark;
-                    }
-                }
+            d.Left = r.Left; d.Top = r.Top; d.Right = r.Right; d.Bottom = r.Bottom;
+            foreach (BeamStrip s in d.Strips) s.MoveTo(r.Left + (int)Math.Round(s.X * d.Zoom), r.Top + (int)Math.Round(s.Y * d.Zoom));
+            Paint(d, true);
+            // HWND_TOPMOST (-1); SWP_NOSIZE 0x01 | SWP_NOMOVE 0x02 | SWP_NOACTIVATE 0x10 | SWP_SHOWWINDOW 0x40.
+            // (The strips are already where they belong.)
+            foreach (BeamStrip s in d.Strips) {
+                if (s.W > 0 && s.H > 0) SetWindowPos(s.Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0053u);
+                else ShowWindow(s.Handle, 0);
             }
-            if (all || rising) s.Push(opacity, 0, 0, w - 1, h - 1);
-            else if (rows) s.Push(opacity, glow ? 0 : topFirst, first, glow ? w - 1 : topLast, final);
-            else s.Push(opacity, first, glow ? 0 : topFirst, final, glow ? h - 1 : topLast);
+            d.Shown = true;
+            LiftPill();
         }
     }
 
-    // A line the beam has left (`count` pixels from `i`, `stride` apart): cleared, and its colours through the colour
-    // filter as it is now, premultiplied by their opacity, for the beam's next pass.
-    void Refilter(BeamStrip s, int i, int count, int stride) {
-        int[] cm = filter, raw = s.Raw, bas = s.Base, px = s.Pixels;
-        byte[] alpha = s.Alpha;
-        int c0 = cm[0], c1 = cm[1], c2 = cm[2], c3 = cm[3], c4 = cm[4], c5 = cm[5], c6 = cm[6], c7 = cm[7], c8 = cm[8];
-        for (int n = 0; n < count; n++, i += stride) {
-            px[i] = 0;
-            int a = alpha[i];
-            if (a == 0) continue;
-            int c = raw[i], r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255;
-            int r2 = (c0 * r + c1 * g + c2 * b) >> 10, g2 = (c3 * r + c4 * g + c5 * b) >> 10, b2 = (c6 * r + c7 * g + c8 * b) >> 10;
-            r2 = r2 < 0 ? 0 : r2 > 255 ? 255 : r2; g2 = g2 < 0 ? 0 : g2 > 255 ? 255 : g2; b2 = b2 < 0 ? 0 : b2 > 255 ? 255 : b2;
-            bas[i] = (a << 24) | (((r2 * a * 257 + 32768) >> 16) << 16) | (((g2 * a * 257 + 32768) >> 16) << 8) | ((b2 * a * 257 + 32768) >> 16);
+    // A strip with a visible window of another process above it (the taskbar, an always-on-top window) goes back to the
+    // top, without activation. Windows of this process (the strips) and of the pill's are not foreign, nor is a cloaked
+    // one (DWMWA_CLOAKED 14: a system window kept "visible" but not drawn, such as the input host). GW_HWNDPREV 3 walks
+    // up the z-order; HWND_TOPMOST (-1); SWP_NOSIZE 0x01 | SWP_NOMOVE 0x02 | SWP_NOACTIVATE 0x10.
+    void RaiseIfCovered(Display d) {
+        System.Text.StringBuilder name = new System.Text.StringBuilder(20);
+        bool raised = false;
+        foreach (BeamStrip s in d.Strips) {
+            if (s.W <= 0 || s.H <= 0) continue;
+            IntPtr h = GetWindow(s.Handle, 3);
+            for (int i = 0; h != IntPtr.Zero && i < 1000; i++, h = GetWindow(h, 3)) {
+                if (!IsWindowVisible(h)) continue;
+                uint pid;
+                GetWindowThreadProcessId(h, out pid);
+                if (pid == ownPid || (pillPid != 0 && pid == pillPid)) continue;
+                int cloaked;
+                if (DwmGetWindowAttribute(h, 14, out cloaked, 4) == 0 && cloaked != 0) continue;
+                name.Length = 0;
+                GetWindowText(h, name, 20);
+                if (name.ToString() == "clawdcursor beam") continue;   // another clawdcursor's beam
+                SetWindowPos(s.Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013u);
+                raised = true;
+                break;
+            }
         }
+        if (raised) LiftPill();
     }
 
-    // One pixel in full: filtered again where asked, then lit.
-    void Exact(BeamStrip s, int i, int act, bool all) {
-        int a = s.Alpha[i];
-        if ((a | s.Ring[i] | s.Bloom[i]) == 0) return;   // never part of the beam: stays clear
-        if (act == 3 || all) {
-            // The colour filter, then premultiplied by the pixel's opacity.
-            int[] cm = filter;
-            int c = s.Raw[i], r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255;
-            int r2 = (cm[0] * r + cm[1] * g + cm[2] * b) >> 10, g2 = (cm[3] * r + cm[4] * g + cm[5] * b) >> 10, b2 = (cm[6] * r + cm[7] * g + cm[8] * b) >> 10;
-            r2 = r2 < 0 ? 0 : r2 > 255 ? 255 : r2; g2 = g2 < 0 ? 0 : g2 > 255 ? 255 : g2; b2 = b2 < 0 ? 0 : b2 > 255 ? 255 : b2;
-            s.Base[i] = (a << 24) | (((r2 * a * 257 + 32768) >> 16) << 16) | (((g2 * a * 257 + 32768) >> 16) << 8) | ((b2 * a * 257 + 32768) >> 16);
-            if (act == 3) { s.Pixels[i] = 0; return; }
+    // The pill stays above the beam: after the beam has gone to the top, the pill's windows go back over it, lowest
+    // first so they keep their own order. (The pill also raises itself over a strip on its own 700 ms clock; doing it
+    // here at once means the two never trade places.) GW_HWNDFIRST 0, GW_HWNDNEXT 2 walk down from the top.
+    void LiftPill() {
+        if (pillPid == 0 || displays.Count == 0 || displays[0].Strips[0] == null) return;
+        List<IntPtr> mine = new List<IntPtr>();
+        IntPtr h = GetWindow(displays[0].Strips[0].Handle, 0);
+        for (int i = 0; h != IntPtr.Zero && i < 1000; i++, h = GetWindow(h, 2)) {
+            uint pid;
+            GetWindowThreadProcessId(h, out pid);
+            if (pid == pillPid && IsWindowVisible(h)) mine.Add(h);
         }
-        if (!turning) { s.Pixels[i] = s.Base[i]; return; }   // the still frame and the paused form: the whole ring, no highlight
-        Lit(s, i);
+        for (int k = mine.Count - 1; k >= 0; k--) SetWindowPos(mine[k], new IntPtr(-1), 0, 0, 0, 0, 0x0013u);
     }
 
-    // One pixel as the beam lights it now: its colour through the beam window, with the white of the highlight (on
-    // the ring) and of the bloom over it.
-    void Lit(BeamStrip s, int i) {
-        int step = (s.Turn[i] - beam) & (Q - 1);
-        int m = maskAt[step];
-        int over = ((s.Ring[i] * glare[step] * m) >> 16) + ((s.Bloom[i] * bloomAt[step]) >> 16);
-        uint part = (uint)((m * (256 - over)) >> 8), color = (uint)s.Base[i];
-        s.Pixels[i] = (int)((((color & 0x00FF00FF) * part >> 8) & 0x00FF00FF) | (((color >> 8) & 0x00FF00FF) * part & 0xFF00FF00)) + over * spark;
+    // One frame of a display: the beam as it is now, faded in over .6 s when it has just come up (a still beam just
+    // appears). `all`: every pixel goes to the screen (a new size or place, the first frame, the fade); otherwise only
+    // where the beam is or was.
+    void Paint(Display d, bool all) {
+        double now = clock.Elapsed.TotalSeconds;
+        double risen = turning ? Math.Max(0, Math.Min(1, (now - d.ShownAt) / Beam.FadeInSeconds)) : 1;
+        d.Beam.Paint(now, turning, all || risen < 1);
+        byte opacity = (byte)(255 * risen * risen * (3 - 2 * risen));
+        int[] dirty = d.Beam.Dirty;
+        for (int k = 0; k < d.Strips.Length; k++)
+            if (d.Strips[k].W > 0 && d.Strips[k].H > 0) d.Strips[k].Push(d.Beam.Pixels[k], opacity, dirty[4 * k], dirty[4 * k + 1], dirty[4 * k + 2], dirty[4 * k + 3]);
     }
-
-    // For the frame being painted.
-    bool turning;
-    int beam, tick, glowEvery = 1, spark = 0x01010101;
-    int[] glare = whiteAt;
-    int[] filter;
-    byte[] does = new byte[1];
-    int[] level = new int[1], glint = new int[1], runs = new int[10], tops = new int[1], tope = new int[1];
-    // The part of the beam window where the bloom is strong enough to show at all (it is at most 2 of 255).
-    static readonly int bloomFrom = Array.FindIndex(bloomAt, v => v * 1100 >= 65536), bloomTo = Array.FindLastIndex(bloomAt, v => v * 1100 >= 65536);
 }
 '@
 
@@ -878,7 +893,7 @@ try {
     Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition $source
 }
 
-# This thread is not DPI aware, as the strips are; where the frame is on screen is read per-monitor-v2, in PHYSICAL
+# This thread is not DPI aware, as the strips are; where the monitors are is read per-monitor-v2, in PHYSICAL
 # pixels on every monitor (WindowOutline.Follow), like ps-bridge.ps1.
 [void][WindowOutline]::SetThreadDpiAwarenessContext([IntPtr](-1))
 
