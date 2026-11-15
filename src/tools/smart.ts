@@ -971,7 +971,7 @@ export function getSmartTools(): ToolDefinition[] {
             replace = false;
             kept = scope === 'other'
               ? ' (typed at the cursor: the focus is not in a text field, so nothing was selected)'
-              : ' (typed at the cursor: this is a document or text area, so its text was kept; mode:"replace" replaces all of it)';
+              : ' (typed at the cursor: this is a document or text area, so its text was kept; to add at the end, press mod+End first; mode:"replace" replaces all of it)';
           }
         }
         ctx.desktop.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
