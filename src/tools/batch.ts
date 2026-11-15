@@ -34,9 +34,12 @@ import { effectLine } from '../core/effect';
 
 /** Resolve a step's tool by name from EITHER surface — a granular tool
  *  (`mouse_click`, `open_app`, …) or a compound tool (`computer`, `window`, …)
- *  — so a batch works whether the caller drives the 97-tool or 6-compound API. */
+ *  — so a batch works whether the caller drives the 97-tool or 6-compound API. The name the agent's host shows it
+ *  (`mcp__clawdcursor__accessibility`, `mcp__plugin_clawdcursor_clawdcursor__computer`) is accepted too: agents copy it
+ *  into steps (the Mac run, 2026-11-15). */
 function resolveAnyTool(name: string): ToolDefinition | undefined {
-  return getTool(name) ?? getCompactTools().find(t => t.name === name);
+  const bare = name.replace(/^mcp__.+__(?=[^_])/, '');
+  return getTool(bare) ?? getCompactTools().find(t => t.name === bare);
 }
 
 /** A lightweight, declarative precondition checked (by re-perceiving) before a step runs. */
