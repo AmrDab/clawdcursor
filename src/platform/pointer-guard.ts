@@ -43,6 +43,11 @@ interface InputGuard {
   launched(r?: { pid?: number; title?: string }, appName?: string): Promise<void>;
   /** Before an act on an element by name: stopped, or the window it would resolve to is an AI assistant nobody chose. */
   byName(processId?: number): Promise<void>;
+  /**
+   * Before a read or an act by element: throws when it would go to clawdcursor's own UI: the process named or, with
+   * none named, the window in front (a host app's own window can be in front, after the user clicked it).
+   */
+  notOwnUi?(processId?: number): Promise<void>;
   /** An act went to this process, not to the window in front (a page act over CDP): the session log names its app (#365). */
   byProcess?(pid: number | null | undefined): Promise<void>;
 }
@@ -188,11 +193,21 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
   wrap('invokeElement', async (g, f, args, nested) => {
     const q = (args[0] ?? {}) as { processId?: number; action?: string };
     if (!nested) {
-      if (q.action === 'get-value') g.stopCheck(); else { g.stopCheck(); await confirmCheck('invokeElement', args, target); await g.byName(q.processId); }
+      g.stopCheck();
+      await g.notOwnUi?.(q.processId);
+      if (q.action !== 'get-value') { await confirmCheck('invokeElement', args, target); await g.byName(q.processId); }
       announce('invokeElement');
     }
     return f(...args);
   });
+  // Reads by element take a process id, or with none the window in front: never clawdcursor's own UI either way.
+  for (const m of ['getUiTree', 'getScreenContext', 'findElements', 'findElement', 'getPageText']) {
+    wrap(m, async (g, f, args, nested) => {
+      const a = args[0];
+      if (!nested) await g.notOwnUi?.(typeof a === 'number' ? a : (a as { processId?: number } | undefined)?.processId);
+      return f(...args);
+    });
+  }
   // A release (mouseUp) is never refused; the window-checked pointer input is wrapped above.
   const stopOnly = [...STOP_METHODS, ...pointerMethods(target).filter(m => m !== 'mouseUp' && !INPUT_METHODS.includes(m))];
   for (const m of stopOnly.filter(m => m !== 'invokeElement')) {

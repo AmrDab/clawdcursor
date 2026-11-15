@@ -43,6 +43,7 @@
  */
 
 import { execFileSync, spawn, type ChildProcess } from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
 import { psOpts, powershellExe } from '../platform/ps-spawn';
 import * as readline from 'readline';
@@ -159,12 +160,26 @@ export function parsePillCmd(raw: string | undefined): string[] | null {
   }
 }
 
+const pidList = (raw: string | undefined): number[] =>
+  (raw ?? '').split(',').map(p => p.trim()).filter(p => /^[1-9]\d{0,9}$/.test(p)).map(Number);
+/** The pids file as last read: read again at most once a second, and kept when a read fails (the host is rewriting it). */
+let pidsFile: { file: string; at: number; pids: number[] } | null = null;
+
 /**
  * CLAWD_OWN_UI_PIDS: comma-separated pids of a host app's processes whose windows are clawdcursor's own UI (a hosted
  * pill is a window of the host, not of the command clawdcursor spawned). Entries that are not a pid are ignored.
+ * CLAWD_OWN_UI_PIDS_FILE: a file with more of them in the same form, which the host may rewrite while clawdcursor
+ * runs (a web view's processes come and go; the environment is read once, at the start).
  */
-export function hostUiPids(raw: string | undefined = process.env.CLAWD_OWN_UI_PIDS): number[] {
-  return (raw ?? '').split(',').map(p => p.trim()).filter(p => /^[1-9]\d{0,9}$/.test(p)).map(Number);
+export function hostUiPids(raw: string | undefined = process.env.CLAWD_OWN_UI_PIDS, file: string | undefined = process.env.CLAWD_OWN_UI_PIDS_FILE): number[] {
+  const named = pidList(raw);
+  if (!file) return named;
+  if (pidsFile?.file !== file || Date.now() - pidsFile.at >= 1000) {
+    let pids = pidsFile?.file === file ? pidsFile.pids : [];
+    try { pids = pidList(fs.readFileSync(file, 'utf8')); } catch { /* keep what was read last */ }
+    pidsFile = { file, at: Date.now(), pids };
+  }
+  return [...named, ...pidsFile.pids];
 }
 
 /** What the overlay shows right now (the control banner state). */

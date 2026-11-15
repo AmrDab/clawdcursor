@@ -14,11 +14,16 @@ Set both in the environment of the clawdcursor process.
 | --- | --- | --- |
 | `CLAWD_PILL_CMD` | A JSON array of strings: the command and its arguments, e.g. `["C:\\node.exe","C:\\app\\pill-host.mjs"]` | clawdcursor starts this command wherever it would start its own pill (Windows, macOS, Linux). |
 | `CLAWD_OWN_UI_PIDS` | Process ids, comma-separated, e.g. `4242,4250` | Windows of these processes are clawdcursor's own on-screen controls: the agent cannot read, click, type into or focus them. Entries that are not a positive whole number are ignored. |
+| `CLAWD_OWN_UI_PIDS_FILE` | The path of a file that holds more process ids, in the same form | Optional. The environment is read once, when clawdcursor starts; this file is read again while it runs (at most once a second), so the host can rewrite it when its processes change. A web view draws in helper processes that come and go (WebView2's `msedgewebview2.exe`): name them here. While the file cannot be read, the last list read stays. |
 
 The command clawdcursor starts is usually a small relay that talks to your app, and the pill is a window of your
 app's process, not of the relay. So name your app's process (every process that owns a pill window) in
 `CLAWD_OWN_UI_PIDS`. The relay's own pid is protected without being named. Other clawdcursor processes on the machine
 learn these pids from the first time this process shows its overlay.
+
+An element is refused by the process it belongs to and by the process of the window it is in. A read or an act by
+element that names no process goes to the window in front: when that is a window of one of these processes (the user
+just clicked the host app), it is refused too, so "press Yes" can never land on the host's own button.
 
 `CLAWD_NO_BANNER=1` and `--no-banner` still turn the pill and the outline off, hosted or not.
 
