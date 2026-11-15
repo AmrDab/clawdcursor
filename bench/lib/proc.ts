@@ -1,47 +1,14 @@
 /** Process helpers. The benchmark only ever stops processes it started itself. */
-import { execFile, execFileSync, spawn, type ChildProcess, type SpawnOptions } from 'child_process';
-import * as fs from 'fs';
+import { execFile, execFileSync, type ChildProcess, type SpawnOptions } from 'child_process';
 import * as net from 'net';
 import * as os from 'os';
-import * as path from 'path';
+// Shared with `clawdcursor task` (packages/clawdcursor-agent): finding a program and starting / stopping a process tree.
+import { findShim, killTree, start, system32, which } from '../../packages/clawdcursor-agent/src/hosts';
+export { findShim, killTree, start, system32, which };
 
 const isWin = process.platform === 'win32';
 
-/** Windows system programs by absolute path: never whatever `taskkill` or `powershell` is first on PATH. */
-export function system32(...rel: string[]): string {
-  return path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', ...rel);
-}
 export const POWERSHELL = system32('WindowsPowerShell', 'v1.0', 'powershell.exe');
-
-/**
- * A program on PATH. On Windows only a real executable (.exe): a .cmd or .bat shim would have to be run through the
- * shell, and nothing in the benchmark is.
- */
-export function which(name: string, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string | null {
-  const file = platform === 'win32' ? `${name}.exe` : name;
-  for (const dir of (env.PATH ?? env.Path ?? '').split(platform === 'win32' ? ';' : ':').filter(Boolean)) {
-    const p = path.join(dir, file);
-    try { if (fs.statSync(p).isFile()) return p; } catch { /* not here */ }
-  }
-  return null;
-}
-
-/** An npm launcher script for `name` on PATH (name.cmd / name.bat), on Windows. It is only reported, never run. */
-export function findShim(name: string, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string | null {
-  if (platform !== 'win32') return null;
-  for (const dir of (env.PATH ?? env.Path ?? '').split(';').filter(Boolean)) {
-    for (const ext of ['.cmd', '.bat']) {
-      const p = path.join(dir, name + ext);
-      try { if (fs.statSync(p).isFile()) return p; } catch { /* not here */ }
-    }
-  }
-  return null;
-}
-
-/** Start a child in its own process group, so the whole tree can be stopped. Always by argument array, never through a shell. */
-export function start(cmd: string, args: string[], opts: SpawnOptions = {}): ChildProcess {
-  return spawn(cmd, args, { windowsHide: true, detached: !isWin, ...opts, shell: false });
-}
 
 /**
  * Start an app whose WINDOW the benchmark needs on screen. `windowsHide` tells Windows to start the process with its
@@ -58,15 +25,6 @@ export async function hasWindow(pid: number | undefined, platform: string = proc
   if (!pid) return false;
   const out = await tryRun(POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${Math.trunc(pid)} -ErrorAction SilentlyContinue).MainWindowHandle`]);
   return Number(out?.trim()) > 0;
-}
-
-/** Stop a process we started, and its children. */
-export function killTree(pid: number | undefined): void {
-  if (!pid) return;
-  try {
-    if (isWin) execFileSync(system32('taskkill.exe'), ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
-    else process.kill(-pid, 'SIGKILL');
-  } catch { /* already gone */ }
 }
 
 /**
