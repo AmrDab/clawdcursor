@@ -8,7 +8,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 vi.mock('../core/banner', () => ({
-  controlBanner: { overlayPids: () => [], showPaused: vi.fn(), showRunning: vi.fn(), canShow: () => true, touch: vi.fn() },
+  controlBanner: { overlayPids: () => [], showPaused: vi.fn(), showRunning: vi.fn(), canShow: () => true, whenCanShow: async () => true, touch: vi.fn() },
 }));
 
 import { __setControlDirForTests, __setForegroundReaderForTests, isGuardRefusal } from '../core/control';

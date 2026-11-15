@@ -330,6 +330,15 @@ class ControlBanner {
   }
 
   /**
+   * canShow(), waiting on macOS for the drawer's first compile (after an install or an upgrade): until it is built
+   * canShow() is false, and a pause asked for meanwhile said "no on-screen prompt" (Mac run, 2026-11-15).
+   */
+  async whenCanShow(): Promise<boolean> {
+    if (this.enabled && process.platform === 'darwin' && !this.canShow()) await macOverlayBinary.compile(macScript());
+    return this.canShow();
+  }
+
+  /**
    * Switch to the paused form (blue outline + instruction + Resume / End task) and
    * keep it up until showRunning(), regardless of pin or idle timers.
    */
