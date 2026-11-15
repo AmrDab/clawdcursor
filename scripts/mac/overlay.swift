@@ -108,7 +108,12 @@ func takeKeyboard(_ panel: PillPanel, _ field: NSView) {
     panel.makeFirstResponder(field)
     DispatchQueue.main.async {
         guard typingReply, !panel.isKeyWindow else { return }
+        // activate() is only in the macOS 14 SDK (Swift 5.9 / Xcode 15); an older toolchain (macOS 12) must still build.
+        #if compiler(>=5.9)
         if #available(macOS 14.0, *) { NSApp.activate() } else { NSApp.activate(ignoringOtherApps: true) }
+        #else
+        NSApp.activate(ignoringOtherApps: true)
+        #endif
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(field)
     }
