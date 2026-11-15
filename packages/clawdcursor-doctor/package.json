@@ -1,0 +1,32 @@
+{
+  "name": "clawdcursor-doctor",
+  "version": "2.0.0",
+  "description": "Optional developer add-on for clawdcursor: `clawdcursor doctor --setup` sets up the test agent behind `clawdcursor task`. clawdcursor downloads it on first use, after asking.",
+  "homepage": "https://clawdcursor.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AmrDab/clawdcursor.git",
+    "directory": "packages/clawdcursor-doctor"
+  },
+  "author": "Amr Dabbas",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "files": [
+    "dist/",
+    "!dist/**/*.map"
+  ],
+  "scripts": {
+    "build": "tsc -p ."
+  },
+  "peerDependencies": {
+    "clawdcursor": "2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "clawdcursor": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
