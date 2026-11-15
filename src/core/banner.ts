@@ -65,7 +65,7 @@ const PAUSED_OUTLINE = '#3b82f6'; // blue — "your turn" (the drawers have thei
  * Which form of the overlay to draw: running (default) or paused for the user. `activity` is what the running pill says
  * ("Typing in Edge"); `app` names the agent's window on the paused card.
  */
-export interface OverlayMode { paused?: PauseInfo; activity?: string; app?: string }
+export interface OverlayMode { paused?: PauseInfo; activity?: string; app?: string; pillPid?: number }
 
 // What the running pill says the agent is doing, per guarded input method (pointer-guard.ts). `true`: the method read
 // the window in front first, so the app is known; the others (accessibility, the browser driver) only say what they do.
@@ -108,6 +108,9 @@ export function activityLabel(method: string, processName?: string, appName?: st
   const app = a[1] ? appLabel(processName, appName) : undefined;
   return app ? `${a[0]} in ${app}` : a[0];
 }
+/** The outline's environment on Windows: the pill's pid, so the beam raises itself over every window but the pill (window-outline.ps1). */
+export const outlineEnv = (mode: OverlayMode): NodeJS.ProcessEnv =>
+  mode.pillPid ? { ...process.env, CLAWD_PILL_PID: String(mode.pillPid) } : { ...process.env };
 type Spawner = (mode: OverlayMode) => ChildProcess;
 
 /** One line to an overlay's stdin; false when it has none or is gone. */
@@ -251,7 +254,7 @@ class ControlBanner {
     }
     const script = path.join(getPackageRoot(), 'scripts', 'window-outline.ps1');
     return spawn(powershellExe(), psArgs(script, flags),
-      psOpts({ stdio, windowsHide: true }));
+      psOpts({ stdio, windowsHide: true, env: outlineEnv(mode) }));
   };
 
   /**
@@ -460,7 +463,7 @@ class ControlBanner {
     if (this.outlineChild) return;
     let child: ChildProcess;
     try {
-      child = this.outlineSpawner({ paused: this.paused ?? undefined });
+      child = this.outlineSpawner({ paused: this.paused ?? undefined, pillPid: this.child?.pid }); // show() spawns the pill first
     } catch {
       return; // cosmetic — never let it break control
     }

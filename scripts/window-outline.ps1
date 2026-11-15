@@ -88,8 +88,13 @@
 #   WS_EX_NOACTIVATE   0x08000000  never steals focus (agent keeps typing)
 #   WS_EX_TOOLWINDOW   0x00000080  no taskbar / alt-tab entry
 #   WS_EX_TOPMOST      0x00000008  stays above the windows on screen (only an always-on-top window can be put over
-#                                  the window in front by another process). The pill raises itself again on its own
-#                                  clock, so it stays above the beam where the two meet.
+#                                  the window in front by another process). The strips span the whole monitor, taskbar
+#                                  included, and the taskbar or another always-on-top window goes above them when it is
+#                                  activated: so every 100 ms a strip with a visible foreign window above it is raised
+#                                  again (SetWindowPos HWND_TOPMOST, no size, no move, no activation, no show). The pill
+#                                  (banner.ps1) raises itself over any "clawdcursor beam" above it, so windows of the
+#                                  pill's process (CLAWD_PILL_PID, set by the parent) do not count as foreign: the beam
+#                                  stays under the pill where the two meet, and the two never swap.
 #
 # The Windows drawer; macOS and Linux use scripts/mac/overlay.swift and scripts/linux/overlay.py (`outline`).
 
@@ -127,6 +132,7 @@ public class BeamStrip : Form {
     [DllImport("gdi32.dll")] static extern IntPtr CreateDIBSection(IntPtr dc, ref BMI info, uint usage, out IntPtr bits, IntPtr section, uint offset);
     [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc, IntPtr o);
     [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr o);
+    [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr dc);
 
     public static bool Capturable;   // Windows could not keep a strip out of captures
 
@@ -159,7 +165,7 @@ public class BeamStrip : Form {
 
     // Where the strip is, relative to the outlined frame, and its size (CSS px); a zero size: not used.
     public int X, Y, W, H;
-    IntPtr dc, bitmap, bits, native;
+    IntPtr dc, bitmap, bits, native, stock;   // stock: the bitmap the DC came with
 
     public void SetSize(int x, int y, int w, int h) {
         X = x; Y = y;
@@ -173,9 +179,21 @@ public class BeamStrip : Form {
             BMI info = new BMI();
             info.Size = 40; info.Width = W; info.Height = -H; info.Planes = 1; info.BitCount = 32;   // top-down, 32-bit
             bitmap = CreateDIBSection(dc, ref info, 0, out bits, IntPtr.Zero, 0);
-            if (bitmap != IntPtr.Zero) SelectObject(dc, bitmap);
+            if (bitmap != IntPtr.Zero) { IntPtr was = SelectObject(dc, bitmap); if (stock == IntPtr.Zero) stock = was; }
         }
         if (old != IntPtr.Zero) DeleteObject(old);
+    }
+
+    // The DC, the bitmap and the buffer are ours to free (a monitor unplugged disposes its strips).
+    protected override void Dispose(bool disposing) {
+        if (dc != IntPtr.Zero) {
+            if (stock != IntPtr.Zero) SelectObject(dc, stock);   // the bitmap must not be selected when it is deleted
+            if (bitmap != IntPtr.Zero) DeleteObject(bitmap);
+            DeleteDC(dc);
+            dc = IntPtr.Zero; bitmap = IntPtr.Zero; bits = IntPtr.Zero; stock = IntPtr.Zero;
+        }
+        if (native != IntPtr.Zero) { Marshal.FreeHGlobal(native); native = IntPtr.Zero; }
+        base.Dispose(disposing);
     }
 
     // The strip to its place on screen, in physical pixels (the caller is per-monitor aware; Windows turns the point
@@ -649,8 +667,15 @@ public class WindowOutline {
     [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
     [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr dc, IntPtr clip, MonitorEnumProc proc, IntPtr data);
     [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint action, uint param, out bool value, uint flags);
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hWnd, uint cmd);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int max);
     [DllImport("shcore.dll")] static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint x, out uint y);
 
+    static readonly uint ownPid = (uint)Process.GetCurrentProcess().Id;
+    static readonly uint pillPid = ReadPillPid();   // the pill's process (CLAWD_PILL_PID), 0 when not given
+    static uint ReadPillPid() { uint n; return uint.TryParse(Environment.GetEnvironmentVariable("CLAWD_PILL_PID"), out n) ? n : 0; }
     long hideUntil;                         // DateTime ticks (UTC); written by the stdin thread
     bool paused;
     bool still;                 // Windows is set to show no animations: one still frame
@@ -747,7 +772,7 @@ public class WindowOutline {
         while (displays.Count > rects.Count) {   // a monitor unplugged
             Display gone = displays[displays.Count - 1];
             displays.RemoveAt(displays.Count - 1);
-            foreach (BeamStrip s in gone.Strips) s.Close();
+            foreach (BeamStrip s in gone.Strips) s.Dispose();   // Close() would leave a strip that was never shown undisposed
         }
         while (displays.Count < rects.Count) displays.Add(NewDisplay());
         for (int i = rects.Count; i < displays.Count; i++) Hide(displays[i]);
@@ -759,10 +784,11 @@ public class WindowOutline {
         for (int i = 0; i < displays.Count; i++) {
             Display d = displays[i];
             RECT r = rects[i];
-            bool moved = !d.Shown || still != wasStill || r.Left != d.Left || r.Top != d.Top || r.Right != d.Right || r.Bottom != d.Bottom;
-            if (!moved) continue;
+            double zoom = ZoomOf(screens[i]);   // a scale change with the same resolution lays out again too
+            bool moved = !d.Shown || still != wasStill || zoom != d.Zoom || r.Left != d.Left || r.Top != d.Top || r.Right != d.Right || r.Bottom != d.Bottom;
+            if (!moved) { RaiseIfCovered(d); continue; }
             if (!d.Shown) d.ShownAt = clock.Elapsed.TotalSeconds;
-            d.Zoom = ZoomOf(screens[i]);
+            d.Zoom = zoom;
             // In CSS px from here: the monitor as a page at this zoom would measure it.
             int w = Math.Max(1, (int)Math.Round((r.Right - r.Left) / d.Zoom)), h = Math.Max(1, (int)Math.Round((r.Bottom - r.Top) / d.Zoom));
             string key = w + "x" + h;
@@ -781,6 +807,28 @@ public class WindowOutline {
                 else ShowWindow(s.Handle, 0);
             }
             d.Shown = true;
+        }
+    }
+
+    // A strip with a visible window of another process above it (the taskbar, an always-on-top window) goes back to the
+    // top, without activation. Windows of this process (the strips) and of the pill's are not foreign. GW_HWNDPREV 3
+    // walks up the z-order; HWND_TOPMOST (-1); SWP_NOSIZE 0x01 | SWP_NOMOVE 0x02 | SWP_NOACTIVATE 0x10.
+    void RaiseIfCovered(Display d) {
+        System.Text.StringBuilder name = new System.Text.StringBuilder(20);
+        foreach (BeamStrip s in d.Strips) {
+            if (s.W <= 0 || s.H <= 0) continue;
+            IntPtr h = GetWindow(s.Handle, 3);
+            for (int i = 0; h != IntPtr.Zero && i < 1000; i++, h = GetWindow(h, 3)) {
+                if (!IsWindowVisible(h)) continue;
+                uint pid;
+                GetWindowThreadProcessId(h, out pid);
+                if (pid == ownPid || (pillPid != 0 && pid == pillPid)) continue;
+                name.Length = 0;
+                GetWindowText(h, name, 20);
+                if (name.ToString() == "clawdcursor beam") continue;   // another clawdcursor's beam
+                SetWindowPos(s.Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013u);
+                break;
+            }
         }
     }
 

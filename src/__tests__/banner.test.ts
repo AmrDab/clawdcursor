@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
-import { controlBanner, outlineFlags } from '../core/banner';
+import { controlBanner, outlineFlags, outlineEnv } from '../core/banner';
 import { stopControl, __setControlDirForTests } from '../core/control';
 import type { ChildProcess } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
@@ -201,6 +201,17 @@ describe('the beam around the display', () => {
     expect(outlineFlags(true, 'win32')).toEqual(['-Color', '#3b82f6', '-Paused']);
     expect(outlineFlags(true, 'darwin')).toEqual(['--color', '#3b82f6', '--paused']);
     expect(outlineFlags(true, 'linux')).toEqual(['--color', '#3b82f6', '--paused']);
+  });
+
+  it('the outline is told the pill\'s pid (CLAWD_PILL_PID) so the beam never fights the pill for the top', () => {
+    const modes: { pillPid?: number }[] = [];
+    controlBanner.__setSpawnerForTests(() => { const c = new FakeChild(); (c as unknown as { pid: number }).pid = 4242; spawned.push(c); return c as unknown as ChildProcess; });
+    controlBanner.__setOutlineSpawnerForTests(mode => { modes.push(mode); const c = new FakeChild(); outlines.push(c); return c as unknown as ChildProcess; });
+    controlBanner.pin();
+    controlBanner.showPaused({ id: 1, message: 'Sign in', since: 0 }, () => {});
+    expect(modes.map(m => m.pillPid)).toEqual([4242, 4242]);
+    expect(outlineEnv({ pillPid: 4242 }).CLAWD_PILL_PID).toBe('4242');
+    expect(outlineEnv({}).CLAWD_PILL_PID).toBeUndefined();
   });
 
   it('the paused form replaces the running outline process, and starts with nothing sent', () => {
@@ -404,7 +415,11 @@ describe('no full-screen glow', () => {
     expect(ps).toContain('IntPtr aware = SetThreadDpiAwarenessContext(new IntPtr(-4));   // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2');
     expect(ps).toContain('SetThreadDpiAwarenessContext([IntPtr](-1))');
     // Re-placed only when a monitor's bounds changed, never on every poll.
-    expect(ps).toContain('if (!moved) continue;');
+    expect(ps).toContain('if (!moved) { RaiseIfCovered(d); continue; }');
+    expect(ps).toContain('zoom != d.Zoom');
+    // A foreign window above a strip: raised again without activating or showing; the pill's windows do not count.
+    expect(ps).toContain('SetWindowPos(s.Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013u);');
+    expect(ps).toContain('CLAWD_PILL_PID');
     // HIDE acts on receipt, not on the next poll: a capture follows HIDE after 90 ms. TARGET is ignored.
     expect(ps).toContain('sync.BeginInvoke((Action)Follow)');
     expect(ps).not.toContain('"TARGET")');

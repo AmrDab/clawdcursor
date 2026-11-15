@@ -335,7 +335,7 @@ Restart the host afterwards so it starts the new server. `clawdcursor versions` 
 
 Earlier releases are in the [changelog](CHANGELOG.md).
 
-**Next: 2.1.** One standard benchmark across app types, OSes and models becomes the release gate, with five general mechanisms behind it: honest results, target resolution, perception without a tree, screen geometry and timing. The first three are merged, and so are an opt-in confirm mode ([#373](https://github.com/AmrDab/clawdcursor/issues/373)), `clawdcursor update`, anonymous error reports and an amber beam around the agent's window in place of the thin outline. See the [2.1 milestone](https://github.com/AmrDab/clawdcursor/milestone/1).
+**Next: 2.1.** One standard benchmark across app types, OSes and models becomes the release gate, with five general mechanisms behind it: honest results, target resolution, perception without a tree, screen geometry and timing. The first three are merged, and so are an opt-in confirm mode ([#373](https://github.com/AmrDab/clawdcursor/issues/373)), `clawdcursor update`, anonymous error reports and a gold beam along the edges of every monitor in place of the thin outline, blue and still while a pause asks the user. See the [2.1 milestone](https://github.com/AmrDab/clawdcursor/milestone/1).
 
 ---
 
