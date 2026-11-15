@@ -1,0 +1,7 @@
+{"type":"thread.started","thread_id":"01a1de02-61b6-7a83-855c-6e87445f4e66"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I’ll call the system tool for the time.\n"}}
+{"type":"item.started","item":{"id":"item_1","type":"mcp_tool_call","server":"clawdcursor","tool":"system","arguments":{"action":"system_time"},"result":null,"error":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"mcp_tool_call","server":"clawdcursor","tool":"system","arguments":{"action":"system_time"},"result":{"content":[{"type":"text","text":"{\"iso\":\"2026-11-15T07:01:09.974Z\",\"localString\":\"Sun Nov 15 2026 07:01:09 GMT+0000 (Coordinated Universal Time)\",\"epochMs\":1794726069974,\"timezone\":\"UTC\"}"}],"structured_content":null},"error":null,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"The tool returned November 15, 2026, at 07:01:09 UTC (UTC).\n\nPASS: Retrieved the system time."}}
+{"type":"turn.completed","usage":{"input_tokens":41818,"cached_input_tokens":36608,"cache_write_input_tokens":0,"output_tokens":199,"reasoning_output_tokens":0}}

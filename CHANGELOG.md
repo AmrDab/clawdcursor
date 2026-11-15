@@ -5,6 +5,25 @@ All notable changes to Clawd Cursor will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Testing clawdcursor on its own: `clawdcursor task`, `clawdcursor logs` and `clawdcursor doctor --setup`.** For
+  developers who want to see an agent work with clawdcursor as its only tool. Two optional add-ons, downloaded from npm
+  on first use and only after asking: `clawdcursor-agent` and `clawdcursor-doctor`, installed into
+  `~/.clawdcursor/addons` at clawdcursor's own version (a different version is offered as an update). With no terminal,
+  the exact install command is printed and nothing is downloaded; `--yes` installs without asking.
+  - `clawdcursor task "<task>"` runs your installed Claude Code or Codex on your own sign-in (no API key), with this
+    clawdcursor as its only MCP server and none of its built-in tools, settings or plugins. It prints each tool call and
+    its result, ends on the agent's PASS/FAIL line (exit 0 / 1, 130 on Ctrl-C) and keeps the run in
+    `~/.clawdcursor/runs/`. `--with anthropic` and `--with openai-compatible` (OpenAI, Ollama, LM Studio, OpenRouter)
+    are there for API keys.
+  - `clawdcursor logs` shows the day log readably: tool calls with outcome, result code and step timings, and stop,
+    pause, refusals and server start and exit. `-f`, `--session <id|last>`, `--tool`, `--errors`, `--since 10m`;
+    `--run last` puts a `task` run and its clawdcursor session on one timeline.
+  - `clawdcursor doctor` keeps its checks and, in a terminal, offers to set up the test agent at the end;
+    `doctor --setup` goes straight there: it finds Claude Code and Codex and their sign-in, picks the default runner and
+    model, can add an API runner (the key stored readable only by you, or the name of its variable), and makes a test
+    call that only reads the system time.
+  - The day log's lines now carry the `pid` of the server that wrote them, and a session file's header carries the
+    `task` run that started its server, so `logs --session` and `logs --run` can tell servers apart.
 - **The outline is a border beam, and the pill has a thinking orb** (#392). The border around the agent's window is
   now the Border Beam of [libraries.dev](https://libraries.dev/beam), in clawdcursor's colours: an **amber** beam that
   goes round the window's edge every two seconds while the agent works, with a thin bright stroke and a soft glow just
