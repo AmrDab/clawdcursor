@@ -314,10 +314,10 @@ describe('no full-screen glow', () => {
     expect(read('scripts', 'banner.ps1')).toContain('MIT License, Copyright (c) 2026 Jakub');
   });
 
-  // The owner's pick (#392): <BorderBeam size="pulse-inner" borderRadius={16}>, the library's defaults otherwise
-  // (colorVariant "colorful", theme "dark", duration 2.3 s). The three drawers carry the library's numbers; these keep
-  // them the same everywhere.
-  it('every drawer draws pulse-inner in colorful (paused: ocean), radius 16, 2.3 s, with the same numbers', () => {
+  // The owner's pick (#392): <BorderBeam size="pulse-inner" colorVariant="gold" borderRadius={23} duration={3.9}
+  // hueRange={46}>, the library's defaults otherwise (theme "dark"). The three drawers carry the library's numbers;
+  // these keep them the same everywhere.
+  it('every drawer draws pulse-inner in gold (paused: ocean), radius 23, 3.9 s, with the same numbers', () => {
     const ps = read('scripts', 'window-outline.ps1');
     const swift = read('scripts', 'mac', 'overlay.swift');
     const py = read('scripts', 'linux', 'overlay.py');
@@ -328,14 +328,14 @@ describe('no full-screen glow', () => {
       const body = src.slice(start + from.length, Math.min(...ends));
       return (body.match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
     };
-    // G.colorful and G.ocean (index.es.js), in order.
-    const colorful = [255, 50, 100, 40, 140, 255, 50, 200, 80, 30, 185, 170, 100, 70, 255, 40, 140, 255, 255, 120, 40, 240, 50, 180, 180, 40, 240];
+    // G.gold and G.ocean (index.es.js), in order.
+    const gold = [240, 190, 60, 255, 210, 90, 225, 165, 40, 250, 200, 70, 255, 225, 120, 230, 175, 50, 245, 205, 85, 215, 155, 35, 255, 215, 100];
     const ocean = [100, 80, 220, 60, 120, 255, 80, 100, 200, 50, 140, 220, 120, 80, 255, 70, 130, 255, 140, 100, 240, 90, 110, 230, 130, 70, 255];
-    expect(numbers(ps, 'Colorful = {')).toEqual(colorful);
+    expect(numbers(ps, 'Gold = {')).toEqual(gold);
     expect(numbers(ps, 'Ocean = {')).toEqual(ocean);
-    expect(numbers(swift, 'let colorful: [[Double]] = ').slice(0, 27)).toEqual(colorful);
+    expect(numbers(swift, 'let gold: [[Double]] = ').slice(0, 27)).toEqual(gold);
     expect(numbers(swift, 'let ocean: [[Double]] = ').slice(0, 27)).toEqual(ocean);
-    expect(numbers(py, 'BEAM_COLORFUL = ').slice(0, 27)).toEqual(colorful);
+    expect(numbers(py, 'BEAM_GOLD = ').slice(0, 27)).toEqual(gold);
     expect(numbers(py, 'BEAM_OCEAN = ').slice(0, 27)).toEqual(ocean);
     // Per colour: its place (G.*.border pos), the ring's size (its size, ao()), the inner glow's (Je, to()), region and
     // quarter (Fe); and the bloom's blobs (eo, Re()): colour, size. In the same order everywhere.
@@ -349,29 +349,31 @@ describe('no full-screen glow', () => {
     expect(numbers(swift, 'let bloomBlobs: [[Double]] = ').slice(0, bloom.length)).toEqual(bloom);
     expect(numbers(py, 'BEAM_BLOB = ').slice(0, blob.length)).toEqual(blob);
     expect(numbers(py, 'BEAM_BLOOM = ').slice(0, bloom.length)).toEqual(bloom);
-    // ge("pulse-inner", dark, 2.3) and pe["pulse-inner"].dark.
-    expect(ps).toContain('public const double Duration = 2.3, Radius = 16, HueSeconds = 16,');
+    // ge("pulse-inner", dark, 3.9) (its periods times 3.9 / 2.3) and pe["pulse-inner"].dark.
+    expect(ps).toContain('public const double Duration = 3.9, Radius = 23, HueSeconds = 16,');
     expect(ps).toContain('const double SP = 0.28, DR = 33, OP = 0.48, GH = 0.34;');
     expect(ps).toContain('BS = 1.9 * Duration / 2.3, SS = 2.6 * Duration / 2.3, GHS = 2.4 * Duration / 2.3;');
     expect(ps).toContain('StrokeOpacity = 1.54, InnerOpacity = 0.44, BloomOpacity = 0.66, Brightness = 0.75, Saturation = 1.2;');
-    expect(swift).toContain('let duration = 2.3, sp = 0.28, dr = 33.0, op = 0.48, gh = 0.34');
+    expect(swift).toContain('let duration = 3.9, sp = 0.28, dr = 33.0, op = 0.48, gh = 0.34');
+    expect(swift).toContain('let band = 28.0, radius = 23.0');
     expect(swift).toContain('let bs = 1.9 * duration / 2.3, ss = 2.6 * duration / 2.3, ghs = 2.4 * duration / 2.3');
-    expect(py).toContain('BEAM_DURATION = 2.3');
-    expect(py).toContain('BEAM_RADIUS = 16');
+    expect(py).toContain('BEAM_DURATION = 3.9');
+    expect(py).toContain('BEAM_RADIUS = 23');
     expect(py).toContain('_SP, _DR, _OP, _GH = 0.28, 33.0, 0.48, 0.34');
     expect(py).toContain('_BS, _SS, _GHS = 1.9 * BEAM_DURATION / 2.3, 2.6 * BEAM_DURATION / 2.3, 2.4 * BEAM_DURATION / 2.3');
     for (const src of [swift, py]) {
       expect(src).toContain('0.76 * 0.52 * 0.66');   // the bloom: alpha 1 - .48 / 2, the inside half of its blur, opacity .66
       expect(src).toContain('0.75 * ');             // brightness(.75)
     }
-    // A full turn of the hue every 16 s, not a drift either way.
+    // A full turn of the hue every 16 s, not a drift either way: hueRange (46) does nothing for the pulse sizes, in the
+    // web library (io()) or its React Native port (pulseHueDegrees()).
     expect(ps).toContain('hue = moving ? 2 * Math.PI * (seconds / HueSeconds % 1) : 0;');
     expect(swift).toContain('(0...hueSteps).map { 360 * Double($0) / Double(hueSteps) }');
     expect(swift).toContain('a.duration = 16');
     expect(py).toContain('hue = 360 * (t / 16 % 1)');
     // The paused form uses the blues.
-    expect(swift).toContain('let palette = paused ? ocean : colorful');
-    expect(py).toContain('palette = BEAM_OCEAN if paused else BEAM_COLORFUL');
+    expect(swift).toContain('let palette = paused ? ocean : gold');
+    expect(py).toContain('palette = BEAM_OCEAN if paused else BEAM_GOLD');
     expect(py).toContain("run_outline(argv[argv.index('--color') + 1] if '--color' in argv else '#ff7a45', '--paused' in argv)");
   });
 

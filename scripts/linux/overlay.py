@@ -511,16 +511,16 @@ def run_pill():
         layout()
 
 
-# The border beam (#392): Border Beam as <BorderBeam size="pulse-inner" borderRadius={16}> - the library's defaults
-# for the rest: colorVariant "colorful", theme "dark", duration 2.3 s - by Jakub Antalik (libraries.dev,
+# The border beam (#392): Border Beam as <BorderBeam size="pulse-inner" colorVariant="gold" borderRadius={23}
+# duration={3.9} hueRange={46}> - the library's defaults for the rest, theme "dark" - by Jakub Antalik (libraries.dev,
 # github.com/Jakubantalik/Libraries.dev, packages/border-beam), MIT License, Copyright (c) 2026 Jakub Antalik. The
 # library's numbers and its licence notice in full are at the top of scripts/window-outline.ps1.
 # Inside the window's edge: an inner glow of coloured blobs (and four faint white ones at the corners) shown within
-# 28 px of the edge, a 1 px ring of radius 16 lit by the same blobs, and a bloom on that ring; the blobs breathe (size,
+# 28 px of the edge, a 1 px ring of radius 23 lit by the same blobs, and a bloom on that ring; the blobs breathe (size,
 # place, opacity) on the library's periods and the colours turn the whole wheel every 16 s. Here each blob is a cairo
 # radial gradient and the glow's 28 px mask a gradient (a bilinear mesh in the corners), drawn 10 times a second.
-BEAM_DURATION = 2.3
-BEAM_RADIUS = 16
+BEAM_DURATION = 3.9
+BEAM_RADIUS = 23
 BEAM_BAND = 28  # the inner glow's mask: 1 at the edge, 0 this far in
 _SP, _DR, _OP, _GH = 0.28, 33.0, 0.48, 0.34
 _BS, _SS, _GHS = 1.9 * BEAM_DURATION / 2.3, 2.6 * BEAM_DURATION / 2.3, 2.4 * BEAM_DURATION / 2.3
@@ -543,8 +543,8 @@ BEAM_BLOB = [(33, -7.4, 70, 40, 65, 35, 1, 0), (12, -5, 60, 35, 55, 30, 2, 0), (
              (93.9, 0, 74, 32, 69, 28, 1, 1), (100, 27.1, 26, 42, 22, 38, 2, 1), (100, 27.1, 52, 48, 47, 44, 3, 1)]
 # The bloom's blobs: colour, reach x, y (px), at that colour's place. They do not breathe.
 BEAM_BLOOM = [(0, 84, 48), (1, 72, 42), (2, 48, 84), (4, 216, 38), (5, 102, 31), (6, 89, 38), (8, 62, 58)]
-BEAM_COLORFUL = [(255, 50, 100), (40, 140, 255), (50, 200, 80), (30, 185, 170), (100, 70, 255), (40, 140, 255),
-                 (255, 120, 40), (240, 50, 180), (180, 40, 240)]
+BEAM_GOLD = [(240, 190, 60), (255, 210, 90), (225, 165, 40), (250, 200, 70), (255, 225, 120), (230, 175, 50),
+             (245, 205, 85), (215, 155, 35), (255, 215, 100)]
 BEAM_OCEAN = [(100, 80, 220), (60, 120, 255), (80, 100, 200), (50, 140, 220), (120, 80, 255), (70, 130, 255),
               (140, 100, 240), (90, 110, 230), (130, 70, 255)]
 
@@ -573,7 +573,7 @@ def _filtered(rgb, degrees):
 def draw_beam(cr, w, h, t, palette):
     """The beam inside a w x h frame at (0, 0), as it is `t` seconds in."""
     rc, band = min(BEAM_RADIUS, w / 2, h / 2), min(BEAM_BAND, w / 2, h / 2)
-    hue = 360 * (t / 16 % 1)  # the whole wheel every 16 s
+    hue = 360 * (t / 16 % 1)  # the whole wheel every 16 s (hueRange does nothing for the pulse sizes)
     colours = [_filtered(c, hue) for c in palette]
     o = [_osc(k, t) for k in range(len(BEAM_OSC))]
 
@@ -651,7 +651,7 @@ def draw_beam(cr, w, h, t, palette):
         cr.mask(pattern)
         cr.restore()
 
-    # The ring (the inner 1 px, radius 16; opacity 1.54, which a browser takes as 1) and the bloom over it: its seven
+    # The ring (the inner 1 px, radius 23; opacity 1.54, which a browser takes as 1) and the bloom over it: its seven
     # blobs at alpha .76, at the half of their 8 px blur that falls inside the window (.52), opacity .66.
     if w <= 2 or h <= 2:
         cr.restore()
@@ -680,7 +680,7 @@ def run_outline(color, paused):
     settings = Gtk.Settings.get_default()
     # Paused: the blues, still. Where the desktop is set to show no animations: one still frame.
     still = paused or (settings is not None and not settings.get_property('gtk-enable-animations'))
-    palette = BEAM_OCEAN if paused else BEAM_COLORFUL
+    palette = BEAM_OCEAN if paused else BEAM_GOLD
     state = {'xid': 0, 'rect': None, 'hidden_until': 0.0, 'buf': b'', 'sized': None, 'shadow': (0, 0, 0, 0),
              'start': time.monotonic()}
 

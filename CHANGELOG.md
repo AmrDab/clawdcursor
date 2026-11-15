@@ -7,13 +7,14 @@ All notable changes to Clawd Cursor will be documented in this file.
 ### Added
 - **The outline is a border beam, and the pill has a thinking orb** (#392). The border around the agent's window is
   now the Border Beam of [libraries.dev](https://libraries.dev/beam) as `<BorderBeam size="pulse-inner"
-  borderRadius={16}>`, with the library's defaults for the rest (the "colorful" palette, dark theme, 2.3 s): while the
-  agent works, coloured blobs **inside** the window's edge - a glow 28 px deep, a thin ring and a bloom on it - that
-  breathe in size, place and brightness while their colours turn the whole wheel every 16 s; while the agent waits for
+  colorVariant="gold" borderRadius={23} duration={3.9} hueRange={46}>`, with the library's defaults for the rest (dark
+  theme): while the agent works, golden blobs **inside** the window's edge - a glow 28 px deep, a thin ring and a bloom
+  on it - that breathe in size, place and brightness while their colours turn the whole wheel every 16 s (`hueRange`
+  does nothing for the pulse sizes, in the web library or its React Native port); while the agent waits for
   you, the same in the library's "ocean" **blues**, held still. The running pill shows the "working" Thinking Orb
   (particles on tilted orbits, in amber) in place of the blinking dot.
   - The beam lies over the window's edge, 28 px deep, and nothing over the rest of it, so it shows the same on a
-    normal, a maximized and a full-screen window. The ring's corners have the library's radius 16, rounder than a
+    normal, a maximized and a full-screen window. The ring's corners have a radius of 23, rounder than a
     window's own (8 px on Windows 11), so at each corner the ring cuts across the window's corner.
   - The library's blobs keep their size in px whatever the box, at places in % of it: on a large window they light
     patches of the edge (about where the library puts them on a card), not all of it.

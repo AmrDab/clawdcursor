@@ -441,7 +441,7 @@ MIT. See [LICENSE](LICENSE).
 
 Built on the Model Context Protocol SDK, nut-js, Playwright, sharp, and the AT-SPI, UI Automation and AX accessibility APIs.
 
-The outline around the agent's window follows **Border Beam** (size `pulse-inner`, `colorful` palette) and the pill's orb
+The outline around the agent's window follows **Border Beam** (size `pulse-inner`, `gold` palette) and the pill's orb
 **Thinking Orbs**, both by Jakub Antalik ([libraries.dev](https://libraries.dev),
 [github.com/Jakubantalik/Libraries.dev](https://github.com/Jakubantalik/Libraries.dev)), MIT License, Copyright (c) 2026
 Jakub Antalik. Their values (palettes, timings, opacities) are used in `scripts/window-outline.ps1`,

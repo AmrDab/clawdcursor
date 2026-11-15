@@ -7,7 +7,7 @@
  *     is working in (control.ts workingWindow), and nothing else: no fill,
  *     nothing on the rest of the screen, nothing at all while that window is not
  *     in front. It is the "border beam" of libraries.dev (#392), size
- *     pulse-inner in its "colorful" palette: coloured blobs that breathe just
+ *     pulse-inner in its "gold" palette: golden blobs that breathe just
  *     inside the window's edge, a thin ring and a glow 28 px deep (the paused
  *     form is the same in blue, still; still too where the OS reduces motion),
  *     over a maximized or full-screen window as over any other. When the
@@ -31,7 +31,7 @@
  * Paused mode (pause-gate.ts): when an agent hands the desktop to the user at a
  * roadblock, both overlays are respawned in their paused form — a BLUE outline and
  * a pill that says what to do, with Resume / End task. The pill prints
- * BANNER_RESUME / BANNER_END; showRunning() swaps back to the running (colorful) form. The card can add choice buttons
+ * BANNER_RESUME / BANNER_END; showRunning() swaps back to the running (gold) form. The card can add choice buttons
  * (CLAWD_BANNER_CHOICES, a JSON array of strings; a click prints BANNER_CHOICE <index>) and a text box
  * (CLAWD_BANNER_INPUT, JSON {placeholder?, multiline?}; sent as BANNER_REPLY like "Something else").
  *

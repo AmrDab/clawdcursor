@@ -36,8 +36,8 @@
 //                  ("ocean"), still. With Reduce Motion on: still. (--color is accepted
 //                  and not used.)
 //
-// The pill's orb is a port of Thinking Orbs, and the beam is Border Beam (size "pulse-inner", borderRadius 16, the
-// library's defaults otherwise: colorVariant "colorful", duration 2.3 s), by Jakub Antalik (libraries.dev,
+// The pill's orb is a port of Thinking Orbs, and the beam is Border Beam (size "pulse-inner", colorVariant "gold",
+// borderRadius 23, duration 3.9 s, the library's defaults otherwise), by Jakub Antalik (libraries.dev,
 // github.com/Jakubantalik/Libraries.dev, packages/border-beam and packages/thinking-orbs), MIT License,
 // Copyright (c) 2026 Jakub Antalik. The recipe table and the licence notice in full are at the top of
 // scripts/window-outline.ps1, the Windows drawer.
@@ -677,12 +677,13 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         return frame
     }
 
-    /// The border beam (#392): Border Beam as <BorderBeam size="pulse-inner" borderRadius={16}> - the library's
-    /// defaults for the rest: colorVariant "colorful", theme "dark", duration 2.3 s - by Jakub Antalik (libraries.dev,
+    /// The border beam (#392): Border Beam as <BorderBeam size="pulse-inner" colorVariant="gold" borderRadius={23}
+    /// duration={3.9} hueRange={46}> - the library's defaults for the rest, theme "dark" - by Jakub Antalik (libraries.dev,
     /// MIT; the library's numbers and its licence notice are at the top of scripts/window-outline.ps1).
     /// Inside the window's edge: an inner glow of coloured blobs (and faint white ones at the corners) within 28 pt of
-    /// the edge, a 1 pt ring of radius 16 lit by the same blobs, and a bloom on that ring; the blobs breathe (size,
-    /// place, opacity) on the library's periods and the colours turn the whole wheel every 16 s.
+    /// the edge, a 1 pt ring of radius 23 lit by the same blobs, and a bloom on that ring; the blobs breathe (size,
+    /// place, opacity) on the library's periods and the colours turn the whole wheel every 16 s (hueRange does
+    /// nothing for the pulse sizes, in the web library or its React Native port).
     /// Drawn for power (#414: window-sized layers with masks and filters once took 55% of an M1's GPU):
     ///   - each blob is one CAGradientLayer only as big as the blob: radial, half an ellipse lying inside the edge
     ///     whose stops are the glow there (the blob times the 28 pt mask) averaged round each of its rings, or for the
@@ -699,7 +700,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         let paused = CommandLine.arguments.contains("--paused")
         let still = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let turning = !paused && !still
-        let band = 28.0, radius = 16.0
+        let band = 28.0, radius = 23.0
 
         let win = NSWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: false)
         win.isOpaque = false
@@ -721,7 +722,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         // Border Beam's numbers (the table is in window-outline.ps1). The oscillators: from, to, period, delay - per
         // blob region 1..3 its width, height, x, y; then the glow's height; then the opacity of each quarter (top-left,
         // top-right, bottom-left, bottom-right).
-        let duration = 2.3, sp = 0.28, dr = 33.0, op = 0.48, gh = 0.34
+        let duration = 3.9, sp = 0.28, dr = 33.0, op = 0.48, gh = 0.34
         let bs = 1.9 * duration / 2.3, ss = 2.6 * duration / 2.3, ghs = 2.4 * duration / 2.3
         let osc: [[Double]] = [
             [1 - sp, 1 + sp * 1.1, ss * 0.9, 0], [1 + sp * 0.9, 1 - sp * 0.85, ss * 1.26, 0], [-dr, dr * 0.9, bs * 1.6, 0], [dr * 0.55, -dr * 0.7, bs * 1.6, 0],
@@ -737,11 +738,11 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             [93.9, 0, 74, 32, 69, 28, 1, 1], [100, 27.1, 26, 42, 22, 38, 2, 1], [100, 27.1, 52, 48, 47, 44, 3, 1]]
         // The bloom's blobs: colour, reach x, y (pt), at that colour's place. They do not breathe.
         let bloomBlobs: [[Double]] = [[0, 84, 48], [1, 72, 42], [2, 48, 84], [4, 216, 38], [5, 102, 31], [6, 89, 38], [8, 62, 58]]
-        let colorful: [[Double]] = [[255, 50, 100], [40, 140, 255], [50, 200, 80], [30, 185, 170], [100, 70, 255],
-                                    [40, 140, 255], [255, 120, 40], [240, 50, 180], [180, 40, 240]]
+        let gold: [[Double]] = [[240, 190, 60], [255, 210, 90], [225, 165, 40], [250, 200, 70], [255, 225, 120],
+                                [230, 175, 50], [245, 205, 85], [215, 155, 35], [255, 215, 100]]
         let ocean: [[Double]] = [[100, 80, 220], [60, 120, 255], [80, 100, 200], [50, 140, 220], [120, 80, 255],
                                  [70, 130, 255], [140, 100, 240], [90, 110, 230], [130, 70, 255]]
-        let palette = paused ? ocean : colorful
+        let palette = paused ? ocean : gold
         // The hue turns the whole wheel every 16 s (24 steps, Core Animation blends between them).
         let hueSteps = 24
         let hues: [Double] = turning ? (0...hueSteps).map { 360 * Double($0) / Double(hueSteps) } : [0]
@@ -971,7 +972,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 return layer
             }
             // The ring (opacity 1.54, which a browser takes as 1): the inner 1 pt, its sides lit where the blobs meet
-            // the edge, its corners arcs of radius 16.
+            // the edge, its corners arcs of radius 23.
             for ci in (0..<9).reversed() {
                 let b = blob(ci, inner: false)
                 let (a, reach) = along(b)
@@ -992,7 +993,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                     stage.addSublayer(layer)
                 }
             }
-            // The corners: a quarter circle each (the inner 1 pt, radius 16), in the colour the ring's blobs give its
+            // The corners: a quarter circle each (the inner 1 pt, radius 23), in the colour the ring's blobs give its
             // middle, pulsing with its quarter, and over it the bloom's colour there. Points in the frame, y down: from
             // a side, round the corner, to the next.
             func composite(_ layers: [(rgb: [Double], v: Double)]) -> (rgb: [Double], alpha: Double) {

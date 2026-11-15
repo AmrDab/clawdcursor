@@ -5,32 +5,36 @@
 # there. Nothing lies over the middle of the window and nothing on the rest of the screen.
 #
 # THE LOOK IS Border Beam by Jakub Antalik (libraries.dev, github.com/Jakubantalik/Libraries.dev, packages/border-beam,
-# MIT - notice below) as <BorderBeam size="pulse-inner" borderRadius={16}>: everything else the library's default for
-# that size - colorVariant "colorful", theme "dark", duration 2.3 s. The numbers are the library's own
+# MIT - notice below) as <BorderBeam size="pulse-inner" colorVariant="gold" borderRadius={23} duration={3.9}
+# hueRange={46}>: everything else the library's default for that size, theme "dark". The numbers are the library's own
 # (dist/index.es.js: po() the pulse-inner CSS, ao()/to()/Re() its layers' blobs, fe() a blob, ge() its timings, so()
-# the oscillators, io() the hue turn, G.colorful / G.ocean the palettes, pe["pulse-inner"].dark the opacities):
+# the oscillators, io() the hue turn, G.gold / G.ocean the palettes, pe["pulse-inner"].dark the opacities).
+# hueRange does nothing for the pulse sizes: io() (web 1.4.1, still the latest on npm and on GitHub) and the React
+# Native port (border-beam-native: PulseBeam is not given it, pulseHueDegrees() turns the full circle) both turn the
+# hue a whole 360 degrees every 16 s, whatever hueRange is.
 #
 #   what              value
 #   ----------------  ----------------------------------------------------------------------------------------------
-#   ring              the inner 1 px of the frame, corners of radius 16, opacity 1.54 (a CSS opacity: 1): nine
+#   ring              the inner 1 px of the frame, corners of radius 23, opacity 1.54 (a CSS opacity: 1): nine
 #                     radial-gradient blobs, one per colour of the palette at its place and size (ao(); colour at the
 #                     centre to clear at the radius, the first on top), each breathing in size and place, with an
 #                     opacity that pulses between .52 and 1 with its quarter
 #   inner glow        the same nine blobs with the inner sizes (to(): 65x35 55x30 35x65 15x30 173x28 80x22 69x28 22x38
 #                     47x44) over four white ones at the corners (radius 60, alpha .18 times the quarter's pulse, clear
 #                     at 70%), opacity .44, shown only near the edge: a mask from 1 at each edge to 0 28 px in (the
-#                     four added), clipped to the radius 16
+#                     four added), clipped to the radius 23
 #   bloom             seven blobs (eo: 84x48 72x42 48x84 216x38 102x31 89x38 62x58 at their colours' places) at alpha
 #                     .76 (1 - .48 / 2) that do not breathe, blurred 8 px, then clipped and masked to the same 1 px
 #                     ring (a browser blurs before it clips or masks), opacity .66, on top
 #   colour filter     hue-rotate (a full turn every 16 s, continuous, as io() sets for the pulse sizes) brightness(.75)
 #                     saturate(1.2)
 #   breathing         sizes x(1 -/+ .28), places +/-33 px, the glow's height x(1 -/+ .34), opacities 1 -> .52, each a
-#                     cosine between two values; periods (duration / 2.3 = 1) x 1.9, 2.6 and 2.4 s times the library's
+#                     cosine between two values; periods (duration / 2.3 = 3.9 / 2.3) x 1.9, 2.6 and 2.4 s (3.22, 4.41 and
+#                     4.07 s) times the library's
 #                     factors (so(): .9, 1.26, 1.6, 1.1, .81, 1.88, .98, 1.4, 1.45, 1.32, .84, 1.58)
 #   blob sizes        in px as given, whatever the frame's size (pulse-inner does not scale them); places in % of it
-#   colorful          (255,50,100) (40,140,255) (50,200,80) (30,185,170) (100,70,255) (40,140,255) (255,120,40)
-#                     (240,50,180) (180,40,240), at (33%,-7.4%) (12%,-5%) (2.1%,68.3%) (2.1%,68.3%) (74.4%,100%)
+#   gold              (240,190,60) (255,210,90) (225,165,40) (250,200,70) (255,225,120) (230,175,50) (245,205,85)
+#                     (215,155,35) (255,215,100), at (33%,-7.4%) (12%,-5%) (2.1%,68.3%) (2.1%,68.3%) (74.4%,100%)
 #                     (55%,100%) (93.9%,0%) (100%,27.1%) (100%,27.1%), ring sizes 70x40 60x35 40x70 20x35 180x32 85x26
 #                     74x32 26x42 52x48
 #   ocean (paused)    (100,80,220) (60,120,255) (80,100,200) (50,140,220) (120,80,255) (70,130,255) (140,100,240)
@@ -41,7 +45,7 @@
 #   - The window is the library's element and its content the card: the beam is drawn over the window's content along
 #     its edge, as the library draws its layers over the card's. The same for a normal, a maximized and a full-screen
 #     window and for the desktop (the monitor): there is never anything outside the edge.
-#   - The ring's corners have the library's radius 16 while a Windows 11 window's are 8: at each corner the ring curves
+#   - The ring's corners have the owner's radius 23 while a Windows 11 window's are 8: at each corner the ring curves
 #     in across the window's own corner.
 #   - The bloom's blur is worked out once per size, not per frame (its blobs do not move; only its colour turns): at
 #     each point along the edge, the inside half of a gaussian of 8 px across it (sampled every 2 px in), then a
@@ -55,7 +59,7 @@
 #     span from the first to the last is handed to Windows (the blobs keep their size in px, so on a large window most
 #     of the edge is dark).
 #   - Paused: the same shape in the library's "ocean" blues, still (drawn once). Where Windows is set to show no
-#     animations (SPI_GETCLIENTAREAANIMATION off): one still frame in colorful.
+#     animations (SPI_GETCLIENTAREAANIMATION off): one still frame in gold.
 #
 # Border Beam - MIT License - Copyright (c) 2026 Jakub Antalik
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
@@ -94,7 +98,7 @@
 # The Windows drawer; macOS and Linux use scripts/mac/overlay.swift and scripts/linux/overlay.py (`outline`).
 
 param(
-    [string]$Color = '',   # accepted for the caller's sake; the beam has its own colours (colorful, or ocean paused)
+    [string]$Color = '',   # accepted for the caller's sake; the beam has its own colours (gold, or ocean paused)
     [switch]$Paused        # the paused form: the same glow, still, in blue tones
 )
 
@@ -210,8 +214,8 @@ public class BeamStrip : Form {
 // The beam's pixels, apart from any window: Layout lays out the eight strips for a frame of a size, Paint fills them
 // for a moment. All in CSS px, the frame's top-left corner at (0, 0).
 public class Beam {
-    // -- Border Beam, pulse-inner, colorful, dark theme (see the table at the top of this file) --
-    public const double Duration = 2.3, Radius = 16, HueSeconds = 16, FadeInSeconds = 0.6;
+    // -- Border Beam, pulse-inner, gold, radius 23, 3.9 s, dark theme (see the table at the top of this file) --
+    public const double Duration = 3.9, Radius = 23, HueSeconds = 16, FadeInSeconds = 0.6;
     const double SP = 0.28, DR = 33, OP = 0.48, GH = 0.34;
     const double BS = 1.9 * Duration / 2.3, SS = 2.6 * Duration / 2.3, GHS = 2.4 * Duration / 2.3;
     const double StrokeOpacity = 1.54, InnerOpacity = 0.44, BloomOpacity = 0.66, Brightness = 0.75, Saturation = 1.2;
@@ -234,7 +238,7 @@ public class Beam {
         93.9, 0, 74, 32, 69, 28, 1, 1,      100, 27.1, 26, 42, 22, 38, 2, 1,    100, 27.1, 52, 48, 47, 44, 3, 1 };
     // The bloom's blobs (eo): colour, reach x, y (px), at that colour's place. They do not breathe.
     static readonly double[] Bloom = { 0, 84, 48,   1, 72, 42,   2, 48, 84,   4, 216, 38,   5, 102, 31,   6, 89, 38,   8, 62, 58 };
-    public static readonly int[] Colorful = { 255, 50, 100,  40, 140, 255,  50, 200, 80,  30, 185, 170,  100, 70, 255,  40, 140, 255,  255, 120, 40,  240, 50, 180,  180, 40, 240 };
+    public static readonly int[] Gold = { 240, 190, 60,  255, 210, 90,  225, 165, 40,  250, 200, 70,  255, 225, 120,  230, 175, 50,  245, 205, 85,  215, 155, 35,  255, 215, 100 };
     public static readonly int[] Ocean = { 100, 80, 220,  60, 120, 255,  80, 100, 200,  50, 140, 220,  120, 80, 255,  70, 130, 255,  140, 100, 240,  90, 110, 230,  130, 70, 255 };
 
     public bool Paused;
@@ -326,7 +330,7 @@ public class Beam {
 
         // The bloom, once: its blobs do not move (only its colour turns, after the blur). At each point, the inside half
         // of a gaussian across the edge (there is nothing outside the window to blur in), every 2 px in ...
-        int[] pal = Paused ? Ocean : Colorful;
+        int[] pal = Paused ? Ocean : Gold;
         int nb = Bloom.Length / 3;
         bloomR = new double[n]; bloomG = new double[n]; bloomB = new double[n]; bloomA = new double[n];
         double[] sr = new double[n], sg = new double[n], sb = new double[n], sa = new double[n];
@@ -522,7 +526,7 @@ public class Beam {
     // The strips at `seconds`: everything breathing as it is then. `moving` false: the still frame (the start).
     // `full` false: Dirty says only where the sides changed (the corners always do: their white blobs pulse).
     public void Paint(double seconds, bool moving, bool full) {
-        // The colours turn the whole wheel every 16 s.
+        // The colours turn the whole wheel every 16 s (hueRange does nothing for the pulse sizes).
         double t = moving ? seconds : 0, hue = moving ? 2 * Math.PI * (seconds / HueSeconds % 1) : 0;
         double hc = Math.Cos(hue), hs = Math.Sin(hue);
         double[] o = new double[17];
@@ -530,7 +534,7 @@ public class Beam {
             double a = Osc[4 * k], b = Osc[4 * k + 1], p = (t - Osc[4 * k + 3]) / Osc[4 * k + 2];
             o[k] = a + (b - a) * (1 - Math.Cos(2 * Math.PI * p)) / 2;
         }
-        int[] pal = Paused ? Ocean : Colorful;
+        int[] pal = Paused ? Ocean : Gold;
         double[] col = new double[30];
         for (int k = 0; k < 27; k++) col[k] = pal[k] / 255.0;
         col[27] = col[28] = col[29] = 1;   // the corners' white
