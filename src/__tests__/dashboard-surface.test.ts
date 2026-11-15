@@ -47,7 +47,7 @@ describe('dashboard page', () => {
   function page(): string {
     let html = '';
     const res = { cookie() {}, type() { return { send: (s: string) => { html = s; } }; } };
-    dashboardPage()({} as never, res as never, () => {});
+    (dashboardPage() as unknown as (req: unknown, res: unknown) => void)({}, res);   // the handler takes (req, res) only
     return html;
   }
 
