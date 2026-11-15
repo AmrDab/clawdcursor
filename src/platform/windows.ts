@@ -56,7 +56,7 @@ import { setWorkingPoint, onAnyDisplay } from './display-target';
 import { wheelUnitsPerNotch } from './wheel';
 import { normalizeWindowText, windowTextIncludes } from '../tools/window-text';
 import { structuredMissFields, targetOf } from '../core/miss-text';
-import { psOpts, powershellExe, windowsDirExe } from './ps-spawn';
+import { psOpts, powershellExe, windowsDirExe, launcherOpts } from './ps-spawn';
 import * as os from 'os';
 import { normalizeControlType } from './uia-control-type';
 
@@ -1575,8 +1575,11 @@ export class WindowsAdapter implements PlatformAdapter {
     if (win) return { pid: win.processId, title: win.title, handle: win.handle };
     const started = await launch?.started;
     if (started === false) return {};
+    // The desktop shell (explorer.exe, always running) is never the app a launch started or handed off to: claimed as one,
+    // `open_app "File Explorer"` that opened nothing read "handed off to the running explorer.exe, which has no window
+    // up yet", and its window, never coming, could not be focused (live 2026-11-14).
     const procs = (await findWindowsProcesses([...app.identity.processNames]))
-      .filter(p => !isOwnUiPid(p.pid))
+      .filter(p => !isOwnUiPid(p.pid) && p.pid !== this.shellPid)
       .sort((x, y) => y.started - x.started);
     const begun = procs.find(p => launch?.since === undefined || p.started >= launch.since);
     if (begun) return { pid: begun.pid, processName: begun.processName };
@@ -1585,15 +1588,15 @@ export class WindowsAdapter implements PlatformAdapter {
   }
 
   /**
-   * Start-Process in a detached PowerShell (values as $env:, never as script text). Resolves true / false with
-   * PowerShell's exit status — Start-Process returns as soon as the program is started, and fails when Windows
+   * Start-Process in a short-lived PowerShell (values as $env:, never as script text; not detached: launcherOpts).
+   * Resolves true / false with PowerShell's exit status — Start-Process returns as soon as the program is started, and fails when Windows
    * cannot find or run it — or undefined when that is not known within a few seconds.
    */
   private startProcess(env: NodeJS.ProcessEnv, command: string): Promise<boolean | undefined> {
     return new Promise(resolve => {
       let child: ReturnType<typeof spawn>;
       try {
-        child = spawn(powershellExe(), ['-NoProfile', '-Command', command], psOpts({ stdio: 'ignore' as const, detached: true, windowsHide: true, env }));
+        child = spawn(powershellExe(), ['-NoProfile', '-Command', command], launcherOpts(env));
       } catch {
         resolve(false);
         return;
@@ -1604,6 +1607,9 @@ export class WindowsAdapter implements PlatformAdapter {
       child.unref();
     });
   }
+
+  /** The desktop shell's process, as the bridge's window read last named it (`shellProcessId`); undefined until then. */
+  private shellPid: number | undefined;
 
   /**
    * The window list a launch works from: the bridge's Win32-only read (`list-windows`), not the UI Automation
@@ -1620,6 +1626,8 @@ export class WindowsAdapter implements PlatformAdapter {
       return [];
     }
     if (!Array.isArray(reply?.windows)) return this.listWindows();
+    const shell = (reply as { shellProcessId?: unknown }).shellProcessId;
+    if (Number.isInteger(shell) && (shell as number) > 0) this.shellPid = shell as number;
     return reply.windows
       .map((raw: any): WindowInfo => ({
         ...this.normalizeWindow(raw),

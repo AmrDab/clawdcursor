@@ -81,3 +81,16 @@ export function psOpts<const T extends object>(options?: T): T & { cwd: string }
   const cwd = (options as { cwd?: string } | undefined)?.cwd;
   return { ...(options as T), cwd: cwd ?? privateRunDir() };
 }
+
+/**
+ * Spawn options for a PowerShell whose only job is `Start-Process` (an app, a folder, a URI opened for the user).
+ *
+ * NOT detached. A detached PowerShell (DETACHED_PROCESS) starts explorer.exe, but Explorer opens no folder window
+ * for it: `open_file` on a folder and `open_app "File Explorer"` showed nothing (live 2026-11-14, Windows 11 26300;
+ * the same Start-Process without `detached` opened the window). Nothing is lost by it: PowerShell exits as soon as
+ * Start-Process returns, and the program it starts is not tied to clawdcursor (Node's job lets a child's own children
+ * break away), so the app stays open after clawdcursor exits.
+ */
+export function launcherOpts(env: NodeJS.ProcessEnv): { stdio: 'ignore'; windowsHide: true; env: NodeJS.ProcessEnv; cwd: string } {
+  return psOpts({ stdio: 'ignore' as const, windowsHide: true as const, env });
+}

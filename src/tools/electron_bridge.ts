@@ -40,7 +40,7 @@
 
 import { screenJson } from '../core/untrusted-screen-content';
 import type { ToolDefinition, ToolResult, ToolContext } from './types';
-import { psOpts, powershellExe } from '../platform/ps-spawn';
+import { powershellExe, launcherOpts } from '../platform/ps-spawn';
 
 /**
  * Known Electron / WebView2 app fingerprints. Match is case-insensitive
@@ -242,7 +242,7 @@ export function getElectronBridgeTools(): ToolDefinition[] {
             const child = spawn(powershellExe(), [
               '-NoProfile', '-Command',
               `Start-Process -FilePath $env:CLAWD_PS_FILE -WorkingDirectory $env:USERPROFILE -ArgumentList '${flag}'`,
-            ], psOpts({ stdio: 'ignore', detached: true, windowsHide: true, env: { ...process.env, CLAWD_PS_FILE: name } }));
+            ], launcherOpts({ ...process.env, CLAWD_PS_FILE: name }));
             child.unref();
           } else {
             // macOS / Linux — open -a / direct spawn.

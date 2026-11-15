@@ -22,7 +22,7 @@ vi.mock('child_process', async orig => {
   };
 });
 
-import { powershellExe, system32Exe, windowsDirExe, psOpts, privateRunDir, __setSystemRootForTests } from '../platform/ps-spawn';
+import { powershellExe, system32Exe, windowsDirExe, psOpts, launcherOpts, privateRunDir, __setSystemRootForTests } from '../platform/ps-spawn';
 import { runPsWithStdin } from '../platform/ps-input';
 
 let root: string;
@@ -168,6 +168,32 @@ describe('review round: windir, a hardened run dir, the interactive console, lau
     for (const f of ['tools/electron_bridge.ts', 'tools/orchestration.ts', 'platform/uri-handler.ts']) {
       expect(read(f), f).toContain('-WorkingDirectory $env:USERPROFILE');
     }
+  });
+});
+
+describe('a PowerShell that runs Start-Process for the user is never detached (live 2026-11-14)', () => {
+  // A detached PowerShell (DETACHED_PROCESS) runs `Start-Process explorer.exe <folder>`, and Explorer opens no window:
+  // open_file on a folder and open_app "File Explorer" showed nothing. The same PowerShell not detached opens it.
+  it('launcherOpts: hidden, no stdio, the private run dir, the given environment, and not detached', () => {
+    const env = { CLAWD_PS_FILE: 'explorer.exe' };
+    const o = launcherOpts(env);
+    expect(o).toEqual({ stdio: 'ignore', windowsHide: true, env, cwd: privateRunDir() });
+    expect('detached' in o).toBe(false);
+  });
+
+  it('no PowerShell spawn in the sources is detached', () => {
+    const src = path.join(__dirname, '..');
+    const files: string[] = [];
+    (function walk(dir: string) {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) { if (e.name !== '__tests__') walk(p); } else if (p.endsWith('.ts')) files.push(p);
+      }
+    })(src);
+    const calls = files.flatMap(f => [...fs.readFileSync(f, 'utf8').matchAll(/\bspawn\(\s*powershellExe\(\)[^;]*;/g)]
+      .map(m => ({ f: path.relative(src, f), text: m[0] })));
+    expect(calls.length).toBeGreaterThanOrEqual(4);   // the scan sees the launchers (windows, uri-handler, electron) and the bridge
+    expect(calls.filter(c => /detached/.test(c.text)).map(c => c.f)).toEqual([]);
   });
 });
 

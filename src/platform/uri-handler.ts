@@ -25,7 +25,7 @@
 
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { psOpts, powershellExe, system32Exe } from './ps-spawn';
+import { psOpts, powershellExe, system32Exe, launcherOpts } from './ps-spawn';
 
 const execFileAsync = promisify(execFile);
 
@@ -185,7 +185,7 @@ export async function shellDispatchUriAndVerify(
     const child = spawn(
       powershellExe(),
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', 'Start-Process -FilePath $env:CLAWD_URI -WorkingDirectory $env:USERPROFILE'],
-      psOpts({ detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, CLAWD_URI: uri } }),
+      launcherOpts({ ...process.env, CLAWD_URI: uri }),
     );
     child.unref();
     child.on('error', () => { /* poll reports no-window */ });

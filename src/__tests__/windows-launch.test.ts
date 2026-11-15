@@ -450,3 +450,67 @@ describe('open_file on Windows — Explorer starting says nothing about the file
     expect(await settle(adapter.launchApp('explorer.exe', MISSING))).toEqual({ pid: 7001, processName: 'python' });
   });
 });
+
+describe('File Explorer on Windows — a folder window, and the desktop shell that is always running (live 2026-11-14)', () => {
+  // Live: open_file on a folder answered "could NOT confirm the folder … (window: "none")" and no Explorer window ever
+  // opened: the Start-Process PowerShell was spawned DETACHED, and Explorer opens no folder window for that one. And
+  // open_app "File Explorer" answered "handed off to the running explorer.exe, pid=8376, which has no window up yet":
+  // pid 8376 was the desktop shell (taskbar, desktop), always running.
+  const SHELL_PID = 8376;
+  const FOLDER = W('Desktop - File Explorer', 'explorer', 9100);
+  const FOLDER_OPEN = { url: 'C:\\Users\\x\\OneDrive\\Desktop', noStartMenuFallback: true };
+  /** The bridge's Win32 window read: the shell's own windows are left out of the list and named as shellProcessId. */
+  const bridge = (before: WindowInfo[], after: WindowInfo[] = before) => {
+    h.fast = async () => ({ windows: spawns.length ? after : before, shellProcessId: SHELL_PID });
+  };
+  const shellRunning = () => { h.procs = [{ pid: SHELL_PID, name: 'explorer', started: Date.now() - 3_600_000 }]; };
+
+  it('the Start-Process PowerShell is NOT detached (a detached one gets no Explorer folder window), and stays hidden', async () => {
+    bridge(DESKTOP, [...DESKTOP, FOLDER]);
+    await settle(adapter.launchApp('explorer.exe', FOLDER_OPEN));
+    expect(spawns).toHaveLength(1);
+    expect(spawns[0].args.join(' ')).toMatch(/Start-Process/);
+    expect(spawns[0].opts).toMatchObject({ windowsHide: true, stdio: 'ignore' });
+    expect((spawns[0].opts as { detached?: boolean }).detached).toBeFalsy();
+  });
+
+  it('…the same for an app started by name and for a program found by a name-only search', async () => {
+    bridge(DESKTOP, [...DESKTOP, W('Untitled - Paint', 'mspaint', 9200)]);
+    await settle(adapter.launchApp('mspaint.exe', { processNames: ['mspaint'], searchTerm: 'Paint' }));
+    const first = spawns.splice(0);
+    h.installed = { path: 'C:\\Program Files\\Tool\\tool.exe', name: 'Tool' };
+    bridge(DESKTOP, [...DESKTOP, W('Tool', 'tool', 9300)]);
+    await settle(adapter.launchApp('Tool', { nameOnly: true }));
+    const ps = [...first, ...spawns].filter(s => s.args.join(' ').includes('Start-Process'));
+    expect(ps).toHaveLength(2);
+    for (const s of ps) expect((s.opts as { detached?: boolean }).detached).toBeFalsy();
+  });
+
+  it('a folder window that opens is reported, so open_file can confirm it', async () => {
+    shellRunning();
+    bridge(DESKTOP, [...DESKTOP, FOLDER]);
+    expect(await settle(adapter.launchApp('explorer.exe', FOLDER_OPEN))).toMatchObject({ pid: 9100, title: 'Desktop - File Explorer' });
+  });
+
+  it('open_app "File Explorer" with no window: the shell is not claimed as a hand-off (nothing to wait for, nothing to focus)', async () => {
+    shellRunning();
+    bridge(DESKTOP.filter(w => w !== EXPLORER));
+    const res = await settle(adapter.launchApp('explorer.exe', { processNames: ['explorer'], searchTerm: 'File Explorer', noStartMenuFallback: true }));
+    expect(res).toEqual({});
+    expect(focus).not.toHaveBeenCalled();
+  });
+
+  it('…but an Explorer process that began with this launch (Windows 11 hosts the window in a new /factory process) is', async () => {
+    h.procs = [{ pid: SHELL_PID, name: 'explorer', started: Date.now() - 3_600_000 }, { pid: 9100, name: 'explorer', started: Date.now() + 500 }];
+    bridge(DESKTOP.filter(w => w !== EXPLORER));
+    const res = await settle(adapter.launchApp('explorer.exe', { processNames: ['explorer'], searchTerm: 'File Explorer', noStartMenuFallback: true }));
+    expect(res).toEqual({ pid: 9100, processName: 'explorer' });
+  });
+
+  it('…and a single-instance app other than the shell is still a hand-off', async () => {
+    h.procs = [{ pid: 6001, name: 'msedge', started: Date.now() - 3_600_000 }];
+    bridge(DESKTOP);
+    const res = await settle(adapter.launchApp('msedge.exe', { searchTerm: 'Edge', processNames: ['msedge'] }));
+    expect(res).toEqual({ pid: 6001, processName: 'msedge', alreadyRunning: true });
+  });
+});

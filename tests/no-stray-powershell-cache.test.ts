@@ -43,7 +43,9 @@ describe('every PowerShell child', () => {
         // The call's own argument list: from its "(" to the matching ")".
         let i = m.index! + m[1].length, depth = 0;
         do { if (src[i] === '(') depth++; else if (src[i] === ')') depth--; i++; } while (depth > 0 && i < src.length);
-        if (!src.slice(m.index!, i).includes('psOpts(')) bad.push(`${path.relative(root, f)}:${src.slice(0, m.index!).split('\n').length}`);
+        // launcherOpts (a Start-Process launcher) is psOpts with the launcher's own options.
+        const args = src.slice(m.index!, i);
+        if (!args.includes('psOpts(') && !args.includes('launcherOpts(')) bad.push(`${path.relative(root, f)}:${src.slice(0, m.index!).split('\n').length}`);
       }
     }
     expect(bad).toEqual([]);
