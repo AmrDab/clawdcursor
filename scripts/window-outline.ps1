@@ -668,6 +668,7 @@ public class WindowOutline {
     [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr dc, IntPtr clip, MonitorEnumProc proc, IntPtr data);
     [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint action, uint param, out bool value, uint flags);
     [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hWnd, uint cmd);
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hWnd, int attr, out int value, int size);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int max);
@@ -807,14 +808,17 @@ public class WindowOutline {
                 else ShowWindow(s.Handle, 0);
             }
             d.Shown = true;
+            LiftPill();
         }
     }
 
     // A strip with a visible window of another process above it (the taskbar, an always-on-top window) goes back to the
-    // top, without activation. Windows of this process (the strips) and of the pill's are not foreign. GW_HWNDPREV 3
-    // walks up the z-order; HWND_TOPMOST (-1); SWP_NOSIZE 0x01 | SWP_NOMOVE 0x02 | SWP_NOACTIVATE 0x10.
+    // top, without activation. Windows of this process (the strips) and of the pill's are not foreign, nor is a cloaked
+    // one (DWMWA_CLOAKED 14: a system window kept "visible" but not drawn, such as the input host). GW_HWNDPREV 3 walks
+    // up the z-order; HWND_TOPMOST (-1); SWP_NOSIZE 0x01 | SWP_NOMOVE 0x02 | SWP_NOACTIVATE 0x10.
     void RaiseIfCovered(Display d) {
         System.Text.StringBuilder name = new System.Text.StringBuilder(20);
+        bool raised = false;
         foreach (BeamStrip s in d.Strips) {
             if (s.W <= 0 || s.H <= 0) continue;
             IntPtr h = GetWindow(s.Handle, 3);
@@ -823,13 +827,32 @@ public class WindowOutline {
                 uint pid;
                 GetWindowThreadProcessId(h, out pid);
                 if (pid == ownPid || (pillPid != 0 && pid == pillPid)) continue;
+                int cloaked;
+                if (DwmGetWindowAttribute(h, 14, out cloaked, 4) == 0 && cloaked != 0) continue;
                 name.Length = 0;
                 GetWindowText(h, name, 20);
                 if (name.ToString() == "clawdcursor beam") continue;   // another clawdcursor's beam
                 SetWindowPos(s.Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013u);
+                raised = true;
                 break;
             }
         }
+        if (raised) LiftPill();
+    }
+
+    // The pill stays above the beam: after the beam has gone to the top, the pill's windows go back over it, lowest
+    // first so they keep their own order. (The pill also raises itself over a strip on its own 700 ms clock; doing it
+    // here at once means the two never trade places.) GW_HWNDFIRST 0, GW_HWNDNEXT 2 walk down from the top.
+    void LiftPill() {
+        if (pillPid == 0 || displays.Count == 0 || displays[0].Strips[0] == null) return;
+        List<IntPtr> mine = new List<IntPtr>();
+        IntPtr h = GetWindow(displays[0].Strips[0].Handle, 0);
+        for (int i = 0; h != IntPtr.Zero && i < 1000; i++, h = GetWindow(h, 2)) {
+            uint pid;
+            GetWindowThreadProcessId(h, out pid);
+            if (pid == pillPid && IsWindowVisible(h)) mine.Add(h);
+        }
+        for (int k = mine.Count - 1; k >= 0; k--) SetWindowPos(mine[k], new IntPtr(-1), 0, 0, 0, 0, 0x0013u);
     }
 
     // One frame of a display: the beam as it is now, faded in over .6 s when it has just come up (a still beam just

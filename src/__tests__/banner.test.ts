@@ -275,7 +275,9 @@ describe('no full-screen glow', () => {
   it('every outline drawer frames every monitor and tracks no window', () => {
     const ps = read('scripts', 'window-outline.ps1');
     expect(ps).toContain('EnumDisplayMonitors(');
-    expect(ps).not.toMatch(/GetForegroundWindow|IsIconic|DwmGetWindowAttribute|GetShellWindow|p\[0\]\.EndsWith\("TARGET"\)/);
+    // DwmGetWindowAttribute is only for DWMWA_CLOAKED (14), never a window's frame bounds (9).
+    expect(ps).not.toMatch(/GetForegroundWindow|IsIconic|DwmGetWindowAttribute\([^)]*,\s*9\s*,|GetShellWindow|p\[0\]\.EndsWith\("TARGET"\)/);
+    expect(ps).toContain('LiftPill();');
     const swift = read('scripts', 'mac', 'overlay.swift');
     expect(swift.slice(swift.indexOf('func windowOutline()'))).toContain('NSScreen.screens');
     const py = read('scripts', 'linux', 'overlay.py');
