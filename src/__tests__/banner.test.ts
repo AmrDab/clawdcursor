@@ -314,9 +314,10 @@ describe('no full-screen glow', () => {
     expect(read('scripts', 'banner.ps1')).toContain('MIT License, Copyright (c) 2026 Jakub');
   });
 
-  // The owner's pick (#392): Border Beam with size="pulse-outside", colorVariant="sunset", borderRadius 30, duration
-  // 1.96 s. The three drawers carry the library's numbers; these keep them the same everywhere.
-  it('every drawer draws pulse-outside in sunset (paused: ocean), radius 30, 1.96 s, with the same numbers', () => {
+  // The owner's pick (#392): <BorderBeam size="pulse-inner" borderRadius={16}>, the library's defaults otherwise
+  // (colorVariant "colorful", theme "dark", duration 2.3 s). The three drawers carry the library's numbers; these keep
+  // them the same everywhere.
+  it('every drawer draws pulse-inner in colorful (paused: ocean), radius 16, 2.3 s, with the same numbers', () => {
     const ps = read('scripts', 'window-outline.ps1');
     const swift = read('scripts', 'mac', 'overlay.swift');
     const py = read('scripts', 'linux', 'overlay.py');
@@ -327,44 +328,78 @@ describe('no full-screen glow', () => {
       const body = src.slice(start + from.length, Math.min(...ends));
       return (body.match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
     };
-    const sunset = [255, 80, 50, 255, 160, 40, 255, 120, 60, 255, 200, 50, 255, 100, 80, 255, 180, 60, 255, 60, 60, 255, 140, 50, 255, 90, 70];
+    // G.colorful and G.ocean (index.es.js), in order.
+    const colorful = [255, 50, 100, 40, 140, 255, 50, 200, 80, 30, 185, 170, 100, 70, 255, 40, 140, 255, 255, 120, 40, 240, 50, 180, 180, 40, 240];
     const ocean = [100, 80, 220, 60, 120, 255, 80, 100, 200, 50, 140, 220, 120, 80, 255, 70, 130, 255, 140, 100, 240, 90, 110, 230, 130, 70, 255];
-    expect(numbers(ps, 'Sunset = {')).toEqual(sunset);
+    expect(numbers(ps, 'Colorful = {')).toEqual(colorful);
     expect(numbers(ps, 'Ocean = {')).toEqual(ocean);
-    expect(numbers(swift, 'let sunset: [[Double]] = ').slice(0, 27)).toEqual(sunset);
+    expect(numbers(swift, 'let colorful: [[Double]] = ').slice(0, 27)).toEqual(colorful);
     expect(numbers(swift, 'let ocean: [[Double]] = ').slice(0, 27)).toEqual(ocean);
-    expect(numbers(py, 'BEAM_SUNSET = ').slice(0, 27)).toEqual(sunset);
+    expect(numbers(py, 'BEAM_COLORFUL = ').slice(0, 27)).toEqual(colorful);
     expect(numbers(py, 'BEAM_OCEAN = ').slice(0, 27)).toEqual(ocean);
-    // The blobs (ring and inner glow; bloom), in the same order everywhere.
-    const edge = [0, 1, 0, 80, 19, 27, 0, 6, 2, 1, 74, 11, 73, -1, 7, 3, 1, 15, 44, 100, 33, 8, 1, 3, 19, 38, 101, 72,
-      4, 2, 3, 84, 13, 67, 100, 1, 3, 2, 60, 21, 24, 101, 2, 1, 2, 17, 40, 0, 60, 3, 2, 0, 13, 32, -1, 28];
-    const bloom = [0, 110, 30, 27, 3, 6, 100, 20, 73, 1, 7, 26, 62, 100, 33, 8, 30, 56, 101, 72, 4, 120, 22, 67, 99, 1, 88, 32, 24, 99, 2, 28, 58, 0, 60];
-    expect(numbers(ps, 'static readonly double[] Edge = {')).toEqual(edge);
+    // Per colour: its place (G.*.border pos), the ring's size (its size, ao()), the inner glow's (Je, to()), region and
+    // quarter (Fe); and the bloom's blobs (eo, Re()): colour, size. In the same order everywhere.
+    const blob = [33, -7.4, 70, 40, 65, 35, 1, 0, 12, -5, 60, 35, 55, 30, 2, 0, 2.1, 68.3, 40, 70, 35, 65, 3, 2,
+      2.1, 68.3, 20, 35, 15, 30, 1, 2, 74.4, 100, 180, 32, 173, 28, 2, 3, 55, 100, 85, 26, 80, 22, 3, 3,
+      93.9, 0, 74, 32, 69, 28, 1, 1, 100, 27.1, 26, 42, 22, 38, 2, 1, 100, 27.1, 52, 48, 47, 44, 3, 1];
+    const bloom = [0, 84, 48, 1, 72, 42, 2, 48, 84, 4, 216, 38, 5, 102, 31, 6, 89, 38, 8, 62, 58];
+    expect(numbers(ps, 'static readonly double[] Blob = {')).toEqual(blob);
     expect(numbers(ps, 'static readonly double[] Bloom = {')).toEqual(bloom);
-    expect(numbers(swift, 'let edgeBlobs: [[Double]] = ').slice(0, edge.length)).toEqual(edge);
+    expect(numbers(swift, 'let blobs: [[Double]] = ').slice(0, blob.length)).toEqual(blob);
     expect(numbers(swift, 'let bloomBlobs: [[Double]] = ').slice(0, bloom.length)).toEqual(bloom);
-    expect(numbers(py, 'BEAM_EDGE = ').slice(0, edge.length)).toEqual(edge);
+    expect(numbers(py, 'BEAM_BLOB = ').slice(0, blob.length)).toEqual(blob);
     expect(numbers(py, 'BEAM_BLOOM = ').slice(0, bloom.length)).toEqual(bloom);
-    // Duration and radius; the paused form uses the blues.
-    expect(ps).toContain('public const double Duration = 1.96, Radius = 30,');
-    expect(swift).toContain('let duration = 1.96,');
-    expect(swift).toContain('let palette = paused ? ocean : sunset');
-    expect(py).toContain('BEAM_DURATION = 1.96');
-    expect(py).toContain('palette = BEAM_OCEAN if paused else BEAM_SUNSET');
+    // ge("pulse-inner", dark, 2.3) and pe["pulse-inner"].dark.
+    expect(ps).toContain('public const double Duration = 2.3, Radius = 16, HueSeconds = 16,');
+    expect(ps).toContain('const double SP = 0.28, DR = 33, OP = 0.48, GH = 0.34;');
+    expect(ps).toContain('BS = 1.9 * Duration / 2.3, SS = 2.6 * Duration / 2.3, GHS = 2.4 * Duration / 2.3;');
+    expect(ps).toContain('StrokeOpacity = 1.54, InnerOpacity = 0.44, BloomOpacity = 0.66, Brightness = 0.75, Saturation = 1.2;');
+    expect(swift).toContain('let duration = 2.3, sp = 0.28, dr = 33.0, op = 0.48, gh = 0.34');
+    expect(swift).toContain('let bs = 1.9 * duration / 2.3, ss = 2.6 * duration / 2.3, ghs = 2.4 * duration / 2.3');
+    expect(py).toContain('BEAM_DURATION = 2.3');
+    expect(py).toContain('BEAM_RADIUS = 16');
+    expect(py).toContain('_SP, _DR, _OP, _GH = 0.28, 33.0, 0.48, 0.34');
+    expect(py).toContain('_BS, _SS, _GHS = 1.9 * BEAM_DURATION / 2.3, 2.6 * BEAM_DURATION / 2.3, 2.4 * BEAM_DURATION / 2.3');
+    for (const src of [swift, py]) {
+      expect(src).toContain('0.76 * 0.52 * 0.66');   // the bloom: alpha 1 - .48 / 2, the inside half of its blur, opacity .66
+      expect(src).toContain('0.75 * ');             // brightness(.75)
+    }
+    // A full turn of the hue every 16 s, not a drift either way.
+    expect(ps).toContain('hue = moving ? 2 * Math.PI * (seconds / HueSeconds % 1) : 0;');
+    expect(swift).toContain('(0...hueSteps).map { 360 * Double($0) / Double(hueSteps) }');
+    expect(swift).toContain('a.duration = 16');
+    expect(py).toContain('hue = 360 * (t / 16 % 1)');
+    // The paused form uses the blues.
+    expect(swift).toContain('let palette = paused ? ocean : colorful');
+    expect(py).toContain('palette = BEAM_OCEAN if paused else BEAM_COLORFUL');
     expect(py).toContain("run_outline(argv[argv.index('--color') + 1] if '--color' in argv else '#ff7a45', '--paused' in argv)");
   });
 
-  it('the Windows glow lies outside the window (inward only where there is no outside), at a capped rate', () => {
+  it('the beam lies inside the window\'s edge on every drawer, whatever the window, at a capped rate', () => {
     const ps = read('scripts', 'window-outline.ps1');
-    // The strips start a margin out from the frame; the glow is not drawn inside it.
-    expect(ps).toContain('new int[] { -m, -m, m + c, m + c,');
-    expect(ps).toContain('} else if (x < 0 || y < 0 || x > w || y > h) {');
-    // The desktop, and a maximized or full-screen window, get the inward form.
-    expect(ps).toContain('bool inward = desk;');
+    const swift = read('scripts', 'mac', 'overlay.swift');
+    const py = read('scripts', 'linux', 'overlay.py');
+    // Windows: the eight strips lie inside the frame, 28 px deep; no outward or inward form any more.
+    expect(ps).toContain('public const int Band = 28;');
+    expect(ps).toContain('int[] r = { 0, 0, c, c,   w - c, 0, c, c,   w - c, h - c, c, c,   0, h - c, c, c,');
+    expect(ps).toContain('beam.Layout(w, h);');
+    expect(ps).not.toMatch(/inward|Margin/);
+    // A maximized or full-screen window is cut to its monitor, and outlined like any other.
     expect(ps).toMatch(/if \(on && GetMonitorInfo\(screen, ref info\) && \(IsZoomed\(t\)/);
-    // 12.5 frames a second while it breathes; the paused and still forms are drawn once.
+    // 12.5 frames a second while it breathes, worked out and pushed only where a blob is; the paused and still forms
+    // are drawn once.
     expect(ps).toContain('frame.Interval = 80;');
     expect(ps).toContain('frame.Tick += (s, e) => { if (shown && turning) Paint(false); };');
+    expect(ps).toContain('if (lines == 0) continue;');
+    // macOS: the window is the target's frame itself.
+    const outline = swift.slice(swift.indexOf('func windowOutline()'));
+    expect(outline).toContain('if win.frame != frame { win.setFrame(frame, display: true) }');
+    expect(outline).not.toMatch(/margin|inward/);
+    // Linux: the window is the frame, cut to the band inside its edge.
+    const run = py.slice(py.indexOf('def run_outline('));
+    expect(run).toContain('win.move(x, y)');
+    expect(run).toContain('t = min(BEAM_BAND if composited else 3, w // 2, h // 2)');
+    expect(py).not.toMatch(/inward|BEAM_MARGIN/);
   });
 
   it('the macOS beam keeps its GPU work to the edge band (#414): small gradient layers, no masks, filters or shadows', () => {
@@ -375,8 +410,6 @@ describe('no full-screen glow', () => {
     expect(outline).toContain('layer.contentsScale = scale');
     expect(outline).toContain('a.autoreverses = true');
     expect(outline).toContain('a.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 12)');
-    // The window is the target and the glow's margin, or the screen itself (drawn inward).
-    expect(outline).toContain('let frame = target.screen ? target.frame : target.frame.insetBy(dx: -margin, dy: -margin)');
   });
 
   it('the Windows outline is click-through, never activates, and stays out of captures', () => {

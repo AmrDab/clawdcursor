@@ -7,11 +7,11 @@
  *     is working in (control.ts workingWindow), and nothing else: no fill,
  *     nothing on the rest of the screen, nothing at all while that window is not
  *     in front. It is the "border beam" of libraries.dev (#392), size
- *     pulse-outside in its "sunset" colours: a warm glow just outside the
- *     window's edge that breathes (the paused form is the same glow in blue,
- *     still; still too where the OS reduces motion). When the window is the
- *     desktop itself (or fills its screen), it is drawn inward from the
- *     monitor's edge. Spawned/
+ *     pulse-inner in its "colorful" palette: coloured blobs that breathe just
+ *     inside the window's edge, a thin ring and a glow 28 px deep (the paused
+ *     form is the same in blue, still; still too where the OS reduces motion),
+ *     over a maximized or full-screen window as over any other. When the
+ *     window is the desktop itself, it goes around the monitor. Spawned/
  *     killed in lockstep with the pill; `TARGET <handle> <pid>` on its stdin
  *     names the window, a bare `TARGET` none.
  * Both exit by themselves when their stdin closes: a host that hard-kills this
@@ -31,7 +31,7 @@
  * Paused mode (pause-gate.ts): when an agent hands the desktop to the user at a
  * roadblock, both overlays are respawned in their paused form — a BLUE outline and
  * a pill that says what to do, with Resume / End task. The pill prints
- * BANNER_RESUME / BANNER_END; showRunning() swaps back to the running (sunset) form. The card can add choice buttons
+ * BANNER_RESUME / BANNER_END; showRunning() swaps back to the running (colorful) form. The card can add choice buttons
  * (CLAWD_BANNER_CHOICES, a JSON array of strings; a click prints BANNER_CHOICE <index>) and a text box
  * (CLAWD_BANNER_INPUT, JSON {placeholder?, multiline?}; sent as BANNER_REPLY like "Something else").
  *
@@ -346,7 +346,7 @@ class ControlBanner {
     this.show();
   }
 
-  /** Leave the paused form: back to the amber running overlay (or hidden). */
+  /** Leave the paused form: back to the running overlay (or hidden). */
   showRunning(): void {
     if (!this.paused) return;
     this.paused = null;

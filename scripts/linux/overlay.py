@@ -33,9 +33,9 @@ by src/core/banner.ts:
                      names the window (a bare "TARGET": none); the beam is drawn
                      while that is the active window, and follows it. "HIDE <ms>"
                      steps aside for a screen capture.
-                     The beam is Border Beam's pulse-outside in sunset (draw_beam):
-                     a warm glow outside the window's edge that breathes, about 10
-                     frames a second; inward on a window as wide as the screen.
+                     The beam is Border Beam's pulse-inner (draw_beam): coloured
+                     blobs that breathe just inside the window's edge, a 1 px ring
+                     and a glow 28 px deep, about 10 frames a second.
                      --paused: the same in blue ("ocean"), still. Without a
                      compositor (no alpha): a plain steady line in --color.
 
@@ -511,15 +511,19 @@ def run_pill():
         layout()
 
 
-# The border beam (#392): Border Beam's pulse-outside in sunset, borderRadius 30, duration 1.96 s, by Jakub Antalik
-# (libraries.dev, github.com/Jakubantalik/Libraries.dev, packages/border-beam), MIT License, Copyright (c) 2026 Jakub
-# Antalik. The library's numbers and its licence notice in full are at the top of scripts/window-outline.ps1.
-# A soft bloom and a tighter inner glow outside the window's edge and patches of a 1 px ring at radius 30, made of warm
-# blobs that breathe (size, place, opacity) on the library's periods, with a slow hue drift. Here each blob is half of
-# a cairo radial gradient lying against the edge (the blur is in its stops), drawn 10 times a second.
-BEAM_DURATION = 1.96
-_SP, _DR, _OP, _GH = 0.28, 14.0, 0.46, 0.16
-_BS, _SS, _GHS = BEAM_DURATION, 6.4 * BEAM_DURATION / 2.3, 2.4 * BEAM_DURATION / 2.3
+# The border beam (#392): Border Beam as <BorderBeam size="pulse-inner" borderRadius={16}> - the library's defaults
+# for the rest: colorVariant "colorful", theme "dark", duration 2.3 s - by Jakub Antalik (libraries.dev,
+# github.com/Jakubantalik/Libraries.dev, packages/border-beam), MIT License, Copyright (c) 2026 Jakub Antalik. The
+# library's numbers and its licence notice in full are at the top of scripts/window-outline.ps1.
+# Inside the window's edge: an inner glow of coloured blobs (and four faint white ones at the corners) shown within
+# 28 px of the edge, a 1 px ring of radius 16 lit by the same blobs, and a bloom on that ring; the blobs breathe (size,
+# place, opacity) on the library's periods and the colours turn the whole wheel every 16 s. Here each blob is a cairo
+# radial gradient and the glow's 28 px mask a gradient (a bilinear mesh in the corners), drawn 10 times a second.
+BEAM_DURATION = 2.3
+BEAM_RADIUS = 16
+BEAM_BAND = 28  # the inner glow's mask: 1 at the edge, 0 this far in
+_SP, _DR, _OP, _GH = 0.28, 33.0, 0.48, 0.34
+_BS, _SS, _GHS = 1.9 * BEAM_DURATION / 2.3, 2.6 * BEAM_DURATION / 2.3, 2.4 * BEAM_DURATION / 2.3
 # from, to, period, delay: per blob region 1..3 its width, height, x, y; the glow's height; each quarter's opacity
 # (top-left, top-right, bottom-left, bottom-right).
 BEAM_OSC = [
@@ -532,21 +536,17 @@ BEAM_OSC = [
     (1 - _GH, 1 + _GH, _GHS, 0),
     (1 - _OP, 1, _BS, 0), (1 - _OP, 1, _BS * 1.32, _BS * 0.28), (1 - _OP, 1, _BS * 0.84, _BS * 0.55),
     (1 - _OP, 1, _BS * 1.58, _BS * 0.83)]
-# The ring's and the inner glow's blobs: colour, region, quarter, reach x, y (px), place x, y (% of the box).
-BEAM_EDGE = [(0, 1, 0, 80, 19, 27, 0), (6, 2, 1, 74, 11, 73, -1), (7, 3, 1, 15, 44, 100, 33), (8, 1, 3, 19, 38, 101, 72),
-             (4, 2, 3, 84, 13, 67, 100), (1, 3, 2, 60, 21, 24, 101), (2, 1, 2, 17, 40, 0, 60), (3, 2, 0, 13, 32, -1, 28)]
-# The bloom's blobs: colour, reach x, y, place x, y. They do not breathe.
-BEAM_BLOOM = [(0, 110, 30, 27, 3), (6, 100, 20, 73, 1), (7, 26, 62, 100, 33), (8, 30, 56, 101, 72),
-              (4, 120, 22, 67, 99), (1, 88, 32, 24, 99), (2, 28, 58, 0, 60)]
-BEAM_SUNSET = [(255, 80, 50), (255, 160, 40), (255, 120, 60), (255, 200, 50), (255, 100, 80), (255, 180, 60),
-               (255, 60, 60), (255, 140, 50), (255, 90, 70)]
+# The palette's blobs, one per colour in its order: place x, y (% of the box), the ring's reach x, y (px), the inner
+# glow's, region (1..3), quarter (0 tl, 1 tr, 2 bl, 3 br).
+BEAM_BLOB = [(33, -7.4, 70, 40, 65, 35, 1, 0), (12, -5, 60, 35, 55, 30, 2, 0), (2.1, 68.3, 40, 70, 35, 65, 3, 2),
+             (2.1, 68.3, 20, 35, 15, 30, 1, 2), (74.4, 100, 180, 32, 173, 28, 2, 3), (55, 100, 85, 26, 80, 22, 3, 3),
+             (93.9, 0, 74, 32, 69, 28, 1, 1), (100, 27.1, 26, 42, 22, 38, 2, 1), (100, 27.1, 52, 48, 47, 44, 3, 1)]
+# The bloom's blobs: colour, reach x, y (px), at that colour's place. They do not breathe.
+BEAM_BLOOM = [(0, 84, 48), (1, 72, 42), (2, 48, 84), (4, 216, 38), (5, 102, 31), (6, 89, 38), (8, 62, 58)]
+BEAM_COLORFUL = [(255, 50, 100), (40, 140, 255), (50, 200, 80), (30, 185, 170), (100, 70, 255), (40, 140, 255),
+                 (255, 120, 40), (240, 50, 180), (180, 40, 240)]
 BEAM_OCEAN = [(100, 80, 220), (60, 120, 255), (80, 100, 200), (50, 140, 220), (120, 80, 255), (70, 130, 255),
               (140, 100, 240), (90, 110, 230), (130, 70, 255)]
-BEAM_MARGIN = 48  # how far out the glow goes
-# Across the edge, how a blurred box edge falls off (a gaussian) at six stops: the bloom's (blur 22.5, its box 20 px
-# out, faded out by 48) and the inner glow's (blur 3, its box 2 px out, about 10 px deep).
-_STOPS = (0, 0.2, 0.4, 0.6, 0.8, 1)
-_BLOOM_FALL, _INNER_FALL = (1, 0.83, 0.63, 0.43, 0.165, 0), (1, 0.67, 0.34, 0.12, 0.03, 0)
 
 
 def _osc(k, t):
@@ -555,50 +555,35 @@ def _osc(k, t):
 
 
 def _filtered(rgb, degrees):
-    """hue-rotate(deg) brightness(1.9) saturate(1.2), each clamped, as a browser does."""
+    """hue-rotate(deg) brightness(.75) saturate(1.2), each clamped, as a browser does."""
     c, s, t = math.cos(math.radians(degrees)), math.sin(math.radians(degrees)), 1.2
     r, g, b = (v / 255 for v in rgb)
 
     def clamp(v):
         return max(0.0, min(1.0, v))
 
-    r1 = clamp(1.9 * clamp((0.213 + c * 0.787 - s * 0.213) * r + (0.715 - c * 0.715 - s * 0.715) * g + (0.072 - c * 0.072 + s * 0.928) * b))
-    g1 = clamp(1.9 * clamp((0.213 - c * 0.213 + s * 0.143) * r + (0.715 + c * 0.285 + s * 0.140) * g + (0.072 - c * 0.072 - s * 0.283) * b))
-    b1 = clamp(1.9 * clamp((0.213 - c * 0.213 - s * 0.787) * r + (0.715 - c * 0.715 + s * 0.715) * g + (0.072 + c * 0.928 + s * 0.072) * b))
+    r1 = clamp(0.75 * clamp((0.213 + c * 0.787 - s * 0.213) * r + (0.715 - c * 0.715 - s * 0.715) * g + (0.072 - c * 0.072 + s * 0.928) * b))
+    g1 = clamp(0.75 * clamp((0.213 - c * 0.213 + s * 0.143) * r + (0.715 + c * 0.285 + s * 0.140) * g + (0.072 - c * 0.072 - s * 0.283) * b))
+    b1 = clamp(0.75 * clamp((0.213 - c * 0.213 - s * 0.787) * r + (0.715 - c * 0.715 + s * 0.715) * g + (0.072 + c * 0.928 + s * 0.072) * b))
     return (clamp((0.213 + 0.787 * t) * r1 + (0.715 - 0.715 * t) * g1 + (0.072 - 0.072 * t) * b1),
             clamp((0.213 - 0.213 * t) * r1 + (0.715 + 0.285 * t) * g1 + (0.072 - 0.072 * t) * b1),
             clamp((0.213 - 0.213 * t) * r1 + (0.715 - 0.715 * t) * g1 + (0.072 + 0.928 * t) * b1))
 
 
-def _side(fx, fy):
-    """Which side a blob placed at (fx, fy) % lies on: 0 top, 1 right, 2 bottom, 3 left."""
-    d = (fy, 100 - fx, 100 - fy, fx)
-    return d.index(min(d))
-
-
-def draw_beam(cr, w, h, off, inward, t, palette):
-    """The beam for a w x h frame whose top-left corner is at (off, off), as it is `t` seconds in."""
-    gx, gy, rc = max(0.35, min(4, w / 350)), max(0.35, min(4, h / 140)), min(30, w / 2, h / 2)
-    hue = 30 * math.sin(2 * math.pi * t / 14)  # 30 degrees either way over 14 s
+def draw_beam(cr, w, h, t, palette):
+    """The beam inside a w x h frame at (0, 0), as it is `t` seconds in."""
+    rc, band = min(BEAM_RADIUS, w / 2, h / 2), min(BEAM_BAND, w / 2, h / 2)
+    hue = 360 * (t / 16 % 1)  # the whole wheel every 16 s
     colours = [_filtered(c, hue) for c in palette]
     o = [_osc(k, t) for k in range(len(BEAM_OSC))]
-    length = (w, h, w, h)
 
-    def half_ellipse(s, a, reach, depth, fall, peak, rgb):
-        """Half an ellipse against side s: centred `a` along it on the edge, `reach` along, `depth` across."""
-        if peak <= 0.002:
+    def blob(cx, cy, rx, ry, rgb, alpha):
+        """A radial-gradient ellipse: `alpha` of the colour in the middle, clear at its edge."""
+        if alpha <= 0.002 or rx <= 0 or ry <= 0:
             return
-        if s == 0:
-            cx, cy, rx, ry = off + a, off, reach, depth
-        elif s == 2:
-            cx, cy, rx, ry = off + a, off + h, reach, depth
-        elif s == 3:
-            cx, cy, rx, ry = off, off + a, depth, reach
-        else:
-            cx, cy, rx, ry = off + w, off + a, depth, reach
         pattern = cairo.RadialGradient(0, 0, 0, 0, 0, 1)
-        for at, f in zip(_STOPS, fall):
-            pattern.add_color_stop_rgba(at, rgb[0], rgb[1], rgb[2], peak * f)
+        pattern.add_color_stop_rgba(0, rgb[0], rgb[1], rgb[2], alpha)
+        pattern.add_color_stop_rgba(1, rgb[0], rgb[1], rgb[2], 0)
         cr.save()
         cr.translate(cx, cy)
         cr.scale(rx, ry)
@@ -607,81 +592,84 @@ def draw_beam(cr, w, h, off, inward, t, palette):
         cr.fill()  # (before restore: the source is part of the saved state)
         cr.restore()
 
-    # The glow: only outside the frame (or, inward, only inside it); the bloom under the inner glow.
+    def reaches(b, x0, y0, x1, y1):
+        cx, cy, rx, ry = b[:4]
+        return cx + rx > x0 and cx - rx < x1 and cy + ry > y0 and cy - ry < y1
+
+    # This frame's blobs (centre, reach, colour, alpha), the first on top: the ring's, and the inner glow's with its
+    # four white corners (radius 60, clear at 70%) under them.
+    ring, inner = [], []
+    for ci, (fx, fy, rw, rh, iw, ih, reg, quarter) in enumerate(BEAM_BLOB):
+        r = reg - 1
+        cx, cy = fx / 100 * w + o[r * 4 + 2], fy / 100 * h + o[r * 4 + 3]
+        ring.append((cx, cy, rw * o[r * 4], rh * o[r * 4 + 1] * o[12], colours[ci], o[13 + quarter]))
+        inner.append((cx, cy, iw * o[r * 4], ih * o[r * 4 + 1] * o[12], colours[ci], o[13 + quarter]))
+    white = _filtered((255, 255, 255), hue)
+    inner += [(w if q % 2 else 0, h if q >= 2 else 0, 42, 42, white, 0.18 * o[13 + q]) for q in range(4)]
+
+    def mesh(pattern, x0, y0, x1, y1, alphas):
+        """A patch whose opacity (x .44) is bilinear between its corners (top-left, top-right, bottom-right, bottom-left)."""
+        pattern.begin_patch()
+        pattern.move_to(x0, y0)
+        pattern.line_to(x1, y0)
+        pattern.line_to(x1, y1)
+        pattern.line_to(x0, y1)
+        for i, a in enumerate(alphas):
+            pattern.set_corner_color_rgba(i, 0, 0, 0, a * 0.44)
+        pattern.end_patch()
+
     cr.save()
-    if inward:
-        cr.rectangle(off, off, w, h)
-    else:
-        cr.rectangle(0, 0, w + 2 * off, h + 2 * off)
-        cr.rectangle(off, off, w, h)
-        cr.set_fill_rule(cairo.FILL_RULE_EVEN_ODD)
+    rounded(cr, w, h, rc)
+    cr.clip()
+    # The inner glow, opacity .44, in four bands: the top and bottom with the corners (where the two masks add up to
+    # 1 - (1 - a)(1 - b): bilinear), the left and right between them.
+    for x0, y0, x1, y1 in ((0, 0, w, band), (0, h - band, w, h), (0, band, band, h - band), (w - band, band, w, h - band)):
+        if x1 - x0 < 1 or y1 - y0 < 1:
+            continue
+        cr.save()
+        cr.rectangle(x0, y0, x1 - x0, y1 - y0)
+        cr.clip()
+        cr.push_group()
+        for b in reversed(inner):
+            if reaches(b, x0, y0, x1, y1):
+                blob(*b)
+        cr.pop_group_to_source()
+        if y0 == 0 and x1 - x0 == w:  # the top
+            pattern = cairo.MeshPattern()
+            mesh(pattern, 0, 0, band, band, (1, 1, 0, 1))
+            mesh(pattern, band, 0, w - band, band, (1, 1, 0, 0))
+            mesh(pattern, w - band, 0, w, band, (1, 1, 1, 0))
+        elif x1 - x0 == w:  # the bottom
+            pattern = cairo.MeshPattern()
+            mesh(pattern, 0, h - band, band, h, (1, 0, 1, 1))
+            mesh(pattern, band, h - band, w - band, h, (0, 0, 1, 1))
+            mesh(pattern, w - band, h - band, w, h, (0, 1, 1, 1))
+        else:
+            pattern = cairo.LinearGradient(x0, 0, x1, 0)
+            pattern.add_color_stop_rgba(0, 0, 0, 0, 0.44 if x0 == 0 else 0)
+            pattern.add_color_stop_rgba(1, 0, 0, 0, 0 if x0 == 0 else 0.44)
+        cr.mask(pattern)
+        cr.restore()
+
+    # The ring (the inner 1 px, radius 16; opacity 1.54, which a browser takes as 1) and the bloom over it: its seven
+    # blobs at alpha .76, at the half of their 8 px blur that falls inside the window (.52), opacity .66.
+    if w <= 2 or h <= 2:
+        cr.restore()
+        return
+    rounded(cr, w, h, rc)
+    cr.save()
+    cr.translate(1, 1)
+    rounded(cr, w - 2, h - 2, max(0, rc - 1))
+    cr.restore()
+    cr.set_fill_rule(cairo.FILL_RULE_EVEN_ODD)
     cr.clip()
     cr.set_fill_rule(cairo.FILL_RULE_WINDING)
-    for ci, bw, bh, fx, fy in reversed(BEAM_BLOOM):  # the first blob on top
-        s = _side(fx, fy)
-        cx, cy, rx, ry = -20 + fx / 100 * (w + 40), -20 + fy / 100 * (h + 40), bw * gx, bh * gy
-        across = (abs(cy + 20), abs(cx - w - 20), abs(cy - h - 20), abs(cx + 20))[s]
-        edge = max(0.0, 1 - across / (ry if s % 2 == 0 else rx))
-        half_ellipse(s, cx if s % 2 == 0 else cy, (rx if s % 2 == 0 else ry) + 22.5, BEAM_MARGIN,
-                     _BLOOM_FALL, 0.30 * 0.77 * edge * 0.813, colours[ci])
-    blobs = []
-    for ci, reg, quarter, bw, bh, fx, fy in BEAM_EDGE:
-        r = reg - 1
-        blobs.append((_side(fx, fy), ci, quarter, fx, fy, bw * o[r * 4] * gx, bh * o[r * 4 + 1] * o[12] * gy,
-                      o[r * 4 + 2], o[r * 4 + 3]))
-    for s, ci, quarter, fx, fy, rx, ry, dx, dy in reversed(blobs):
-        cx, cy = -2 + fx / 100 * (w + 4) + dx, -2 + fy / 100 * (h + 4) + dy
-        across = (abs(cy + 2), abs(cx - w - 2), abs(cy - h - 2), abs(cx + 2))[s]
-        edge = max(0.0, 1 - across / (ry if s % 2 == 0 else rx))
-        half_ellipse(s, cx if s % 2 == 0 else cy, (rx if s % 2 == 0 else ry) + 3, 10,
-                     _INNER_FALL, 0.34 * o[13 + quarter] * edge * 0.748, colours[ci])
+    for b in reversed(ring):
+        if reaches(b, 0, 0, w, h):
+            blob(*b)
+    for ci, bw, bh in reversed(BEAM_BLOOM):
+        blob(BEAM_BLOB[ci][0] / 100 * w, BEAM_BLOB[ci][1] / 100 * h, bw, bh, colours[ci], 0.76 * 0.52 * 0.66)
     cr.restore()
-
-    # The ring, on top: the inner 1 px of the frame, lit where the blobs are; its corners arcs of radius 30.
-    def ring_at(x, y):
-        r = g = b = a = 0.0
-        for s, ci, quarter, fx, fy, rx, ry, dx, dy in reversed(blobs):
-            ex, ey = (x - (fx / 100 * w + dx)) / rx, (y - (fy / 100 * h + dy)) / ry
-            d2 = ex * ex + ey * ey
-            if d2 >= 1:
-                continue
-            v = (1 - math.sqrt(d2)) * o[13 + quarter]
-            c = colours[ci]
-            r, g, b, a = c[0] * v + r * (1 - v), c[1] * v + g * (1 - v), c[2] * v + b * (1 - v), v + a * (1 - v)
-        return ((r / a, g / a, b / a), a * 0.94) if a > 0 else ((0, 0, 0), 0)
-
-    for s, ci, quarter, fx, fy, rx, ry, dx, dy in reversed(blobs):
-        cx, cy = fx / 100 * w + dx, fy / 100 * h + dy
-        along, reach = (cx, rx) if s % 2 == 0 else (cy, ry)
-        across = (abs(cy), abs(cx - w), abs(cy - h), abs(cx))[s]
-        edge = max(0.0, 1 - across / (ry if s % 2 == 0 else rx))
-        a0, a1 = max(rc, along - reach), min(length[s] - rc, along + reach)
-        peak = 0.94 * o[13 + quarter] * edge
-        if a1 - a0 < 1 or peak <= 0.002:
-            continue
-        rgb = colours[ci]
-        if s % 2 == 0:
-            line = cairo.LinearGradient(off + along - reach, 0, off + along + reach, 0)
-            cr.rectangle(off + a0, off if s == 0 else off + h - 1, a1 - a0, 1)
-        else:
-            line = cairo.LinearGradient(0, off + along - reach, 0, off + along + reach)
-            cr.rectangle(off + w - 1 if s == 1 else off, off + a0, 1, a1 - a0)
-        line.add_color_stop_rgba(0, rgb[0], rgb[1], rgb[2], 0)
-        line.add_color_stop_rgba(0.5, rgb[0], rgb[1], rgb[2], peak)
-        line.add_color_stop_rgba(1, rgb[0], rgb[1], rgb[2], 0)
-        cr.set_source(line)
-        cr.fill()
-    if rc >= 1:
-        cr.set_line_width(1)
-        for (ccx, ccy, start) in ((rc, rc, math.pi), (w - rc, rc, 1.5 * math.pi), (w - rc, h - rc, 0), (rc, h - rc, 0.5 * math.pi)):
-            mid = start + math.pi / 4
-            rgb, alpha = ring_at(ccx + rc * math.cos(mid), ccy + rc * math.sin(mid))
-            if alpha < 0.01:
-                continue
-            cr.set_source_rgba(rgb[0], rgb[1], rgb[2], alpha)
-            cr.new_sub_path()
-            cr.arc(off + ccx, off + ccy, rc - 0.5, start, start + math.pi / 2)
-            cr.stroke()
 
 
 def run_outline(color, paused):
@@ -692,9 +680,9 @@ def run_outline(color, paused):
     settings = Gtk.Settings.get_default()
     # Paused: the blues, still. Where the desktop is set to show no animations: one still frame.
     still = paused or (settings is not None and not settings.get_property('gtk-enable-animations'))
-    palette = BEAM_OCEAN if paused else BEAM_SUNSET
+    palette = BEAM_OCEAN if paused else BEAM_COLORFUL
     state = {'xid': 0, 'rect': None, 'hidden_until': 0.0, 'buf': b'', 'sized': None, 'shadow': (0, 0, 0, 0),
-             'inward': False, 'start': time.monotonic()}
+             'start': time.monotonic()}
 
     def shadow(xid, scale):
         # A client-decorated GTK window draws its shadow inside its own X window and says how wide it is in
@@ -720,8 +708,7 @@ def run_outline(color, paused):
         cr.set_operator(cairo.OPERATOR_OVER)
         if state['rect'] is not None:
             _x, _y, w, h = state['rect']
-            draw_beam(cr, w, h, 0 if state['inward'] else BEAM_MARGIN, state['inward'],
-                      0 if still else time.monotonic() - state['start'], palette)
+            draw_beam(cr, w, h, 0 if still else time.monotonic() - state['start'], palette)
         return False
 
     win.connect('draw', draw)
@@ -743,12 +730,10 @@ def run_outline(color, paused):
         return (e.x + left, e.y + top, w, h) if w > 0 and h > 0 else None
 
     def bands():
-        """Where the beam is in the window: the glow's band and the ring's corners (window coordinates)."""
+        """Where the beam is in the window: the band just inside the frame's edge."""
         x, y, w, h = state['rect']
-        m, c = (BEAM_MARGIN, 31) if not state['inward'] else (0, BEAM_MARGIN)
-        ww, wh = w + 2 * m, h + 2 * m
-        return [(0, 0, ww, m + c), (0, wh - m - c, ww, m + c), (0, m + c, m + c, wh - 2 * (m + c)),
-                (ww - m - c, m + c, m + c, wh - 2 * (m + c))]
+        c = min(BEAM_BAND, w // 2, h // 2)
+        return [(0, 0, w, c), (0, h - c, w, c), (0, c, c, h - 2 * c), (w - c, c, c, h - 2 * c)]
 
     def follow():
         rect = frame()
@@ -759,28 +744,13 @@ def run_outline(color, paused):
             win.hide()
             return True
         x, y, w, h = rect
-        root = screen.get_root_window()
-        # A window as wide as the screen (maximized) has no room outside it: the glow goes inward.
-        state['inward'] = root is not None and x <= 0 and x + w >= root.get_width()
-        m = 0 if state['inward'] else BEAM_MARGIN
-        if composited:
-            # The window is cut to the beam's band: outside the frame (or, inward, inside its edge), and the ring's
-            # corners; nothing lies over the content.
-            shape = cairo.Region(cairo.RectangleInt(0, 0, w + 2 * m, h + 2 * m))
-            if state['inward']:
-                inner = min(BEAM_MARGIN, w // 2, h // 2)
-                shape.subtract(cairo.RectangleInt(inner, inner, w - 2 * inner, h - 2 * inner))
-            else:
-                rc = int(min(30, w // 2, h // 2))
-                shape.subtract(cairo.RectangleInt(m + 1, m + rc, max(0, w - 2), max(0, h - 2 * rc)))
-                shape.subtract(cairo.RectangleInt(m + rc, m + 1, max(0, w - 2 * rc), max(0, h - 2)))
-        else:
-            t = min(3, w // 2, h // 2)
-            shape = cairo.Region(cairo.RectangleInt(0, 0, w, h))
-            shape.subtract(cairo.RectangleInt(t, t, w - 2 * t, h - 2 * t))
-            m = 0
-        win.move(x - m, y - m)
-        win.resize(w + 2 * m, h + 2 * m)
+        # The window is the frame, cut to the beam's band just inside its edge (or, without a compositor, to the plain
+        # line): nothing lies over the middle of it.
+        t = min(BEAM_BAND if composited else 3, w // 2, h // 2)
+        shape = cairo.Region(cairo.RectangleInt(0, 0, w, h))
+        shape.subtract(cairo.RectangleInt(t, t, w - 2 * t, h - 2 * t))
+        win.move(x, y)
+        win.resize(w, h)
         win.show_all()
         win.shape_combine_region(shape)
         # Click-through: an empty input shape sends every click to the window underneath.
