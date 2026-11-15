@@ -8,7 +8,7 @@
  */
 import { AsyncLocalStorage } from 'async_hooks';
 import { hardKeyRefusal, keysOf } from './hard-keys';
-import { fenceActive, fencePointer } from '../core/fence';
+import { fenceActive, fencePointer, pointerPoints } from '../core/fence';
 
 let hook: (() => Promise<void>) | null = null;
 
@@ -243,7 +243,52 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
   });
   guardHardKeys(target);
   fencePointerMethods(target);
+  ownUiPointerMethods(target);
   return target;
+}
+
+/** The process of the top-level window at a screen point (the pointer's own position for null); null when it cannot be told. */
+type PointPid = (at: { x: number; y: number } | null) => Promise<number | null>;
+/** Windows: WindowFromPoint, its root window, that window's process (the bridge's pid-at-point). Not read on macOS or Linux yet. */
+const platformPointPid: PointPid = async at => {
+  if (process.platform !== 'win32') return null;
+  const { psRunner } = await import('./ps-runner');
+  const r = await psRunner.run({ cmd: 'pid-at-point', ...(at ? { x: Math.round(at.x), y: Math.round(at.y) } : {}) }) as { processId?: number };
+  return typeof r?.processId === 'number' && r.processId > 0 ? r.processId : null;
+};
+let pointPid: PointPid = process.env.VITEST ? async () => null : platformPointPid;
+/** For tests: what is at a point. */
+export function __setPointPidReaderForTests(f: PointPid | null): void {
+  pointPid = f ?? platformPointPid;
+}
+
+/**
+ * A press, drag or scroll at coordinates lands on whatever window is at that point, in front or not: a host app's own
+ * card (CLAWD_OWN_UI_PIDS, docs/pill-host.md) has the user's Yes button on it, and a blind click there would answer for
+ * them. Before every pointer method of this object but a move or a release, the window at each of its points (both
+ * ends of a drag; the pointer's own position when it names none) must not be own UI. Outermost, like the fence, so a
+ * move followed by a bare press is checked where the pointer is. Only read when a host named its own UI: the built-in
+ * pill steps out of the way of a press instead (beforePointerPress). A point that cannot be read is let through.
+ */
+function ownUiPointerMethods(target: object): void {
+  const t = target as Record<string, unknown>;
+  for (const m of pointerMethods(target)) {
+    if (m === 'mouseUp' || m === 'mouseMove' || m === 'mouseMoveRelative') continue;
+    const f = t[m];
+    if (typeof f !== 'function') continue;
+    t[m] = async (...args: unknown[]) => {
+      if (inInput.getStore() !== 'user' && (process.env.CLAWD_OWN_UI_PIDS || process.env.CLAWD_OWN_UI_PIDS_FILE)) {
+        const points: Array<{ x: number; y: number } | null> = pointerPoints(m, args);
+        for (const at of points.length ? points : [null]) {
+          const pid = await pointPid(at).catch(() => null);
+          if (pid !== null && isOwnUiPid(pid)) {
+            throw new Error(`${at ? `the point (${Math.round(at.x)}, ${Math.round(at.y)})` : 'the point under the pointer'} is clawdcursor's own on-screen control — it is the user's, never read or acted on. Target the app instead.`);
+          }
+        }
+      }
+      return f.apply(target, args);
+    };
+  }
 }
 
 /**

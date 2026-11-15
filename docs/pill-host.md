@@ -25,6 +25,10 @@ An element is refused by the process it belongs to and by the process of the win
 element that names no process goes to the window in front: when that is a window of one of these processes (the user
 just clicked the host app), it is refused too, so "press Yes" can never land on the host's own button.
 
+A click, drag or scroll at coordinates is refused when the window at that point is a window of one of these processes,
+whichever window is in front (both ends of a drag; where the pointer is, for a press with no coordinates). Windows
+only for now: on macOS and Linux the window at a point is not read, so only the window in front is checked there.
+
 `CLAWD_NO_BANNER=1` and `--no-banner` still turn the pill and the outline off, hosted or not.
 
 ### When the command fails
