@@ -36,6 +36,9 @@ export function streamJsonUser(text: string): string {
 export function claudeTaskCommand(o: { exe: string; model?: string; mcpConfigPath: string; task: string }): CliCommand {
   return {
     unsetEnv: hostSessionEnv(),
+    // claude -p starts the model without waiting for a server slower than its connect window: init says "pending",
+    // the agent has no tools and may invent a PASS (a clawdcursor cold start on macOS, 2026-11-15). Wait for it, up to 60 s.
+    env: { MCP_CONNECTION_NONBLOCKING: 'false', MCP_TIMEOUT: '60000' },
     cmd: o.exe,
     args: [
       '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
