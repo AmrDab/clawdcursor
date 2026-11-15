@@ -1,5 +1,5 @@
 /**
- * The outline follows the window the agent works in after its own `window focus` and `open_app` too, not only after an act
+ * The working window (control.ts workingWindow, the pill's "in <app>") follows the agent's own `window focus` and `open_app` too, not only after an act
  * (1.6.0). macOS eval 2026-11-10: after `window open_app Calculator` or `window focus "RC1527 Test"` the outline stayed on
  * the previous app (hidden behind the new one) until the next act, so every read that followed the switch (read_tree,
  * screenshot, copy_all_text) ran with the pill showing and no outline.
@@ -59,15 +59,15 @@ afterEach(() => {
   controlBanner.__resetForTests();
 });
 
-describe('the outline follows the agent\'s own focus and launches', () => {
+describe('the working window follows the agent\'s own focus and launches (the beam is told nothing)', () => {
   it('window focus by title: the outline goes to that window, with no act', async () => {
     const d = fakeDesktop({ onFocus: () => { fg = TEST; return true; } });
     await d.keyPress('a');
-    expect(outlines[0].written).toEqual(['TARGET 1440 100']);
+    expect(outlines[0].written).toEqual([]);  // the beam is on the display: nothing is sent
     await d.focusWindow({ title: 'RC1527 Test' });
     expect(workingWindow()).toEqual({ processId: 300, handle: 0x7b2 });
     expect(workingIn()?.processName).toBe('firefox');
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300']);
+    expect(outlines[0].written).toEqual([]);  // the beam is on the display: nothing is sent
     expect(d.sent).toEqual(['key a']);
   });
 
@@ -75,7 +75,7 @@ describe('the outline follows the agent\'s own focus and launches', () => {
     const d = fakeDesktop({ onFocus: () => { setTimeout(() => { fg = TEST; }, 150); return true; } });
     await d.keyPress('a');
     await d.focusWindow({ title: 'RC1527 Test' });
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300']);
+    expect(outlines[0].written).toEqual([]);  // the beam is on the display: nothing is sent
   });
 
   it('open_app: the outline goes to the launched window, by its pid or title', async () => {
@@ -84,19 +84,19 @@ describe('the outline follows the agent\'s own focus and launches', () => {
     await d.openApp('Calculator');
     expect(workingWindow()).toEqual({ processId: 400, handle: 0x9c4 });
     expect(workingIn()?.processName).toBe('Calculator');
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 2500 400']);
+    expect(outlines[0].written).toEqual([]);  // the beam is on the display: nothing is sent
   });
 
   it('open_app that reports no window: the outline goes to a window of the app it launched, and to no other', async () => {
     const d = fakeDesktop({ onOpen: () => { fg = CALC; return {}; } });
     await d.keyPress('a');
     await d.openApp('Calculator');
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 2500 400']);
+    expect(outlines[0].written).toEqual([]);  // the beam is on the display: nothing is sent
     // Another app in front after the launch is not the one the agent opened: no window, so no outline.
     fg = EDGE;
     await fakeDesktop().openApp('Calculator');
     expect(workingWindow()).toBeUndefined();
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 2500 400', 'TARGET']);
+    expect(outlines[0].written).toEqual([]);  // the beam is on the display: nothing is sent
   });
 
   it('a read after a switch does not move it, whatever is in front by then', async () => {
@@ -109,7 +109,7 @@ describe('the outline follows the agent\'s own focus and launches', () => {
     await d.getUiTree();
     await d.invokeElement({ name: 'Total', action: 'get-value' });
     expect(workingWindow()).toEqual({ processId: 300, handle: 0x7b2 });
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300']);
+    expect(outlines[0].written).toEqual([]);  // the beam is on the display: nothing is sent
   });
 
   it('a failed focus does not move it', async () => {
@@ -117,7 +117,7 @@ describe('the outline follows the agent\'s own focus and launches', () => {
     await d.keyPress('a');
     await d.focusWindow({ title: 'RC1527 Test' });
     expect(workingWindow()).toEqual({ processId: 100, handle: 0x5a0 });
-    expect(outlines[0].written).toEqual(['TARGET 1440 100']);
+    expect(outlines[0].written).toEqual([]);  // the beam is on the display: nothing is sent
   });
 
   it('a focus that reports success but never comes to the front does not move it, and the next input is still refused', async () => {
@@ -125,7 +125,7 @@ describe('the outline follows the agent\'s own focus and launches', () => {
     await d.keyPress('a');
     await d.focusWindow({ title: 'RC1527 Test' });
     expect(workingWindow()).toEqual({ processId: 100, handle: 0x5a0 });
-    expect(outlines[0].written).toEqual(['TARGET 1440 100']);
+    expect(outlines[0].written).toEqual([]);  // the beam is on the display: nothing is sent
     await expect(d.keyPress('b')).rejects.toThrow(/foreground changed: you focused "RC1527 Test", but "msedge" \(pid 100\) is in front/);
     expect(d.sent).toEqual(['key a']);
   });
@@ -139,6 +139,6 @@ describe('the outline follows the agent\'s own focus and launches', () => {
     fg = TEST;
     await d.keyPress('c');
     expect(d.sent).toEqual(['key a', 'key c']);
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300']);
+    expect(outlines[0].written).toEqual([]);  // the beam is on the display: nothing is sent
   });
 });

@@ -26,16 +26,18 @@ by src/core/banner.ts:
                      keyboard, so the box is still a window opened by that click.)
                      stdin: "HIDE <ms>" steps aside for an agent's click;
                      "ACTIVITY <text>" replaces the activity text.
-  overlay.py outline [--color #RRGGBB]
-                     a thin border around the window the agent works in, and
-                     nothing else: no fill, nothing on the rest of the screen;
-                     clicks pass straight through it. stdin: "TARGET <xid> <pid>"
-                     names the window (a bare "TARGET": none); the border is drawn
-                     while that is the active window, and follows it. "HIDE <ms>"
-                     steps aside for a screen capture.
-                     The border is steady here: the travelling highlight of the
-                     Windows and macOS drawers (#392) waits until it can be
-                     checked on a live Linux desktop.
+  overlay.py outline [--color #RRGGBB] [--paused]
+                     the border beam around the display, on every monitor, and
+                     nothing else: no fill, nothing over the middle of the screen;
+                     clicks pass straight through it. It is up from the start and
+                     tracks no window; the monitors are looked at again every
+                     100 ms. stdin: "HIDE <ms>" steps aside for a screen capture
+                     ("TARGET ..." lines are ignored).
+                     The beam is Border Beam's pulse-inner (draw_beam): coloured
+                     blobs that breathe just inside the screen's edge, a 1 px ring
+                     and a glow 28 px deep, about 10 frames a second.
+                     --paused: the same in blue ("ocean"), still. Without a
+                     compositor (no alpha): a plain steady line in --color.
 
 When stdin closes (the parent is gone) the process exits.
   overlay.py --probe prints "ok" when GTK can open the display (banner.ts uses
@@ -509,70 +511,250 @@ def run_pill():
         layout()
 
 
-def run_outline(color, thickness):
-    gi.require_version('GdkX11', '3.0')
-    from gi.repository import GdkX11  # noqa: F401  (gives the active window its get_xid)
-    r, g, b = hex_rgb(color)
-    screen = Gdk.Screen.get_default()
-    win, _composited = popup(1, 1)
-    state = {'xid': 0, 'rect': None, 'hidden_until': 0.0, 'buf': b'', 'sized': None, 'shadow': (0, 0, 0, 0)}
+# The border beam (#392): Border Beam as <BorderBeam size="pulse-inner" colorVariant="gold" borderRadius={23}
+# duration={3.9} hueRange={46}> - the library's defaults for the rest, theme "dark" - by Jakub Antalik (libraries.dev,
+# github.com/Jakubantalik/Libraries.dev, packages/border-beam), MIT License, Copyright (c) 2026 Jakub Antalik. The
+# library's numbers and its licence notice in full are at the top of scripts/window-outline.ps1.
+# Inside the window's edge: an inner glow of coloured blobs (and four faint white ones at the corners) shown within
+# 28 px of the edge, a 1 px ring of radius 23 lit by the same blobs, and a bloom on that ring; the blobs breathe (size,
+# place, opacity) on the library's periods and the colours turn the whole wheel every 16 s. Here each blob is a cairo
+# radial gradient and the glow's 28 px mask a gradient (a bilinear mesh in the corners), drawn 10 times a second.
+BEAM_DURATION = 3.9
+BEAM_RADIUS = 23
+BEAM_BAND = 28  # the inner glow's mask: 1 at the edge, 0 this far in
+_SP, _DR, _OP, _GH = 0.28, 33.0, 0.48, 0.34
+_BS, _SS, _GHS = 1.9 * BEAM_DURATION / 2.3, 2.6 * BEAM_DURATION / 2.3, 2.4 * BEAM_DURATION / 2.3
+# from, to, period, delay: per blob region 1..3 its width, height, x, y; the glow's height; each quarter's opacity
+# (top-left, top-right, bottom-left, bottom-right).
+BEAM_OSC = [
+    (1 - _SP, 1 + _SP * 1.1, _SS * 0.9, 0), (1 + _SP * 0.9, 1 - _SP * 0.85, _SS * 1.26, 0),
+    (-_DR, _DR * 0.9, _BS * 1.6, 0), (_DR * 0.55, -_DR * 0.7, _BS * 1.6, 0),
+    (1 + _SP, 1 - _SP * 0.85, _SS * 1.1, 0), (1 - _SP * 0.8, 1 + _SP * 1.05, _SS * 0.81, 0),
+    (_DR * 0.8, -_DR * 0.9, _BS * 1.88, 0), (-_DR, _DR * 0.65, _BS * 1.88, 0),
+    (1 - _SP * 0.6, 1 + _SP * 1.15, _SS * 0.98, 0), (1 + _SP * 0.75, 1 - _SP, _SS * 1.4, 0),
+    (-_DR * 0.6, _DR, _BS * 1.45, 0), (-_DR * 0.85, _DR * 0.45, _BS * 1.45, 0),
+    (1 - _GH, 1 + _GH, _GHS, 0),
+    (1 - _OP, 1, _BS, 0), (1 - _OP, 1, _BS * 1.32, _BS * 0.28), (1 - _OP, 1, _BS * 0.84, _BS * 0.55),
+    (1 - _OP, 1, _BS * 1.58, _BS * 0.83)]
+# The palette's blobs, one per colour in its order: place x, y (% of the box), the ring's reach x, y (px), the inner
+# glow's, region (1..3), quarter (0 tl, 1 tr, 2 bl, 3 br).
+BEAM_BLOB = [(33, -7.4, 70, 40, 65, 35, 1, 0), (12, -5, 60, 35, 55, 30, 2, 0), (2.1, 68.3, 40, 70, 35, 65, 3, 2),
+             (2.1, 68.3, 20, 35, 15, 30, 1, 2), (74.4, 100, 180, 32, 173, 28, 2, 3), (55, 100, 85, 26, 80, 22, 3, 3),
+             (93.9, 0, 74, 32, 69, 28, 1, 1), (100, 27.1, 26, 42, 22, 38, 2, 1), (100, 27.1, 52, 48, 47, 44, 3, 1)]
+# The bloom's blobs: colour, reach x, y (px), at that colour's place. They do not breathe.
+BEAM_BLOOM = [(0, 84, 48), (1, 72, 42), (2, 48, 84), (4, 216, 38), (5, 102, 31), (6, 89, 38), (8, 62, 58)]
+BEAM_GOLD = [(240, 190, 60), (255, 210, 90), (225, 165, 40), (250, 200, 70), (255, 225, 120), (230, 175, 50),
+             (245, 205, 85), (215, 155, 35), (255, 215, 100)]
+BEAM_OCEAN = [(100, 80, 220), (60, 120, 255), (80, 100, 200), (50, 140, 220), (120, 80, 255), (70, 130, 255),
+              (140, 100, 240), (90, 110, 230), (130, 70, 255)]
 
-    def shadow(xid, scale):
-        # A client-decorated GTK window draws its shadow inside its own X window and says how wide it is in
-        # _GTK_FRAME_EXTENTS (left, right, top, bottom, device pixels). Without xprop the border sits outside the shadow.
-        if not shutil.which('xprop'):
-            return (0, 0, 0, 0)
-        try:
-            out = subprocess.run(['xprop', '-id', str(xid), '_GTK_FRAME_EXTENTS'],
-                                 capture_output=True, text=True, timeout=1).stdout
-            sides = tuple(int(v) // scale for v in out.split('=')[1].split(','))
-            return sides if len(sides) == 4 else (0, 0, 0, 0)
-        except Exception:
-            return (0, 0, 0, 0)  # the property is not set: server-side decorations
 
-    def draw(_w, cr):
-        cr.set_operator(cairo.OPERATOR_SOURCE)
-        cr.set_source_rgb(r, g, b)
-        cr.paint()
-        return False
+def _osc(k, t):
+    a, b, period, delay = BEAM_OSC[k]
+    return a + (b - a) * (1 - math.cos(2 * math.pi * (t - delay) / period)) / 2
 
-    win.connect('draw', draw)
 
-    def frame():
-        """The target's visible frame (decorations included, a GTK shadow not) while it is the active window."""
-        if not state['xid'] or time.monotonic() < state['hidden_until']:
-            return None
-        active = screen.get_active_window()
-        if active is None or active.get_xid() != state['xid']:
-            return None
-        e = active.get_frame_extents()
-        sized = (state['xid'], e.width, e.height)
-        if sized != state['sized']:  # asked again only when the window changes or resizes (a maximized one has no shadow)
-            state['sized'] = sized
-            state['shadow'] = shadow(state['xid'], max(1, active.get_scale_factor()))
-        left, right, top, bottom = state['shadow']
-        w, h = e.width - left - right, e.height - top - bottom
-        return (e.x + left, e.y + top, w, h) if w > 0 and h > 0 else None
+def _filtered(rgb, degrees):
+    """hue-rotate(deg) brightness(.75) saturate(1.2), each clamped, as a browser does."""
+    c, s, t = math.cos(math.radians(degrees)), math.sin(math.radians(degrees)), 1.2
+    r, g, b = (v / 255 for v in rgb)
+
+    def clamp(v):
+        return max(0.0, min(1.0, v))
+
+    r1 = clamp(0.75 * clamp((0.213 + c * 0.787 - s * 0.213) * r + (0.715 - c * 0.715 - s * 0.715) * g + (0.072 - c * 0.072 + s * 0.928) * b))
+    g1 = clamp(0.75 * clamp((0.213 - c * 0.213 + s * 0.143) * r + (0.715 + c * 0.285 + s * 0.140) * g + (0.072 - c * 0.072 - s * 0.283) * b))
+    b1 = clamp(0.75 * clamp((0.213 - c * 0.213 - s * 0.787) * r + (0.715 - c * 0.715 + s * 0.715) * g + (0.072 + c * 0.928 + s * 0.072) * b))
+    return (clamp((0.213 + 0.787 * t) * r1 + (0.715 - 0.715 * t) * g1 + (0.072 - 0.072 * t) * b1),
+            clamp((0.213 - 0.213 * t) * r1 + (0.715 + 0.285 * t) * g1 + (0.072 - 0.072 * t) * b1),
+            clamp((0.213 - 0.213 * t) * r1 + (0.715 - 0.715 * t) * g1 + (0.072 + 0.928 * t) * b1))
+
+
+def draw_beam(cr, w, h, t, palette):
+    """The beam inside a w x h frame at (0, 0), as it is `t` seconds in."""
+    rc, band = min(BEAM_RADIUS, w / 2, h / 2), min(BEAM_BAND, w / 2, h / 2)
+    hue = 360 * (t / 16 % 1)  # the whole wheel every 16 s (hueRange does nothing for the pulse sizes)
+    colours = [_filtered(c, hue) for c in palette]
+    o = [_osc(k, t) for k in range(len(BEAM_OSC))]
+
+    def blob(cx, cy, rx, ry, rgb, alpha):
+        """A radial-gradient ellipse: `alpha` of the colour in the middle, clear at its edge."""
+        if alpha <= 0.002 or rx <= 0 or ry <= 0:
+            return
+        pattern = cairo.RadialGradient(0, 0, 0, 0, 0, 1)
+        pattern.add_color_stop_rgba(0, rgb[0], rgb[1], rgb[2], alpha)
+        pattern.add_color_stop_rgba(1, rgb[0], rgb[1], rgb[2], 0)
+        cr.save()
+        cr.translate(cx, cy)
+        cr.scale(rx, ry)
+        cr.set_source(pattern)
+        cr.arc(0, 0, 1, 0, 2 * math.pi)
+        cr.fill()  # (before restore: the source is part of the saved state)
+        cr.restore()
+
+    def reaches(b, x0, y0, x1, y1):
+        cx, cy, rx, ry = b[:4]
+        return cx + rx > x0 and cx - rx < x1 and cy + ry > y0 and cy - ry < y1
+
+    # This frame's blobs (centre, reach, colour, alpha), the first on top: the ring's, and the inner glow's with its
+    # four white corners (radius 60, clear at 70%) under them.
+    ring, inner = [], []
+    for ci, (fx, fy, rw, rh, iw, ih, reg, quarter) in enumerate(BEAM_BLOB):
+        r = reg - 1
+        cx, cy = fx / 100 * w + o[r * 4 + 2], fy / 100 * h + o[r * 4 + 3]
+        ring.append((cx, cy, rw * o[r * 4], rh * o[r * 4 + 1] * o[12], colours[ci], o[13 + quarter]))
+        inner.append((cx, cy, iw * o[r * 4], ih * o[r * 4 + 1] * o[12], colours[ci], o[13 + quarter]))
+    white = _filtered((255, 255, 255), hue)
+    inner += [(w if q % 2 else 0, h if q >= 2 else 0, 42, 42, white, 0.18 * o[13 + q]) for q in range(4)]
+
+    def mesh(pattern, x0, y0, x1, y1, alphas):
+        """A patch whose opacity (x .44) is bilinear between its corners (top-left, top-right, bottom-right, bottom-left)."""
+        pattern.begin_patch()
+        pattern.move_to(x0, y0)
+        pattern.line_to(x1, y0)
+        pattern.line_to(x1, y1)
+        pattern.line_to(x0, y1)
+        for i, a in enumerate(alphas):
+            pattern.set_corner_color_rgba(i, 0, 0, 0, a * 0.44)
+        pattern.end_patch()
+
+    cr.save()
+    rounded(cr, w, h, rc)
+    cr.clip()
+    # The inner glow, opacity .44, in four bands: the top and bottom with the corners (where the two masks add up to
+    # 1 - (1 - a)(1 - b): bilinear), the left and right between them.
+    for x0, y0, x1, y1 in ((0, 0, w, band), (0, h - band, w, h), (0, band, band, h - band), (w - band, band, w, h - band)):
+        if x1 - x0 < 1 or y1 - y0 < 1:
+            continue
+        cr.save()
+        cr.rectangle(x0, y0, x1 - x0, y1 - y0)
+        cr.clip()
+        cr.push_group()
+        for b in reversed(inner):
+            if reaches(b, x0, y0, x1, y1):
+                blob(*b)
+        cr.pop_group_to_source()
+        if y0 == 0 and x1 - x0 == w:  # the top
+            pattern = cairo.MeshPattern()
+            mesh(pattern, 0, 0, band, band, (1, 1, 0, 1))
+            mesh(pattern, band, 0, w - band, band, (1, 1, 0, 0))
+            mesh(pattern, w - band, 0, w, band, (1, 1, 1, 0))
+        elif x1 - x0 == w:  # the bottom
+            pattern = cairo.MeshPattern()
+            mesh(pattern, 0, h - band, band, h, (1, 0, 1, 1))
+            mesh(pattern, band, h - band, w - band, h, (0, 0, 1, 1))
+            mesh(pattern, w - band, h - band, w, h, (0, 1, 1, 1))
+        else:
+            pattern = cairo.LinearGradient(x0, 0, x1, 0)
+            pattern.add_color_stop_rgba(0, 0, 0, 0, 0.44 if x0 == 0 else 0)
+            pattern.add_color_stop_rgba(1, 0, 0, 0, 0 if x0 == 0 else 0.44)
+        cr.mask(pattern)
+        cr.restore()
+
+    # The ring (the inner 1 px, radius 23; opacity 1.54, which a browser takes as 1) and the bloom over it: its seven
+    # blobs at alpha .76, at the half of their 8 px blur that falls inside the window (.52), opacity .66.
+    if w <= 2 or h <= 2:
+        cr.restore()
+        return
+    rounded(cr, w, h, rc)
+    cr.save()
+    cr.translate(1, 1)
+    rounded(cr, w - 2, h - 2, max(0, rc - 1))
+    cr.restore()
+    cr.set_fill_rule(cairo.FILL_RULE_EVEN_ODD)
+    cr.clip()
+    cr.set_fill_rule(cairo.FILL_RULE_WINDING)
+    for b in reversed(ring):
+        if reaches(b, 0, 0, w, h):
+            blob(*b)
+    for ci, bw, bh in reversed(BEAM_BLOOM):
+        blob(BEAM_BLOB[ci][0] / 100 * w, BEAM_BLOB[ci][1] / 100 * h, bw, bh, colours[ci], 0.76 * 0.52 * 0.66)
+    cr.restore()
+
+
+def run_outline(color, paused):
+    # One beam window per monitor, each the size of its monitor, cut to the band just inside its edge.
+    display = Gdk.Display.get_default()
+    settings = Gtk.Settings.get_default()
+    # Paused: the blues, still. Where the desktop is set to show no animations: one still frame.
+    still = paused or (settings is not None and not settings.get_property('gtk-enable-animations'))
+    palette = BEAM_OCEAN if paused else BEAM_GOLD
+    state = {'hidden_until': 0.0, 'buf': b'', 'beams': [], 'start': time.monotonic()}  # beams: [win, rect, composited]
+
+    def make_beam():
+        win, composited = popup(1, 1)
+        beam = [win, None, composited]
+
+        def draw(_w, cr):
+            cr.set_operator(cairo.OPERATOR_SOURCE)
+            if not composited:  # no alpha on this display: a plain steady line in the colour given
+                cr.set_source_rgb(*hex_rgb(color))
+                cr.paint()
+                return False
+            cr.set_source_rgba(0, 0, 0, 0)
+            cr.paint()
+            cr.set_operator(cairo.OPERATOR_OVER)
+            if beam[1] is not None:
+                _x, _y, w, h = beam[1]
+                draw_beam(cr, w, h, 0 if still else time.monotonic() - state['start'], palette)
+            return False
+
+        win.connect('draw', draw)
+        return beam
+
+    def monitors():
+        """Every monitor's rectangle, none while stepping aside for a capture."""
+        if time.monotonic() < state['hidden_until']:
+            return []
+        out = []
+        for i in range(display.get_n_monitors()):
+            g = display.get_monitor(i).get_geometry()
+            if g.width > 0 and g.height > 0:
+                out.append((g.x, g.y, g.width, g.height))
+        return out
+
+    def bands(rect):
+        """Where the beam is on a monitor: the band just inside its edge."""
+        x, y, w, h = rect
+        c = min(BEAM_BAND, w // 2, h // 2)
+        return [(0, 0, w, c), (0, h - c, w, c), (0, c, c, h - 2 * c), (w - c, c, c, h - 2 * c)]
 
     def follow():
-        rect = frame()
-        if rect == state['rect']:
-            return True
-        state['rect'] = rect
-        if rect is None:
-            win.hide()
-            return True
-        x, y, w, h = rect
-        t = min(thickness, w // 2, h // 2)
-        # The window is cut to a hollow frame: the middle is not part of it, so nothing lies over the content.
-        ring = cairo.Region(cairo.RectangleInt(0, 0, w, h))
-        ring.subtract(cairo.RectangleInt(t, t, w - 2 * t, h - 2 * t))
-        win.move(x, y)
-        win.resize(w, h)
-        win.show_all()
-        win.shape_combine_region(ring)
-        # Click-through: an empty input shape sends every click to the window underneath.
-        win.input_shape_combine_region(cairo.Region())
+        rects = monitors()
+        while len(state['beams']) < len(rects):
+            state['beams'].append(make_beam())
+        for i, beam in enumerate(state['beams']):
+            win, old, composited = beam
+            rect = rects[i] if i < len(rects) else None
+            if rect == old:
+                continue
+            beam[1] = rect
+            if rect is None:
+                win.hide()
+                continue
+            x, y, w, h = rect
+            # The window is the monitor, cut to the beam's band just inside its edge (or, without a compositor, to the
+            # plain line): nothing lies over the middle of it.
+            t = min(BEAM_BAND if composited else 3, w // 2, h // 2)
+            shape = cairo.Region(cairo.RectangleInt(0, 0, w, h))
+            shape.subtract(cairo.RectangleInt(t, t, w - 2 * t, h - 2 * t))
+            win.move(x, y)
+            win.resize(w, h)
+            win.show_all()
+            win.shape_combine_region(shape)
+            # Click-through: an empty input shape sends every click to the window underneath.
+            win.input_shape_combine_region(cairo.Region())
+            win.queue_draw()
+        return True
+
+    def breathe():
+        # About 10 frames a second, only the band the beam is in.
+        if not still:
+            for win, rect, composited in state['beams']:
+                if rect is not None and composited:
+                    for bx, by, bw, bh in bands(rect):
+                        if bw > 0 and bh > 0:
+                            win.queue_draw_area(bx, by, bw, bh)
         return True
 
     def on_line(line):
@@ -580,9 +762,8 @@ def run_outline(color, thickness):
         if not parts:
             return
         try:
-            if parts[0] == 'TARGET':
-                state['xid'] = int(parts[1]) if len(parts) > 1 else 0
-            elif parts[0] == 'HIDE' and len(parts) > 1:
+            # (A "TARGET" line, from an older parent, is ignored: the beam is on every monitor.)
+            if parts[0] == 'HIDE' and len(parts) > 1:
                 state['hidden_until'] = time.monotonic() + max(50, min(int(parts[1]), 10000)) / 1000
         except ValueError:
             return
@@ -607,7 +788,7 @@ def run_outline(color, thickness):
     except Exception:
         pass  # no stdin: nothing to listen to
     GLib.timeout_add(100, follow)
-
+    GLib.timeout_add(100, breathe)
 
 def main(argv):
     if '--probe' in argv:
@@ -615,14 +796,14 @@ def main(argv):
         print('ok' if ok and Gdk.Display.get_default() is not None else 'no-display')
         return 0 if ok else 1
     if not argv or argv[0] not in ('pill', 'outline'):
-        sys.stderr.write('usage: overlay.py pill | outline [--color #RRGGBB] | --probe\n')
+        sys.stderr.write('usage: overlay.py pill | outline [--color #RRGGBB] [--paused] | --probe\n')
         return 2
     if Gdk.Display.get_default() is None:
         return 1
     if argv[0] == 'pill':
         run_pill()
     else:
-        run_outline(argv[argv.index('--color') + 1] if '--color' in argv else '#f59e0b', 3)
+        run_outline(argv[argv.index('--color') + 1] if '--color' in argv else '#ff7a45', '--paused' in argv)
     Gtk.main()
     return 0
 
