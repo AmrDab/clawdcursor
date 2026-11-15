@@ -411,7 +411,9 @@ program
     }
     const { doctorSetupStep } = await import('./addons');
     const code = await doctorSetupStep(opts.setup === true);
-    if (code) process.exit(code);
+    // Exit when done: the accessibility bridge doctor started keeps node alive, and "All systems go!" never returned
+    // to the prompt (2.0.0 too).
+    process.exit(code);
   });
 
 // ── Developer add-ons: a test agent and a log viewer, downloaded on first use after asking (addons.ts) ──

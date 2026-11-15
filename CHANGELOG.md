@@ -74,6 +74,8 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **macOS: the first pause after an install or upgrade reaches the user.** `pause_for_user` and confirm mode said "no
   on-screen prompt is available" while the overlay was still compiling. They now wait for that compile, and fail only
   if it fails. A compile cut short by an exiting run no longer leaves its temp file behind.
+- **`clawdcursor doctor` returns to the prompt.** After "All systems go!" it never exited: the accessibility bridge it
+  started kept the process alive (2.0.0 too).
 - **Windows: `open_app` starts apps directly again, not through the Start menu (10–12 s per launch).** The PowerShell that runs
   `Start-Process` was spawned detached, and a detached PowerShell exits 0 without starting anything. Every alias launch
   (Paint, Character Map, the Snipping Tool, ...) waited 4 s for a window, then fell back to the Start menu: Escape, Win,
