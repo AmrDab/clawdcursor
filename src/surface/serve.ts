@@ -16,6 +16,7 @@ import { createMcpServer, servedTools, startMcpStdio, startMcpHttp, type McpServ
 import { createUtilityServer, describeRoutes } from './http-utility';
 import { initServerToken } from './auth';
 import { endAllSessions, reportUncleanExits } from './session-log';
+import { startAgentLiveLog, type LiveLog } from './live-log';
 import { claimPidFile, releasePidFile, recordLockPort, isProcessAlive, DAEMON_LOCK } from './pidfile';
 import { spoolBeforeExit } from '../core/observability/telemetry';
 import { logger } from '../core/observability/logger';
@@ -254,7 +255,8 @@ async function serveHttp(opts: ServeOptions): Promise<void> {
   } catch (err) {
     console.warn('MCP HTTP transport not loaded:', (err as Error).message);
   }
-  const exit = exitRoutine(endAllSessions, () => releasePidFile(DAEMON_LOCK));
+  let liveLog: LiveLog | null = null;
+  const exit = exitRoutine(endAllSessions, () => { releasePidFile(DAEMON_LOCK); liveLog?.stop(); });
   const app = createUtilityServer({
     host: BIND_HOST,
     // POST /stop (and the dashboard Stop) exits like Ctrl+C: the lock is released, so `stop` never meets a stale one.
@@ -278,9 +280,12 @@ async function serveHttp(opts: ServeOptions): Promise<void> {
     console.log(`\nAll mutating endpoints require: ${pc.cyan('Authorization: Bearer <token>')}`);
     console.log(`\nReady. ${e('🐾', '')}`);
     announceStart('http', compact);
+    // In a terminal: every action from any clawdcursor on this computer, as it happens (live-log.ts).
+    liveLog = startAgentLiveLog();
   });
 
   process.on('SIGINT', () => {
+    liveLog?.stop();
     console.log(`\n${e('👋', '--')} Shutting down...`);
     exit('SIGINT (Ctrl+C)');
   });

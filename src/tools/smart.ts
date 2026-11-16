@@ -16,7 +16,7 @@ import { ocrEngine } from '../platform/ocr-engine';
 import { screenLockedMessage } from '../platform/mac-ax';
 import { getBrowserProcessNames } from '../platform/browser-config';
 import { ocrPointToClickPoint, windowOcrRegion } from '../platform/coord-scale';
-import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys, EMPTY_AFTER_TYPING } from './paste-guard';
+import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys, EMPTY_AFTER_TYPING, selectAllScope } from './paste-guard';
 import { wrapUntrustedScreenContent, screenJson, quoteScreenText } from '../core/untrusted-screen-content';
 import { ensureVisible } from '../core/sense/ui-map-visible';
 import { locateFieldByLabel } from '../core/sense/ui-map-field';
@@ -804,7 +804,7 @@ export function getSmartTools(): ToolDefinition[] {
         },
         mode: {
           type: 'string',
-          description: '"replace" (default with a target): select all of the field, then type. "append": type at the cursor, keeping the content (default without a target).',
+          description: '"replace" (default with a target): replace the field\'s text (select-all inside a one-line field only). A document or text area keeps its text and gets the text at the cursor unless "replace" is passed. "append": type at the cursor, keeping the content (default without a target).',
           required: false,
           enum: ['replace', 'append'],
         },
@@ -818,7 +818,8 @@ export function getSmartTools(): ToolDefinition[] {
         const processId = params.processId as number | undefined;
         // Setting a field means replacing it: macOS preselects only a file's base
         // name in a Save panel, so pasting there gave "name.txt.txt".
-        const replace = params.mode === 'replace' || (params.mode !== 'append' && !!target);
+        const asked = params.mode === 'replace';
+        let replace = asked || (params.mode !== 'append' && !!target);
 
         if (target) {
           let focused = false;
@@ -907,6 +908,19 @@ export function getSmartTools(): ToolDefinition[] {
           }
         }
 
+        // Select-all only where it takes just the field's text: over a page it turned the page blue, and in TextEdit it wiped
+        // the document (owner, 2026-11-15). A document or text area keeps its text unless the replace was asked for.
+        let kept = '';
+        if (replace) {
+          let scope: ReturnType<typeof selectAllScope> = 'unknown';
+          try { scope = selectAllScope(await ctx.a11y.getFocusedElement()); } catch { /* unread: as before, the field's select-all */ }
+          if (scope === 'other' || (scope === 'document' && !asked)) {
+            replace = false;
+            kept = scope === 'other'
+              ? ' (typed at the cursor: the focus is not in a text field, so nothing was selected)'
+              : ' (typed at the cursor: this is a document or text area, so its text was kept; to add at the end, press mod+End first; mode:"replace" replaces all of it)';
+          }
+        }
         ctx.desktop.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
         // Short text: real keystrokes, the user's clipboard never touched. Longer text is pasted (below).
         const privateTyping = ctx.platform?.typingIsPrivate?.() !== false;
@@ -964,7 +978,7 @@ export function getSmartTools(): ToolDefinition[] {
             ? ` ⚠ read back: the field shows different text (an autocomplete suggestion, or the field reformatted it); check it before going on.${fieldShows}`
             : '';
         return {
-          text: `Typed ${[...text].length} chars (${how})${target ? ` into "${target}"` : ''}${replace && !failed ? ' (replaced its content)' : ''} in ${activeInfo}${readBack}${warn ? ` ⚠ ${warn}` : ''}`,
+          text: `Typed ${[...text].length} chars (${how})${target ? ` into "${target}"` : ''}${replace && !failed ? ' (replaced its content)' : ''}${kept} in ${activeInfo}${readBack}${warn ? ` ⚠ ${warn}` : ''}`,
           ...(failed ? { isError: true } : {}),
         };
       },

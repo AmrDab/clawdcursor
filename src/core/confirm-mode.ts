@@ -180,7 +180,7 @@ export async function confirmBefore(method: string, args: unknown[], held: strin
     pauseGate.forget(key);
     return;
   }
-  if (!pauseGate.available()) {
+  if (!(await pauseGate.whenAvailable())) {
     throw new Error(`not confirmed: confirm mode is on but no on-screen prompt can ask the user (the overlay is off), so it will not ${what} — nothing was sent. Ask the user in your own chat; they can do this step themselves.`);
   }
   pauseGate.forget(key);   // an old answer to this question is never reused: the user is asked each time

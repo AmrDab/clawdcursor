@@ -33,7 +33,15 @@ import { effectLine } from '../core/effect';
  *  (`mouse_click`, `open_app`, …) or a compound tool (`computer`, `window`, …)
  *  — so a batch works whether the caller drives the granular or 6-compound API. */
 function resolveAnyTool(name: string): ToolDefinition | undefined {
-  return getTool(name) ?? getCompactTools().find(t => t.name === name);
+  const bare = bareStepName(name);
+  return getTool(bare) ?? getCompactTools().find(t => t.name === bare);
+}
+
+/** A step's tool name without the prefix the agent's host shows (`mcp__clawdcursor__accessibility`,
+ *  `mcp__plugin_clawdcursor_clawdcursor__computer`): agents copy it into steps (the Mac run, 2026-11-15). Only a
+ *  clawdcursor server's prefix is taken off, so another server's `computer` never runs as clawdcursor's. */
+export function bareStepName(name: string): string {
+  return name.replace(/^mcp__[\w-]*clawdcursor__(?=[^_])/, '');
 }
 
 /** A lightweight, declarative precondition checked (by re-perceiving) before a step runs. */
@@ -141,7 +149,7 @@ export async function executeBatch(
     logger.warn('safety.refused', { tool: c.tool, action: c.action, guard: r.guard, reason: r.why, batchStep: i });
     // The Stop and pause texts whole: they say what to do next.
     outcomes.push({ i, label, status: 'blocked', text: r.guard === 'stopped' || r.guard === 'own_ui' ? r.why : r.why.slice(0, 200) });
-    return halt(i, `step ${i} (${label}): ${r.why}`);
+    return halt(i, `step ${i + 1} (${label}): ${r.why}`);
   };
 
   for (let i = 0; i < steps.length; i++) {
@@ -171,7 +179,7 @@ export async function executeBatch(
       const g = await checkGuard(guard, ctx);
       if (!g.ok) {
         outcomes.push({ i, label, status: 'guard_failed', text: `precondition failed: ${g.detail}` });
-        return halt(i, `precondition failed at step ${i} — re-plan from current state`);
+        return halt(i, `precondition failed at step ${i + 1} — re-plan from current state`);
       }
       // The precondition takes time (find_element: seconds) and the screen can change meanwhile: check again.
       const again = await refusalBefore(call, ctx);
@@ -190,7 +198,7 @@ export async function executeBatch(
     if (res.isError) {
       forgetScreenIfActed(call);   // the halt skips afterCall
       outcomes.push({ i, label, status: 'error', text: clipScreenText(res.text || '', 200), pressedKeys: res.pressedKeys, ...target });
-      return halt(i, `step ${i} (${label}) errored`);
+      return halt(i, `step ${i + 1} (${label}) errored`);
     }
 
     const after = await afterCall(call, res, ctx);
@@ -205,12 +213,14 @@ export async function executeBatch(
   return { total: steps.length, completed, allDone: completed === steps.length, steps: outcomes, ...shot };
 }
 
+// Step numbers in the text count from 1, as the agent counts its steps: "5/6 completed, halted at step 5" read as the fifth
+// failing when the sixth had. `i`, `stoppedAt`, `imageStep` and the log's `batchStep` stay indexes.
 function renderResult(r: BatchResult): string {
-  const lines = r.steps.map(s => `  ${s.i}. [${s.status}] ${s.label} — ${s.text}`);
+  const lines = r.steps.map(s => `  ${s.i + 1}. [${s.status}] ${s.label} — ${s.text}`);
   const head = r.allDone
     ? `batch: all ${r.total} steps completed.`
-    : `batch: ${r.completed}/${r.total} completed, halted at step ${r.stoppedAt} — ${r.stopReason}`;
-  const image = r.imageStep !== undefined ? ` The image attached is step ${r.imageStep}'s.` : '';
+    : `batch: ${r.completed}/${r.total} completed, halted at step ${r.stoppedAt! + 1} — ${r.stopReason}`;
+  const image = r.imageStep !== undefined ? ` The image attached is step ${r.imageStep + 1}'s.` : '';
   return `${head}${image}\n${lines.join('\n')}`;
 }
 
@@ -282,7 +292,7 @@ export function getBatchTools(): ToolDefinition[] {
           ...(result.image ? { image: result.image } : {}),
           steps: result.steps.map(s => {
             const a = stepArgs(steps[s.i]).action;
-            return { tool: steps[s.i].name, ...(typeof a === 'string' ? { action: a } : {}), status: s.status, text: s.text, pressedKeys: s.pressedKeys,
+            return { tool: bareStepName(steps[s.i].name), ...(typeof a === 'string' ? { action: a } : {}), status: s.status, text: s.text, pressedKeys: s.pressedKeys,
               ...(s.app ? { app: s.app } : {}), ...(s.appPid ? { appPid: s.appPid } : {}), ...(s.appHandle ? { appHandle: s.appHandle } : {}) };
           }),
         };

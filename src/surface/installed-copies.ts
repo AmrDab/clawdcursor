@@ -152,6 +152,36 @@ const LABEL: Record<CopyKind, string> = {
 
 const RELEASES = 'https://github.com/AmrDab/clawdcursor/releases/latest';
 
+/** GitHub's latest release, as `doctor` reads it: 5 s, then an AbortError. */
+export async function fetchLatestRelease(): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    return await fetch('https://api.github.com/repos/AmrDab/clawdcursor/releases/latest', {
+      headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'clawdcursor-doctor' },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * The version every copy should be on: the latest release. `doctor` and `versions` both flag copies against it, never
+ * against the running copy's own version: a source checkout or a release candidate is newer than anything the printed
+ * fix installs ("older than v2.1.0" while npm's latest was 2.0.0, Mac check 2026-11-16), and an old running copy would
+ * hide the release it is missing. Undefined when it cannot be read: the newest copy found is the reference then.
+ */
+async function latestRelease(): Promise<string | undefined> {
+  try {
+    const res = await fetchLatestRelease();
+    if (!res.ok) return undefined;
+    return String(((await res.json()) as { tag_name?: unknown }).tag_name ?? '').replace(/^v/, '') || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** What to do about a stale copy, in one line. */
 function fixFor(kind: CopyKind, platform: NodeJS.Platform): string {
   switch (kind) {
@@ -185,4 +215,9 @@ export function describeCopies(copies: InstalledCopy[], opts: { latest?: string;
   if (npx.length) lines.push(`npx cache holds: ${npx.map(v => `v${v}`).join(', ')} (used by the plugin / npx; old ones are harmless)`);
   if (!lines.length) lines.push('no installed copies found (running from source?)');
   return { lines, stale };
+}
+
+/** `clawdcursor versions`: every copy, flagged against the same reference as `doctor` (latestRelease). */
+export async function versionsLines(copies: InstalledCopy[] = findInstalledCopies(), running: string = getPackageRoot()): Promise<string[]> {
+  return describeCopies(copies, { latest: await latestRelease(), running }).lines;
 }

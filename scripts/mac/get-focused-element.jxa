@@ -96,7 +96,8 @@ function run() {
       isEnabled: true,
       bounds: bounds,
       value: value,
-      secure: secure || undefined
+      secure: secure || undefined,
+      multiline: role === 'AXTextArea' || undefined
     });
   } catch (e) {
     return JSON.stringify(null);

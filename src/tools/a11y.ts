@@ -412,11 +412,10 @@ export function getA11yTools(): ToolDefinition[] {
       description:
         'Read the text of the focused web page or document EXACTLY (IDs, amounts, codes) — prefer it over ' +
         'OCR for pages and documents. Reads the document\'s text through accessibility: no keystrokes, ' +
-        'nothing selected. Where that cannot be read: a browser page gets select-all + copy (the clipboard ' +
-        'is restored; the result says which keys it pressed, and the page stays selected) unless focus is in ' +
-        'a field or a list; any other window gets no keys and returns the names and values in its ' +
+        'nothing selected, the clipboard untouched. A window with no document text returns the names and values in its ' +
         'accessibility tree, labelled "names only" — that is not the document\'s text, use ocr for the ' +
-        'content. Refuses in terminals. Focus the right window first.',
+        'content. Do not select-all + copy a page yourself: this reads it without the page turning blue. ' +
+        'Refuses in terminals. Focus the right window first.',
       // `ocr`'s parameter, declared here too: the `system` schema lists it, so models pass it with every read.
       parameters: {
         scope: {
@@ -442,14 +441,12 @@ export function getA11yTools(): ToolDefinition[] {
         await ctx.ensureInitialized();
         if (!ctx.platform) return { text: 'copy_all_text: platform adapter unavailable.', isError: true };
         const r = await copyAllText(ctx.platform);
-        if (!r.ok) return { text: r.text, isError: true, pressedKeys: r.pressedKeys };
-        ctx.a11y.invalidateCache();
-        const scopeNote = scope === 'screen' ? 'copy_all_text reads the focused window\'s document only; for the text of the whole screen use ocr.' : '';
-        const note = [r.note, scopeNote].filter(Boolean).join('\n');
+        if (!r.ok) return { text: r.text, isError: true };
+        const note = scope === 'screen' ? 'copy_all_text reads the focused window\'s document only; for the text of the whole screen use ocr.' : '';
         // One result's worth, so every host shows it inline (#384). Page text is third-party data, not instructions.
         const part = pageTextPart(r.text, r.window ?? 'the focused window', { find, offset });
         const body = part.body ? `\n${wrapUntrustedScreenContent(part.body)}` : '';
-        return { text: `${part.head}${body}${part.tail}${note ? `\n${note}` : ''}`, pressedKeys: r.pressedKeys, ...(part.isError ? { isError: true } : {}) };
+        return { text: `${part.head}${body}${part.tail}${note ? `\n${note}` : ''}`, ...(part.isError ? { isError: true } : {}) };
       },
     },
 

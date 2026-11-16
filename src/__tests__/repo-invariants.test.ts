@@ -76,10 +76,21 @@ describe('programs are started by absolute path, PowerShell from the private run
         // The call's own argument list: from its "(" to the matching ")".
         let i = m.index! + m[1].length, depth = 0;
         do { if (src[i] === '(') depth++; else if (src[i] === ')') depth--; i++; } while (depth > 0 && i < src.length);
-        if (!src.slice(m.index!, i).includes('psOpts(')) bad.push(`${path.relative(ROOT, f)}:${src.slice(0, m.index!).split('\n').length}`);
+        // launcherOpts (a Start-Process launcher) is psOpts with the launcher's own options.
+        const args = src.slice(m.index!, i);
+        if (!args.includes('psOpts(') && !args.includes('launcherOpts(')) bad.push(`${path.relative(ROOT, f)}:${src.slice(0, m.index!).split('\n').length}`);
       }
     }
     expect(bad).toEqual([]);
+  });
+
+  // A detached PowerShell (DETACHED_PROCESS) runs `Start-Process explorer.exe <folder>`, and Explorer opens no window:
+  // open_file on a folder and open_app "File Explorer" showed nothing (live 2026-11-14). The same PowerShell not detached opens it.
+  it('no PowerShell spawn in the sources is detached (one that runs Start-Process for the user opens no Explorer window)', () => {
+    const calls = PRODUCTION.flatMap(f => [...fs.readFileSync(f, 'utf8').matchAll(/\bspawn\(\s*powershellExe\(\)[^;]*;/g)]
+      .map(m => ({ f: rel(f), text: m[0] })));
+    expect(calls.length).toBeGreaterThanOrEqual(4);   // the scan sees the launchers (windows, uri-handler, electron) and the bridge
+    expect(calls.filter(c => /detached/.test(c.text)).map(c => c.f)).toEqual([]);
   });
 
   it('the repo root has no Microsoft/ directory (a stray PowerShell module cache), on disk or tracked', () => {
@@ -203,11 +214,20 @@ describe('files that must (not) be there', () => {
     }
   });
 
-  it('the beam and the orb carry the library\'s licence notice (#392)', () => {
-    const ps = read('scripts', 'window-outline.ps1');
-    expect(ps).toContain('Border Beam - MIT License - Copyright (c) 2026 Jakub Antalik');
-    expect(ps).toContain('The above copyright notice and this permission notice shall be included in all copies or substantial portions of');
-    expect(read('scripts', 'mac', 'overlay.swift')).toContain('MIT License,\n// Copyright (c) 2026 Jakub Antalik');
-    expect(read('scripts', 'banner.ps1')).toContain('MIT License, Copyright (c) 2026 Jakub');
+  // The orb is a port of Thinking Orbs (libraries.dev, MIT): its notice goes with it. The outline is 2.0.0's again, so
+  // nothing of Border Beam is left to credit.
+  it('the orb carries the library\'s licence notice (#392)', () => {
+    const pill = read('scripts', 'banner.ps1');
+    expect(pill).toContain('Thinking Orbs - MIT License - Copyright (c) 2026 Jakub Antalik');
+    expect(pill).toContain('The above copyright notice and this permission notice shall be included in all copies or substantial portions of');
+    expect(pill).toContain('MIT License, Copyright (c) 2026 Jakub');
+    const swift = read('scripts', 'mac', 'overlay.swift');
+    expect(swift).toContain('MIT License,\n// Copyright (c) 2026 Jakub Antalik');
+    // Both ports point at the notice where it is.
+    expect(pill).toContain('the notice is in full at the top of this file');
+    expect(swift).toContain('The licence notice in full is at the top of scripts/banner.ps1');
+    for (const src of [pill, swift, read('scripts', 'window-outline.ps1'), read('scripts', 'linux', 'overlay.py')]) {
+      expect(src).not.toMatch(/Border Beam|border-beam/);
+    }
   });
 });

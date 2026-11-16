@@ -17,6 +17,7 @@ import { PassThrough } from 'stream';
 import type { ChildProcess } from 'child_process';
 import { controlBanner, type OverlayMode } from '../core/banner';
 import { pauseGate } from '../core/pause-gate';
+import { macOverlayBinary } from '../platform/mac-swift-binary';
 
 class FakeChild extends EventEmitter {
   stdout = new PassThrough();
@@ -63,6 +64,25 @@ describe('pauseGate', () => {
     controlBanner.__setPlatformEnabledForTests(false);
     expect(pauseGate.available()).toBe(false);
   });
+
+  // Mac run 2026-11-15: the first pause after an install came while the drawer was compiling, and was refused as "no
+  // on-screen prompt is available". It waits for the compile now, and is refused only if the compile fails.
+  it.each([['built', '/x/clawd-overlay', true], ['failed', null, false]] as const)(
+    'on macOS a pause waits for the overlay first compile (compile %s)', async (_what, bin, expected) => {
+      const banner = controlBanner as unknown as { ready: () => boolean };
+      banner.ready = () => false;   // still compiling
+      const compile = vi.spyOn(macOverlayBinary, 'compile').mockImplementation(async () => { if (bin) banner.ready = () => true; return bin; });
+      const desc = Object.getOwnPropertyDescriptor(process, 'platform')!;
+      Object.defineProperty(process, 'platform', { ...desc, value: 'darwin' });
+      try {
+        expect(pauseGate.available()).toBe(false);
+        expect(await pauseGate.whenAvailable()).toBe(expected);
+        expect(compile).toHaveBeenCalled();
+      } finally {
+        Object.defineProperty(process, 'platform', desc);
+        compile.mockRestore();
+      }
+    });
 
   it('switches the running overlay to the paused form, and back after Resume', async () => {
     controlBanner.pin();

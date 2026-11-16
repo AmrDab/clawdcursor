@@ -1,6 +1,6 @@
 {
   "name": "clawdcursor",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "mcpName": "io.github.AmrDab/clawdcursor",
   "description": "Local MCP server that gives any AI agent cross-OS desktop control through the accessibility tree first, OCR next and screenshots last — the fallback execution layer for when APIs, CLIs, and direct integrations aren't available. Works with any tool-calling model (Claude, GPT, Gemini, Llama) on Windows, macOS, and Linux. Open source (MIT).",
   "homepage": "https://clawdcursor.com",
@@ -58,6 +58,7 @@
     "prepare": "npm run clean && tsc && node dist/postbuild.js && node scripts/bundle-cli.mjs",
     "prebuild": "npm run clean",
     "build": "tsc && node dist/postbuild.js && node scripts/bundle-cli.mjs",
+    "build:addons": "npm --prefix packages/clawdcursor-agent ci --no-audit --no-fund && tsc -p packages/clawdcursor-agent && tsc -p packages/clawdcursor-doctor",
     "setup": "node scripts/verify-install.js && npm run build && node -e \"if(process.platform==='darwin'){const{execSync}=require('child_process');try{execSync('chmod +x native/build.sh && native/build.sh',{stdio:'inherit'})}catch(e){console.error('\\n❌ Native build failed. Run manually: cd native && ./build.sh');process.exit(1)}}\" && npm link --force",
     "dev": "tsx watch src/surface/cli.ts",
     "start": "node dist/surface/cli.js agent",

@@ -116,6 +116,8 @@ export interface FocusedElementInfo {
   secure?: boolean;
   /** `value` was read from the element itself, so an empty one is an empty field (UiElement.readable). */
   readable?: boolean;
+  /** A text area holding a document's lines (UiElement.multiline): smart_type does not select all of it. */
+  multiline?: boolean;
 }
 
 export interface WindowInfo {
@@ -559,6 +561,7 @@ export class AccessibilityBridge {
           value: el.value ?? '',
           ...(el.secure ? { secure: true } : {}),
           ...(el.readable ? { readable: true } : {}),
+          ...(el.multiline ? { multiline: true } : {}),
         };
       } catch {
         return null;

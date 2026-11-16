@@ -87,7 +87,10 @@ export async function getReadinessStatus(): Promise<ReadinessStatus> {
   };
 }
 
-export async function printStatusReport(): Promise<void> {
+/**
+ * Print a formatted status report to console. `daemon`: what the CLI found on the daemon's port (/health only: status starts nothing).
+ */
+export async function printStatusReport(daemon: { port: number; running: boolean }): Promise<void> {
   const status = await getReadinessStatus();
 
   const check = (ok: boolean) => ok ? pc.green('✓') : pc.red('✗');
@@ -105,6 +108,11 @@ export async function printStatusReport(): Promise<void> {
   } else if (process.platform !== 'darwin') {
     console.log(`${pc.green('✓')} Platform: ${process.platform} ${pc.gray('(no special permissions needed)')}`);
   }
+
+  // The daemon is optional (MCP over stdio needs none): not running is no failure.
+  console.log(daemon.running
+    ? `${pc.green('✓')} Daemon: running on port ${daemon.port}`
+    : `${pc.gray('○')} Daemon: not running ${pc.gray('(clawdcursor agent starts it; MCP over stdio needs none)')}`);
 
   console.log(pc.gray('─'.repeat(50)));
 

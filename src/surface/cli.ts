@@ -63,9 +63,10 @@ import { VERSION } from '../version';
 import { authHeaders } from './auth';
 import dotenv from 'dotenv';
 import pc from 'picocolors';
-import { migrateFromLegacyDir, getPackageRoot } from '../paths';
+import { migrateFromLegacyDir } from '../paths';
 import { stopHostApp } from '../platform/native-helper';
 import { stopControl, resumeControl, isStopped } from '../core/control';
+import { foreignOverlayState } from '../core/overlay-state';
 
 dotenv.config({ quiet: true });
 
@@ -81,8 +82,9 @@ import { setTelemetryEnabled, offReason, telemetryStatusText, STATE_FILE as TELE
 
 const program = new Command();
 
-// Flags and commands that went with the built-in agent (2.0): the failure stays, with one line saying why.
-const REMOVED_IN_2 = /unknown option '--(provider|model|text-model|vision-model|base-url|api-key|no-save|reset)'|unknown command 'task'/;
+// Flags that went with the built-in agent (2.0): the failure stays, with one line saying why. (`task` is back as the
+// test-agent add-on, below.)
+const REMOVED_IN_2 = /unknown option '--(provider|model|text-model|vision-model|base-url|api-key|no-save|reset)'/;
 program.configureOutput({
   outputError: (str, write) => {
     write(str);
@@ -103,7 +105,14 @@ async function isClawdInstance(port: number): Promise<boolean> {
 program
   .name('clawdcursor')
   .description('🐾 Desktop control for AI agents: an MCP tool layer your agent drives')
-  .version(VERSION);
+  .version(VERSION)
+  .addHelpText('before', [
+    'Start here:',
+    '  clawdcursor doctor          check and set up',
+    '  clawdcursor agent           run, with a live log of every action',
+    '  clawdcursor task "<task>"   test an agent',
+    '',
+  ].join('\n'));
 
 // ── The daemon: `clawdcursor agent` serves MCP over HTTP (serve.ts). It runs no model and needs no key; the connecting
 // agent (Claude Code, Codex, Cursor, ...) drives the tools. `start` and `serve` are deprecated aliases. `--no-llm` is still
@@ -175,9 +184,47 @@ program
 program
   .command('doctor')
   .description('🩺 Diagnose setup: version, consent, screen capture, accessibility, permissions. Driving clawdcursor over MCP needs no doctor: consent + (macOS) `grant` is the whole setup.')
-  .action(async () => {
-    const { runDoctor } = await import('./doctor');
-    await runDoctor();
+  .option('--setup', 'Go straight to setting up the test agent behind `clawdcursor task` (an add-on: downloaded after asking)')
+  .action(async (opts: { setup?: boolean }) => {
+    if (!opts.setup) {
+      const { runDoctor } = await import('./doctor');
+      await runDoctor();
+    }
+    const { doctorSetupStep } = await import('./addons');
+    const code = await doctorSetupStep(opts.setup === true);
+    // Exit when done: the accessibility bridge doctor started keeps node alive, and "All systems go!" never returned
+    // to the prompt (2.0.0 too).
+    process.exit(code);
+  });
+
+// ── Developer add-ons: a test agent and a log viewer, downloaded on first use after asking (addons.ts) ──
+
+program
+  .command('task')
+  .description('🧪 Test clawdcursor as the only tool an agent has: your Claude Code or Codex (your subscription, no API key) does <task> with clawdcursor and ends with PASS or FAIL (exit 0 / 1). Add-on: downloaded on first use, after asking')
+  .argument('<task...>', 'What to do on the desktop, in plain words')
+  .option('--with <runner>', 'claude | codex | anthropic | openai-compatible (default: the one `doctor --setup` picked, else the installed and signed-in CLI, claude first)')
+  .option('--model <model>', 'Model for the runner (default: its own default, or the one `doctor --setup` picked)')
+  .option('--granular', 'Give the agent the granular tools (one per action) instead of the six compact ones')
+  .option('--yes', 'Download the add-on without asking (CI)')
+  .action(async (words: string[], opts: { with?: string; model?: string; granular?: boolean; yes?: boolean }) => {
+    const { runTaskCommand } = await import('./addons');
+    process.exit(await runTaskCommand(words.join(' '), opts));
+  });
+
+program
+  .command('logs')
+  .description('📜 Show the logs readably: tool calls with outcome, code and step timings; stop, pause, refusals, server start and exit. Add-on: downloaded on first use, after asking')
+  .option('-f, --follow', 'Keep printing new events as they are written')
+  .option('--session <id>', 'One MCP session: its id (session-…) or "last"')
+  .option('--tool <name>', 'Only this tool (computer), tool.action (computer.click) or action (click)')
+  .option('--errors', 'Only failed calls, refusals and warnings')
+  .option('--since <duration>', 'Only the last 30s / 10m / 2h / 1d')
+  .option('--run <id>', 'A `clawdcursor task` run ("last" for the newest), joined with its clawdcursor session')
+  .option('--yes', 'Download the add-on without asking (CI)')
+  .action(async (opts: { follow?: boolean; session?: string; tool?: string; errors?: boolean; since?: string; run?: string; yes?: boolean }) => {
+    const { runLogsCommand } = await import('./addons');
+    process.exit(await runLogsCommand(opts));   // with --follow it runs until Ctrl-C
   });
 
 program
@@ -185,16 +232,17 @@ program
   .description('📊 Check readiness status (consent, permissions)')
   .action(async () => {
     const { printStatusReport } = await import('./readiness');
-    await printStatusReport();
+    // Where `stop` / `resume` look for the daemon, and the same probe: /health answers, nothing is started.
+    const port = clientPort(undefined);
+    await printStatusReport({ port, running: await isClawdInstance(port) });
   });
 
 program
   .command('versions')
   .description('📦 List every copy of clawdcursor on this machine (global install, Claude Desktop extension, Claude Code plugin) and flag old ones')
   .action(async () => {
-    const { findInstalledCopies, describeCopies } = await import('./installed-copies');
-    const { lines } = describeCopies(findInstalledCopies(), { latest: VERSION, running: getPackageRoot() });
-    for (const line of lines) console.log(`  ${line}`);
+    const { versionsLines } = await import('./installed-copies');
+    for (const line of await versionsLines()) console.log(`  ${line}`);
   });
 
 program
@@ -308,7 +356,7 @@ program
 
 program
   .command('resume')
-  .description('Continue a task paused for you (same as the on-screen Resume), or --end it. After a stop, gives control back.')
+  .description('Continue a task the daemon paused for you (same as the on-screen Resume), or --end it; a stdio MCP server\'s pause is answered on its card. After a stop, gives control back.')
   .option('--end', 'End the paused task')
   .option('--port <port>', 'API server port (default: the running daemon\'s port, else 3847)')
   .action(async (opts) => {
@@ -321,7 +369,16 @@ program
     }
     if (!(await isClawdInstance(port))) {
       if (gaveBack) return;
-      console.log(`${e('🐾', '>')} No running instance found on port ${port}`);
+      // Only the daemon's pause is answered from here: a stdio MCP server's has no port to reach, and is left alone. Say so
+      // rather than "no running instance" (the Mac run, 2026-11-16: a stdio server's pause ended as this printed that, and it
+      // looked as if this command had ended it; nothing here can).
+      const other = foreignOverlayState();
+      if (other.paused) {
+        console.log(`${e('🐾', '>')} No daemon on port ${port}, so nothing was answered. The pause on screen is clawdcursor process ` +
+          `${other.pausedBy ?? '?'}'s, which this command cannot reach (an MCP server over stdio has no port): answer it on the card, Resume or End task.`);
+      } else {
+        console.log(`${e('🐾', '>')} No running instance found on port ${port}`);
+      }
       process.exitCode = 1;
       return;
     }

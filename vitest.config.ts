@@ -17,7 +17,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'unit',
-          include: ['src/__tests__/**/*.test.ts', 'tests/**/*.test.ts', 'bench/__tests__/**/*.test.ts'],
+          include: ['src/__tests__/**/*.test.ts', 'tests/**/*.test.ts', 'bench/__tests__/**/*.test.ts', 'packages/*/__tests__/**/*.test.ts'],
           exclude: SYSTEM,
           testTimeout: 15000,
         },

@@ -96,6 +96,8 @@ const manifest = {
     '',
     '**Control stays yours:** a pill and an outline around the window being worked in show while an agent is in control, and Stop on the pill halts every action until you resume. Key combos that lock the computer or end your session are never sent, and the agent never types into an AI assistant window by accident. What the agent does is up to the agent and your approval prompts in Claude: clawdcursor carries out what it is asked, with your user rights.',
     '',
+    '**Error reports:** from 2.1, clawdcursor sends anonymous error reports by default, so bugs get found and fixed. Every value is a number or comes from a fixed list; typed text, the clipboard, screen text, screenshots, window titles and app names are never sent. `clawdcursor telemetry` shows exactly what is sent, and `clawdcursor optout` turns them off.',
+    '',
     '**macOS:** grant Claude **Accessibility** and **Screen Recording** in System Settings → Privacy & Security the first time macOS asks.',
   ].join('\n'),
   author: { name: 'Amr Dabbas', url: 'https://github.com/AmrDab' },

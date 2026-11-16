@@ -68,6 +68,7 @@ vi.mock('child_process', () => ({
 
 import { WindowsAdapter } from '../platform/windows';
 import { __setSystemRootForTests } from '../platform/ps-spawn';
+import { withSteps } from '../core/observability/steps';
 
 const W = (title: string, processName: string, processId: number): WindowInfo =>
   ({ title, processName, processId, handle: processId, bounds: { x: 0, y: 0, width: 800, height: 600 }, isMinimized: false });
@@ -178,7 +179,7 @@ describe('open_app on Windows — a running window is the app only by identity',
     desktop(DESKTOP);
     const res = await settle(adapter.launchApp('Mail', { searchTerm: 'Mail', processNames: ['Mail'] }));
     expect(adapter.typeText).toHaveBeenCalledWith('Mail');
-    expect(res).toEqual({});
+    expect(res).toEqual({ startMenuAfter: 'Start-Process' });
     expect(focus).not.toHaveBeenCalled();
   });
 
@@ -348,7 +349,7 @@ describe('open_app on Windows — a slow starter whose process is up but whose w
     h.procs = [{ pid: 6001, name: 'msedge', started: old() }];
     const res = await settle(adapter.launchApp('msedge.exe', { searchTerm: 'Edge', processNames: ['msedge'] }));
     expect(adapter.typeText).toHaveBeenCalledWith('Edge');
-    expect(res).toEqual({});
+    expect(res).toEqual({ startMenuAfter: 'Start-Process' });
   });
 });
 
@@ -448,5 +449,122 @@ describe('open_file on Windows — Explorer starting says nothing about the file
     desktop(DESKTOP);
     h.procs = [{ pid: 7001, name: 'python', started: Date.now() + 500 }];
     expect(await settle(adapter.launchApp('explorer.exe', MISSING))).toEqual({ pid: 7001, processName: 'python' });
+  });
+});
+
+describe('open_app on Windows — the launchers are not detached, and the route that answered is in the step log', () => {
+  // Live (2026-11-14): open_app "mspaint" took 10–12 s. The DETACHED PowerShell's Start-Process exited 0 in 0.2 s
+  // and started nothing; the 4 s poll found no window, and the Start-menu fallback (Escape, Win, "Paint", Enter)
+  // opened Paint. Attached, the window was up in 1.2–1.6 s. The log listed only the PowerShell and bridge steps.
+  const PAINT = W('Untitled - Paint', 'mspaint', 800);
+  const PAINT_ALIAS = { alwaysNewInstance: true, processNames: ['mspaint'], searchTerm: 'Paint' };
+
+  it('Start-Process, shell:AppsFolder and both name-only launches spawn attached, hidden and without pipes', async () => {
+    desktop(DESKTOP);
+    await settle(adapter.launchApp('mspaint.exe', { ...PAINT_ALIAS, noStartMenuFallback: true }));
+    await settle(adapter.launchApp('Calculator', { ...CALC_ALIAS, noStartMenuFallback: true }));
+    h.installed = { appId: 'Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic', name: 'Media Player' };
+    await settle(adapter.launchApp('Media Player', { nameOnly: true }));
+    h.installed = { path: 'C:\\Tools\\thing.exe', name: 'Thing' };
+    await settle(adapter.launchApp('Thing', { nameOnly: true }));
+    expect(spawns.map(s => path.basename(s.cmd).toLowerCase())).toEqual(['powershell.exe', 'explorer.exe', 'explorer.exe', 'powershell.exe']);
+    for (const s of spawns) {
+      expect(s.opts).not.toHaveProperty('detached', true);
+      expect(s.opts).toMatchObject({ stdio: 'ignore', windowsHide: true });
+    }
+  });
+
+  it('a direct launch: the step log says start-process, and nothing was typed', async () => {
+    desktop(DESKTOP, [...DESKTOP, PAINT]);
+    const run = await settle(withSteps('window', 'open_app', () => adapter.launchApp('mspaint.exe', PAINT_ALIAS)));
+    expect(run.ok && run.result).toMatchObject({ pid: 800, title: 'Untitled - Paint' });
+    expect(run.ok && run.result).not.toHaveProperty('startMenuAfter');
+    expect(run.steps['launch start-process']).toEqual({ n: 1, ms: 0 });
+    expect(Object.keys(run.steps).filter(k => k.startsWith('start-menu'))).toEqual([]);
+    expect(adapter.typeText).not.toHaveBeenCalled();
+  });
+
+  it('the Start-menu fallback: every key, the typing and the route are steps, and the result says so', async () => {
+    // Paint appears only once Enter has been pressed in the Start menu, as it did live.
+    const pressed = () => vi.mocked(adapter.keyPress).mock.calls.some(c => c[0] === 'Return');
+    vi.spyOn(adapter, 'listWindows').mockImplementation(async () => (pressed() ? [...DESKTOP, PAINT] : DESKTOP));
+    const run = await settle(withSteps('window', 'open_app', () => adapter.launchApp('mspaint.exe', PAINT_ALIAS)));
+    expect(run.ok && run.result).toMatchObject({ pid: 800, title: 'Untitled - Paint', startMenuAfter: 'Start-Process' });
+    expect(Object.keys(run.steps)).toEqual(expect.arrayContaining([
+      'start-menu key Escape', 'start-menu key Super', 'start-menu type-text', 'start-menu key Return', 'launch start-menu',
+    ]));
+    expect(run.steps['launch start-process']).toBeUndefined();
+    // The typed text is never a step name: steps carry no arguments.
+    expect(Object.keys(run.steps).some(k => k.includes('Paint'))).toBe(false);
+  });
+
+  it('a packaged app: the fallback names shell:AppsFolder as the route that showed no window', async () => {
+    desktop(DESKTOP);
+    const res = await settle(adapter.launchApp('Calculator', CALC_ALIAS));
+    expect(res).toEqual({ startMenuAfter: 'shell:AppsFolder' });
+  });
+});
+
+describe('File Explorer on Windows — a folder window, and the desktop shell that is always running (live 2026-11-14)', () => {
+  // Live: open_file on a folder answered "could NOT confirm the folder … (window: "none")" and no Explorer window ever
+  // opened: the Start-Process PowerShell was spawned DETACHED, and Explorer opens no folder window for that one. And
+  // open_app "File Explorer" answered "handed off to the running explorer.exe, pid=8376, which has no window up yet":
+  // pid 8376 was the desktop shell (taskbar, desktop), always running.
+  const SHELL_PID = 8376;
+  const FOLDER = W('Desktop - File Explorer', 'explorer', 9100);
+  const FOLDER_OPEN = { url: 'C:\\Users\\x\\OneDrive\\Desktop', noStartMenuFallback: true };
+  /** The bridge's Win32 window read: the shell's own windows are left out of the list and named as shellProcessId. */
+  const bridge = (before: WindowInfo[], after: WindowInfo[] = before) => {
+    h.fast = async () => ({ windows: spawns.length ? after : before, shellProcessId: SHELL_PID });
+  };
+  const shellRunning = () => { h.procs = [{ pid: SHELL_PID, name: 'explorer', started: Date.now() - 3_600_000 }]; };
+
+  it('the Start-Process PowerShell is NOT detached (a detached one gets no Explorer folder window), and stays hidden', async () => {
+    bridge(DESKTOP, [...DESKTOP, FOLDER]);
+    await settle(adapter.launchApp('explorer.exe', FOLDER_OPEN));
+    expect(spawns).toHaveLength(1);
+    expect(spawns[0].args.join(' ')).toMatch(/Start-Process/);
+    expect(spawns[0].opts).toMatchObject({ windowsHide: true, stdio: 'ignore' });
+    expect((spawns[0].opts as { detached?: boolean }).detached).toBeFalsy();
+  });
+
+  it('…the same for an app started by name and for a program found by a name-only search', async () => {
+    bridge(DESKTOP, [...DESKTOP, W('Untitled - Paint', 'mspaint', 9200)]);
+    await settle(adapter.launchApp('mspaint.exe', { processNames: ['mspaint'], searchTerm: 'Paint' }));
+    const first = spawns.splice(0);
+    h.installed = { path: 'C:\\Program Files\\Tool\\tool.exe', name: 'Tool' };
+    bridge(DESKTOP, [...DESKTOP, W('Tool', 'tool', 9300)]);
+    await settle(adapter.launchApp('Tool', { nameOnly: true }));
+    const ps = [...first, ...spawns].filter(s => s.args.join(' ').includes('Start-Process'));
+    expect(ps).toHaveLength(2);
+    for (const s of ps) expect((s.opts as { detached?: boolean }).detached).toBeFalsy();
+  });
+
+  it('a folder window that opens is reported, so open_file can confirm it', async () => {
+    shellRunning();
+    bridge(DESKTOP, [...DESKTOP, FOLDER]);
+    expect(await settle(adapter.launchApp('explorer.exe', FOLDER_OPEN))).toMatchObject({ pid: 9100, title: 'Desktop - File Explorer' });
+  });
+
+  it('open_app "File Explorer" with no window: the shell is not claimed as a hand-off (nothing to wait for, nothing to focus)', async () => {
+    shellRunning();
+    bridge(DESKTOP.filter(w => w !== EXPLORER));
+    const res = await settle(adapter.launchApp('explorer.exe', { processNames: ['explorer'], searchTerm: 'File Explorer', noStartMenuFallback: true }));
+    expect(res).toEqual({});
+    expect(focus).not.toHaveBeenCalled();
+  });
+
+  it('…but an Explorer process that began with this launch (Windows 11 hosts the window in a new /factory process) is', async () => {
+    h.procs = [{ pid: SHELL_PID, name: 'explorer', started: Date.now() - 3_600_000 }, { pid: 9100, name: 'explorer', started: Date.now() + 500 }];
+    bridge(DESKTOP.filter(w => w !== EXPLORER));
+    const res = await settle(adapter.launchApp('explorer.exe', { processNames: ['explorer'], searchTerm: 'File Explorer', noStartMenuFallback: true }));
+    expect(res).toEqual({ pid: 9100, processName: 'explorer' });
+  });
+
+  it('…and a single-instance app other than the shell is still a hand-off', async () => {
+    h.procs = [{ pid: 6001, name: 'msedge', started: Date.now() - 3_600_000 }];
+    bridge(DESKTOP);
+    const res = await settle(adapter.launchApp('msedge.exe', { searchTerm: 'Edge', processNames: ['msedge'] }));
+    expect(res).toEqual({ pid: 6001, processName: 'msedge', alreadyRunning: true });
   });
 });

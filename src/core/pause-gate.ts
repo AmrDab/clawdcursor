@@ -219,6 +219,11 @@ class PauseGate {
     return process.env.CLAWD_NO_PAUSE !== '1' && controlBanner.canShow();
   }
 
+  /** available(), waiting for the overlay's first build on macOS: a question asked meanwhile still reaches the user. */
+  async whenAvailable(): Promise<boolean> {
+    return process.env.CLAWD_NO_PAUSE !== '1' && await controlBanner.whenCanShow();
+  }
+
   /**
    * Does a call with this re-attach key continue an existing pause — the one on screen, or one that settled while its
    * caller was waiting and whose outcome is about to be handed over? Either way it is not a new pause.
@@ -275,6 +280,7 @@ class PauseGate {
     const promise = new Promise<PauseResult>(resolve => { settle = resolve; });
     const entry: Pending = { info, key: req.key, promise, settle };
     this.pending = entry;
+    logger.info('pause.start');   // never the message: the agent wrote it, and it can quote the screen
 
     const timer = setTimeout(() => this.finish(entry, { outcome: 'timeout' }), timeoutMs());
     timer.unref?.();

@@ -165,7 +165,7 @@
                   "replace",
                   "append"
                 ],
-                "description": "\"replace\" (default with a target): select all of the field, then type. \"append\": type at the cursor, keeping the content (default without a target)."
+                "description": "\"replace\" (default with a target): replace the field's text (select-all inside a one-line field only). A document or text area keeps its text and gets the text at the cursor unless \"replace\" is passed. \"append\": type at the cursor, keeping the content (default without a target)."
               },
               "scope": {
                 "type": "string",
@@ -1203,7 +1203,7 @@
         },
         {
           "name": "copy_all_text",
-          "description": "[perceive-text] Read the text of the focused web page or document EXACTLY (IDs, amounts, codes) — prefer it over OCR for pages and documents. Reads the document's text through accessibility: no keystrokes, nothing selected. Where that cannot be read: a browser page gets select-all + copy (the clipboard is restored; the result says which keys it pressed, and the page stays selected) unless focus is in a field or a list; any other window gets no keys and returns the names and values in its accessibility tree, labelled \"names only\" — that is not the document's text, use ocr for the content. Refuses in terminals. Focus the right window first.",
+          "description": "[perceive-text] Read the text of the focused web page or document EXACTLY (IDs, amounts, codes) — prefer it over OCR for pages and documents. Reads the document's text through accessibility: no keystrokes, nothing selected, the clipboard untouched. A window with no document text returns the names and values in its accessibility tree, labelled \"names only\" — that is not the document's text, use ocr for the content. Do not select-all + copy a page yourself: this reads it without the page turning blue. Refuses in terminals. Focus the right window first.",
           "inputSchema": {
             "type": "object",
             "properties": {
@@ -1769,7 +1769,7 @@
                   "replace",
                   "append"
                 ],
-                "description": "\"replace\" (default with a target): select all of the field, then type. \"append\": type at the cursor, keeping the content (default without a target)."
+                "description": "\"replace\" (default with a target): replace the field's text (select-all inside a one-line field only). A document or text area keeps its text and gets the text at the cursor unless \"replace\" is passed. \"append\": type at the cursor, keeping the content (default without a target)."
               }
             },
             "required": [
@@ -2633,7 +2633,7 @@
         },
         {
           "name": "key_press",
-          "description": "[act] Press a key or key combo. \"mod\" is this OS's shortcut modifier (cmd on macOS, ctrl on Windows and Linux). Use \"+\" for a chord (e.g. \"mod+s\", \"shift+Tab\"). Space-separate for a sequence (\"Down Down End\"). Examples: \"Return\", \"Tab\", \"Escape\", \"F5\", \"mod+a\".",
+          "description": "[act] Press a key or key combo. \"mod\" is this OS's shortcut modifier (cmd on macOS, ctrl on Windows and Linux). Use \"+\" for a chord (e.g. \"mod+s\", \"shift+Tab\"). Space-separate for a sequence (\"Down Down End\"). Examples: \"Return\", \"Tab\", \"Escape\", \"F5\", \"mod+s\".",
           "inputSchema": {
             "type": "object",
             "properties": {

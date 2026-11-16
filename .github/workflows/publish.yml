@@ -114,6 +114,45 @@ jobs:
             gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
           fi
 
+  # The developer add-ons core fetches on first use of `task`, `logs` and
+  # `doctor --setup` (`<pkg>@<core version>`), so each release publishes them at
+  # core's version. A separate job: a failure here must not hold the Release.
+  # Trusted publishing only works for a package that already exists on npm, so
+  # each add-on's very first version is published by hand, then its trusted
+  # publisher (this repo, publish.yml) is set on npmjs.com.
+  addons:
+    name: npm publish add-ons
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
+      - run: npm ci
+      - run: npm run build:addons
+      - name: npm publish (trusted publishing, OIDC)
+        run: |
+          for p in clawdcursor-agent clawdcursor-doctor; do
+            VER="$(node -p "require('./packages/$p/package.json').version")"
+            if npm view "$p@$VER" version >/dev/null 2>&1; then
+              echo "$p@$VER is already on npm, skipped."
+            elif ! npm view "$p" name >/dev/null 2>&1; then
+              # Trusted publishing works only for a package that exists: its first version is published by hand.
+              echo "::warning::$p is not on npm yet, so it was not published. Publish its first version by hand (npm publish --access public in packages/$p), then add this workflow as its trusted publisher."
+            else
+              (cd "packages/$p" && npm publish --access public)
+            fi
+          done
+
   # Claude Desktop extension: one .mcpb per OS, each built natively on that OS
   # (sharp's native build is per platform; the macOS helper needs a Mac).
   # Stable asset names, so releases/latest/download/clawdcursor-<os>.mcpb is a

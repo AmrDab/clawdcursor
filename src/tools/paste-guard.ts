@@ -8,9 +8,25 @@
  *
  * What was typed or set is then read back from the field (readBackTyped, setResult).
  */
-import type { PlatformAdapter } from '../platform/types';
+import type { PlatformAdapter, UiElement } from '../platform/types';
 import { quoteScreenText } from '../core/untrusted-screen-content';
 import { sleep } from '../sleep';
+
+/**
+ * What a select-all would select with `el` focused. Owner, 2026-11-15: a page turning blue under select-all looked broken,
+ * and in TextEdit a replace by select-all wiped the user's document.
+ * - 'field': a one-line field, so only its text.
+ * - 'document': a document, a web page or a text area, so all of an editor's text or the whole page.
+ * - 'other': a known role that is not text (a list, an item, a button), so every item or the whole page.
+ * - 'unknown': nothing read, or a generic container (an app without accessibility reads as its pane), so no evidence.
+ */
+export function selectAllScope(el: Pick<UiElement, 'controlType' | 'multiline'> | null | undefined): 'field' | 'document' | 'other' | 'unknown' {
+  const role = String(el?.controlType ?? '').replace(/^ControlType\./, '').toLowerCase();
+  if (!role || /^(pane|window|custom|group|unknown)$/.test(role)) return 'unknown';
+  if (/document|textarea|text area|webarea/.test(role)) return 'document';
+  if (/^(edit|textfield|axtextfield|searchfield|axsearchfield|combobox|axcombobox|spinner)$/.test(role)) return el?.multiline ? 'document' : 'field';
+  return 'other';
+}
 
 /** Clipboards differ in line endings and trailing whitespace (Windows reads come back trimmed). */
 const same = (a: string, b: string): boolean => a.replace(/\r\n/g, '\n').trim() === b.replace(/\r\n/g, '\n').trim();

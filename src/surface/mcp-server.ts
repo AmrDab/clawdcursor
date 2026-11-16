@@ -30,6 +30,7 @@ import { allowNames, setHost } from '../core/observability/telemetry';
 import { classifyResult, renderResultLine, isJsonText, isActingAction, isUnverifiableAction } from '../core/result-codes';
 import { refusalBefore, afterCall, forgetScreenIfActed, guardedCall } from '../tools/call-guards';
 import { OPAQUE_MARK } from '../tools/blind-hints';
+import { bareStepName } from '../tools/batch';
 
 // ── Typed SDK boundary (#115) ────────────────────────────────────────────────
 //
@@ -106,13 +107,13 @@ function isActingCall(toolName: string, action: string | undefined, test: typeof
   return test(c.tool, c.action);
 }
 
-/** Does any step of a batch (compact or granular tool names) change something? */
-function batchActs(steps: unknown): boolean {
+/** Does any step of a batch (compact or granular tool names, host prefix or not) change something? */
+export function batchActs(steps: unknown): boolean {
   if (!Array.isArray(steps)) return false;
   return steps.some(s => {
     const step = (s ?? {}) as { name?: unknown; arguments?: { action?: unknown }; args?: { action?: unknown } };
     const action = step.arguments?.action ?? step.args?.action;
-    return typeof step.name === 'string' && isActingCall(step.name, typeof action === 'string' ? action : undefined);
+    return typeof step.name === 'string' && isActingCall(bareStepName(step.name), typeof action === 'string' ? action : undefined);
   });
 }
 

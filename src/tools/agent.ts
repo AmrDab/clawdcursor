@@ -69,7 +69,7 @@ export function getAgentTools(): ToolDefinition[] {
         if (asking && done_when !== undefined && done_when !== null) {
           return { text: 'pause_for_user: done_when cannot be combined with `choices` / `input`: a question is answered only by the user\'s click or text, never by what shows on screen.', isError: true };
         }
-        if (!pauseGate.available()) {
+        if (!(await pauseGate.whenAvailable())) {
           return {
             text: 'pause_for_user: no on-screen prompt is available on this machine (the overlay is off: --no-banner, CLAWD_NO_BANNER, CLAWD_NO_PAUSE, or not supported on this OS yet). Ask the user in your own chat instead.',
             isError: true,

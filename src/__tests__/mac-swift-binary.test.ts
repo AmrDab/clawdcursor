@@ -63,6 +63,18 @@ describe('mac OCR binary cache', () => {
     expect(swiftc.calls).toHaveLength(1);
   });
 
+  // Mac run 2026-11-15: a run that ended before swiftc did left clawd-overlay-<key>.<pid>.tmp behind for good.
+  it('a compile removes the temp files of compiles whose process is gone, and nothing else', async () => {
+    const dead = path.join(dir, 'ocr-recognize-0123456789ab.999999999.tmp');
+    const mine = path.join(dir, `ocr-recognize-0123456789ab.${process.pid}.tmp`);
+    const other = path.join(dir, 'clawd-overlay-0123456789ab.999999999.tmp');
+    for (const f of [dead, mine, other]) fs.writeFileSync(f, 'partial');
+    await compileMacOcrBinary(script, dir);
+    expect(fs.existsSync(dead)).toBe(false);
+    expect(fs.existsSync(mine)).toBe(true);    // this process's own build
+    expect(fs.existsSync(other)).toBe(true);   // another helper's: its own compile cleans it
+  });
+
   it('concurrent callers share one compile', async () => {
     const [a, b] = await Promise.all([compileMacOcrBinary(script, dir), compileMacOcrBinary(script, dir)]);
     expect(a).toBe(b);

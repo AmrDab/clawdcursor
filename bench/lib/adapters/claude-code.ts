@@ -8,20 +8,13 @@ import * as path from 'path';
 import { PREFLIGHT_PROMPT, locateAgent, preflightFailure, runCli, runPreflight, sigOf, SERVER_NAME, type Adapter, type AgentJob, type CliCommand } from './common';
 import { tryRun } from '../proc';
 import type { CallSig } from '../types';
+import { CLAUDE_ISOLATION, hostSessionEnv } from '../../../packages/clawdcursor-agent/src/hosts';
+
+export { hostSessionEnv };
 
 /** The --mcp-config file: the isolated server over HTTP, with its bearer token. */
 export function claudeMcpConfig(mcpUrl: string, token: string): string {
   return JSON.stringify({ mcpServers: { [SERVER_NAME]: { type: 'http', url: mcpUrl, headers: { Authorization: `Bearer ${token}` } } } }, null, 2);
-}
-
-/**
- * A benchmark started from inside a Claude Code session (CLAUDECODE is set) inherits that session's own CLAUDE* and
- * ANTHROPIC* variables (its base URL, entrypoint, host auth). The agent would then sign in as that session, not with the
- * owner's own `claude` login: "Credit balance is too low" or "OAuth session expired" although `claude` works in a shell.
- */
-export function hostSessionEnv(env: NodeJS.ProcessEnv = process.env): string[] {
-  if (!env.CLAUDECODE) return [];
-  return Object.keys(env).filter(k => /^(CLAUDE|ANTHROPIC)|^USE_(LOCAL|STAGING)_OAUTH$/.test(k));
 }
 
 export function claudeCommand(o: { exe: string; model: string; mcpConfigPath: string; prompt: string }): CliCommand {
@@ -32,12 +25,9 @@ export function claudeCommand(o: { exe: string; model: string; mcpConfigPath: st
       '-p',
       '--model', o.model,
       '--mcp-config', o.mcpConfigPath,
-      '--strict-mcp-config',                               // no other MCP server: not the owner's clawdcursor, not their plugins'
+      ...CLAUDE_ISOLATION,                                 // only this MCP server, no built-in tool, no skill of the owner's, nothing saved
       '--setting-sources', 'project',                      // not the owner's user settings: no hooks, plugins or CLAUDE.md of theirs (the cwd is an empty directory)
       '--allowedTools', `mcp__${SERVER_NAME}__*`,
-      '--tools', '',                                       // no built-in tool (Bash, Read, ...): the desktop is reached through clawdcursor only
-      '--disable-slash-commands',                          // no skill from the owner's home: the server under test brings its own guidance
-      '--no-session-persistence',
       '--output-format', 'stream-json', '--verbose',       // one JSON line per message: tool calls with their arguments, then the result
     ],
     stdin: o.prompt,
@@ -49,8 +39,7 @@ export function claudePreflightCommand(o: { exe: string; model: string }): CliCo
   return {
     unsetEnv: hostSessionEnv(),
     cmd: o.exe,
-    args: ['-p', '--model', o.model, '--strict-mcp-config', '--setting-sources', 'project', '--tools', '', '--disable-slash-commands',
-      '--no-session-persistence', '--output-format', 'json'],
+    args: ['-p', '--model', o.model, ...CLAUDE_ISOLATION, '--setting-sources', 'project', '--output-format', 'json'],
     stdin: PREFLIGHT_PROMPT,
   };
 }

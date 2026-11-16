@@ -1,17 +1,13 @@
 /**
  * Control banner — the on-screen "desktop control in progress" indicators:
- *   - the pill: topmost, never-focused; a small dotted orb, what the agent is doing
+ *   - the pill: topmost, never-focused; a small dotted orb (a pulsing dot on Linux), what the agent is doing
  *     ("Typing in Edge", sent as `ACTIVITY <text>` on its stdin), the time since
  *     it appeared, and a Stop button (a double-click anywhere stops too).
- *   - the outline: a click-through beam along the edge of the window the agent
- *     is working in (control.ts workingWindow), and nothing else: no fill,
- *     nothing on the rest of the screen, nothing at all while that window is not
- *     in front. It is the "border beam" of libraries.dev (#392): an amber beam
- *     going round the edge (the paused form is a steady blue ring; still where
- *     the OS reduces motion), with a soft glow reaching a little into the window.
- *     When the window is the desktop itself, it goes around the monitor. Spawned/
- *     killed in lockstep with the pill; `TARGET <handle> <pid>` on its stdin
- *     names the window, a bare `TARGET` none.
+ *   - the outline: a thin, click-through amber border around the window the
+ *     agent is working in (control.ts workingWindow), and nothing else: no fill,
+ *     nothing on the rest of the screen, nothing at all while no window is known
+ *     or that window is not in front. Spawned/killed in lockstep with the pill;
+ *     `TARGET <handle> <pid>` on its stdin names the window, a bare `TARGET` none.
  * Both exit by themselves when their stdin closes: a host that hard-kills this
  * process must not leave them on screen.
  *
@@ -301,6 +297,15 @@ class ControlBanner {
   }
 
   /**
+   * canShow(), waiting on macOS for the drawer's first compile (after an install or an upgrade): until it is built
+   * canShow() is false, and a pause asked for meanwhile said "no on-screen prompt" (Mac run, 2026-11-15).
+   */
+  async whenCanShow(): Promise<boolean> {
+    if (this.enabled && process.platform === 'darwin' && !this.canShow()) await macOverlayBinary.compile(macScript());
+    return this.canShow();
+  }
+
+  /**
    * Switch to the paused form (blue outline + instruction + Resume / End task) and
    * keep it up until showRunning(), regardless of pin or idle timers.
    */
@@ -310,6 +315,9 @@ class ControlBanner {
     this.activity = ''; // after the answer the pill says "Working" until the agent's next input, not what it did before
     this.onAnswer = onAnswer;
     this.onRefocus = onRefocus;
+    // After an idle hide the outline has forgotten the window, but the card still names the app the agent worked in
+    // (control.ts): the blue outline goes round that same window.
+    if (!this.working) this.working = workingWindow();
     this.clearIdleTimer();
     this.killChildren();
     this.show();

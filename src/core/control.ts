@@ -89,6 +89,8 @@ export async function sleepUnlessStopped(ms: number): Promise<boolean> {
 interface Foreground { processId: number; processName: string; appName?: string; title?: string; handle?: number | string; guessed?: boolean;
   /** For the fence (fence.ts): the app a Store app's frame hosts, and where the window is. */
   hostedProcessId?: number; bounds?: { x: number; y: number; width: number; height: number };
+  /** That app's process name ("CalculatorApp"): a focus by the app's own name matches it, as the Windows adapter's lookup does. */
+  hostedProcessName?: string;
   /**
    * The process this act went to, VERIFIED when it was sent: the pid the fence allowed it by, else (no fence) the window's
    * own process, or for a Store app the process its frame hosts read fresh from the bridge. Never the display cache's
@@ -125,7 +127,7 @@ function resetBinding(): void { lease = undefined; acted = undefined; working = 
 const platformForeground = async (): Promise<Foreground | null> => {
   const { getPlatform } = await import('../platform');
   const w = await (await getPlatform()).getActiveWindow();
-  return w && w.processId ? { processId: w.processId, processName: w.processName || `pid ${w.processId}`, appName: w.appName, title: w.title || undefined, handle: w.handle, guessed: w.guessed, hostedProcessId: w.hostedProcessId, bounds: w.bounds } : null;
+  return w && w.processId ? { processId: w.processId, processName: w.processName || `pid ${w.processId}`, appName: w.appName, title: w.title || undefined, handle: w.handle, guessed: w.guessed, hostedProcessId: w.hostedProcessId, hostedProcessName: w.hostedProcessName, bounds: w.bounds } : null;
 };
 // Off under the test runner unless a test sets a reader: a unit test must not start the real platform to ask.
 let readForeground: () => Promise<Foreground | null> = process.env.VITEST ? async () => null : platformForeground;
@@ -180,9 +182,13 @@ async function verifiedPid(now: Foreground, decided: number | undefined): Promis
   return (await freshHostedAppOf(now).catch(() => undefined))?.processId;
 }
 const lower = (s: string) => s.toLowerCase().replace(/\.(exe|app)$/, '');
+// A handle is that one window: only Windows puts one in a query (on macOS a window's handle is often its pid). A Store
+// app's frame also answers to the app's own names, the ones the Windows adapter found it by (frame-host.ts processNamesOf).
 const matches = (q: WindowQuery, f: Foreground) =>
-  (q.processId !== undefined && (q.processId === f.processId || q.processId === f.hostedProcessId))
-  || (!!q.processName && lower(f.processName).includes(lower(q.processName)))
+  (q.handle !== undefined && f.handle !== undefined && Number(f.handle) === q.handle)
+  || (q.processId !== undefined && (q.processId === f.processId || q.processId === f.hostedProcessId))
+  || (!!q.processName && [f.processName, ...(f.hostedProcessId ? [f.hostedProcessName, f.appName] : [])]
+    .some(n => !!n && lower(n).includes(lower(q.processName!))))
   || (!!q.title && !!f.title && windowTextIncludes(f.title, q.title));
 
 function stopCheck(): void {
@@ -208,7 +214,7 @@ async function before(): Promise<void> {
   if (pending) {
     // Waited for it above: if it is still not in front, the focus did not take (or the user switched), whatever the clock says.
     if (!matches(pending, now)) {
-      throw new Error(`foreground changed: you ${pending.opened ? 'opened' : 'focused'} ${quoteScreenText(pending.processName ?? pending.title ?? `pid ${pending.processId}`)}, but ${name(now)} is in front — nothing was sent. Focus it again.`);
+      throw new Error(`foreground changed: you ${pending.opened ? 'opened' : 'focused'} ${quoteScreenText(pending.processName ?? pending.title ?? (pending.processId !== undefined ? `pid ${pending.processId}` : `window ${pending.handle}`))}, but ${name(now)} is in front — nothing was sent. Focus it again.`);
     }
     pending = null;
     explicit = true;

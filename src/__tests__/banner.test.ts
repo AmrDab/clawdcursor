@@ -13,7 +13,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import { controlBanner, outlineFlags } from '../core/banner';
-import { stopControl, __setControlDirForTests } from '../core/control';
+import { stopControl, __setControlDirForTests, __setForegroundReaderForTests } from '../core/control';
+import { guardInputMethods } from '../platform/pointer-guard';
 import type { ChildProcess } from 'child_process';
 import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
@@ -226,6 +227,21 @@ describe('the outline around the window the agent works in', () => {
     expect(live()[0].written).toEqual(['TARGET 1440 100']);
   });
 
+  it('a pause after the idle hide goes round the window the card names, not nothing', async () => {
+    // The idle hide forgets the outline's window; the card still names the app the agent last worked in (control.ts).
+    __setForegroundReaderForTests(async () => ({ processId: 100, processName: 'msedge', title: 'Inbox - Edge', handle: 0x5a0 }));
+    try {
+      controlBanner.touch();
+      await guardInputMethods({ async keyPress(_k: string) {} }).keyPress('a');
+      vi.advanceTimersByTime(30_001);   // the idle hide
+      expect(live()).toEqual([]);
+      controlBanner.showPaused({ id: 1, message: 'Sign in', since: 0 }, () => {});
+      expect(live()[0].written).toEqual(['TARGET 1440 100']);
+    } finally {
+      __setForegroundReaderForTests(null);
+    }
+  });
+
   it('the next session does not open on the last one\'s window', () => {
     controlBanner.pin();
     controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
@@ -273,12 +289,55 @@ describe('no overlay outlives its parent', () => {
   });
 });
 
+// Mac run 2026-11-15: with the Claude desktop app in front, a click into the pause card's box gave it no keyboard.
+describe('the macOS pause card takes the keyboard for an answer', () => {
+  const swift = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'mac', 'overlay.swift'), 'utf8');
+  it('the panel opens allowKey for a press on the box before AppKit handles it, not only the first time', () => {
+    // AppKit makes a clicked window key in NSWindow.sendEvent, before mouseDown; with canBecomeKey false then, that is dropped.
+    const panel = swift.slice(swift.indexOf('final class PillPanel'), swift.indexOf('/// Set while the user types'));
+    expect(panel).toMatch(/override func sendEvent\(_ event: NSEvent\)/);
+    expect(panel).toMatch(/event\.type == \.leftMouseDown, !isKeyWindow,\s*let target = keyboardTarget\(at: event\.locationInWindow\)/);
+    expect(panel).toMatch(/typingReply = true\s*\n\s*allowKey = true\s*\n\s*super\.sendEvent\(event\)/);
+    expect(panel).toMatch(/if !isKeyWindow \{ takeKeyboard\(self, target\) \}/);
+    // Only the box (or its field editor): a button press can be dragged off, and must not leave the card holding the keys.
+    const target = panel.slice(panel.indexOf('func keyboardTarget('), panel.indexOf('override func sendEvent('));
+    expect(target).toMatch(/v is ClickToTypeField \{ return v \}/);
+    expect(target).not.toMatch(/FirstClickButton/);
+    const field = swift.slice(swift.indexOf('final class ClickToTypeField'), swift.indexOf('func takeKeyboard('));
+    expect(field).not.toMatch(/mouseDown/);
+  });
+  it('takeKeyboard is synchronous and asks for activation only when the panel is still not key; "Something else" goes the same way', () => {
+    const take = swift.slice(swift.indexOf('func takeKeyboard('), swift.indexOf('final class PillView'));
+    expect(take).not.toMatch(/DispatchQueue/);
+    expect(take).toMatch(/if !panel\.isKeyWindow \{[\s\S]*NSApp\.activate\(\)[\s\S]*panel\.makeKeyAndOrderFront\(nil\)\s*\n\s*\}/);
+    // A box being edited keeps its field editor (re-making it first responder selects the whole answer).
+    expect(take).toMatch(/if \(field as\? NSControl\)\?\.currentEditor\(\) == nil \{ panel\.makeFirstResponder\(field\) \}/);
+    // NSApp.activate() exists only in the macOS 14 SDK: older toolchains (macOS 12 is supported) get the old call.
+    expect(take).toMatch(/#if compiler\(>=5\.9\)\s*\n\s*if #available\(macOS 14\.0, \*\) \{ NSApp\.activate\(\) \}[^\n]*\n\s*#else\s*\n\s*NSApp\.activate\(ignoringOtherApps: true\)\s*\n\s*#endif/);
+    expect(swift.match(/NSApp\.activate\(\)/g)).toHaveLength(1);
+    expect(swift).toMatch(/if on, let panel = pillPanel, let field = replyField \{\s*takeKeyboard\(panel, field\)/);
+  });
+  it('focus is handed back cooperatively, never to the other overlay process', () => {
+    // yieldActivation(to:) is macOS 14 SDK: only inside the compiler check. A refused hand-back still steps down.
+    const hand = swift.slice(swift.indexOf('func handBack('), swift.indexOf('func giveFocusBack('));
+    expect(hand).toMatch(/#if compiler\(>=5\.9\)\s*\n\s*if #available\(macOS 14\.0, \*\) \{\s*\n\s*NSApp\.yieldActivation\(to: app\)\s*\n\s*if !app\.activate\(\) \{ NSApp\.deactivate\(\) \}[\s\S]*#endif\s*\n\s*NSApp\.deactivate\(\)\s*\n\s*app\.activate\(options: \[\]\)/);
+    expect(swift.match(/NSApp\.yieldActivation\(/g)).toHaveLength(1);
+    expect(swift).toMatch(/var previousApp: NSRunningApplication\? = NSWorkspace\.shared\.frontmostApplication\.flatMap \{ isOverlay\(\$0\) \? nil : \$0 \}/);
+    expect(swift).toMatch(/executableURL[\s\S]*resolvingSymlinksInPath\(\) == theirs\.resolvingSymlinksInPath\(\)/);
+    expect(swift).toMatch(/!isOverlay\(app\) \{\s*\n\s*previousApp = app/);
+    expect(swift).toMatch(/!prev\.isTerminated, !isOverlay\(prev\) \{ handBack\(to: prev\) \}/);
+    expect(swift).not.toMatch(/prev\.activate/);
+    // Esc in "Something else" gives the keyboard back too: giveFocusBack() alone did nothing for a key, inactive panel.
+    expect(swift).toMatch(/takeKeyboard\(panel, field\)\s*\} else \{\s*releaseKeyboard\(\)/);
+  });
+});
+
 // The drawers put real windows on screen, so these read the source: nothing draws on a whole screen any more.
 describe('no full-screen glow', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
   const read = (...p: string[]) => readFileSync(join(root, ...p), 'utf8');
 
-  it('no outline drawer sizes a window to a screen (only the desktop itself in front is outlined as its monitor)', () => {
+  it('no outline drawer sizes a window to a screen', () => {
     expect(read('scripts', 'window-outline.ps1')).not.toMatch(/AllScreens|PrimaryScreen|\.Bounds\b/);
     const swift = read('scripts', 'mac', 'overlay.swift');
     expect(swift.slice(swift.indexOf('func windowOutline()'))).not.toMatch(/screen\.frame|NSScreen\.screens/);
@@ -287,14 +346,43 @@ describe('no full-screen glow', () => {
     expect(py.slice(start, py.indexOf('\ndef ', start + 1))).not.toMatch(/get_monitor|get_n_monitors/);
   });
 
+  it('the pill\'s orb is still where the OS is set to reduce motion (#392)', () => {
+    expect(read('scripts', 'banner.ps1')).toContain('if (SystemParametersInfo(0x1042, 0, out animate, 0) && !animate) return;');
+    const swift = read('scripts', 'mac', 'overlay.swift');
+    expect(swift).toContain('if window == nil || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return }');
+  });
+
+  it('the macOS outline is the 2.0 border: 3 pt inside the agent\'s window, amber (blue when paused), still, click-through, under the pill', () => {
+    const swift = read('scripts', 'mac', 'overlay.swift');
+    const outline = swift.slice(swift.indexOf('func windowOutline()'));
+    expect(outline).toContain('view.layer?.borderColor = hexColor(option("--color", "#f59e0b")).cgColor');
+    expect(outline).toContain('view.layer?.borderWidth = 3');
+    expect(outline).toContain('win.ignoresMouseEvents = true');
+    expect(outline).toContain('win.level = .floating');
+    expect(outline).toContain('win.sharingType = .none');
+    expect(swift).toContain('panel.level = .screenSaver');
+    // Drawn once: no beam layers and nothing animated.
+    expect(outline).not.toMatch(/CAShapeLayer|CAGradientLayer|CABasicAnimation|CAKeyframeAnimation|lineDashPhase/);
+  });
+
+  it('the macOS outline goes only round a window of the app in front that is on screen and can be seen', () => {
+    const swift = read('scripts', 'mac', 'overlay.swift');
+    const find = swift.slice(swift.indexOf('func targetFrame()'), swift.indexOf('func windowOutline()'));
+    expect(find).toContain('NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(targetPid)');
+    expect(find).toContain('CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)');
+    expect(find).toContain('((w[kCGWindowAlpha as String] as? Double) ?? 1) > 0.01');
+    expect(find).toContain('rect.width >= 40, rect.height >= 40 else { continue }');
+    // No stand-in: with no such window nothing is drawn (the pill alone shows control).
+    expect(find).not.toMatch(/mouseLocation|visibleFrame|pointerScreen/);
+    expect(swift).toMatch(/line == "TARGET" \|\| line\.hasPrefix\("TARGET "\)/);
+  });
+
   it('the Windows outline is click-through, never activates, and stays out of captures', () => {
     const ps = read('scripts', 'window-outline.ps1');
     for (const style of ['0x00080000', '0x00000020', '0x08000000', '0x00000080', '0x00000008']) expect(ps).toContain(style);
     expect(ps).toContain('SetWindowDisplayAffinity(Handle, 0x11)');
-    // Where the frame is, is read in physical pixels (per-monitor-v2); the strips themselves are not DPI aware, so
-    // Windows draws them at the monitor's scale.
-    expect(ps).toContain('IntPtr aware = SetThreadDpiAwarenessContext(new IntPtr(-4));   // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2');
-    expect(ps).toContain('SetThreadDpiAwarenessContext([IntPtr](-1))');
+    // Where the frame is, and where the border goes, are physical pixels on every monitor (per-monitor-v2).
+    expect(ps).toContain('SetThreadDpiAwarenessContext([IntPtr](-4))');
     // Re-placed only when it moved or is no longer above its window (walking up the z-order), never on every poll.
     expect(ps).toContain('if (placed && !moved) return;');
     // TARGET and HIDE act on receipt, not on the next poll: a capture follows HIDE after 90 ms.
@@ -302,5 +390,28 @@ describe('no full-screen glow', () => {
     // A byte-order mark in front of the first line (a .NET parent) does not lose the command.
     expect(ps).toContain('p[0].EndsWith("TARGET")');
     expect(ps).toContain('p[0].EndsWith("HIDE")');
+  });
+
+  it('the Windows outline is the thin border of 2.0.0: solid, opaque, 3 px at 100%, hollow, rounded like the window', () => {
+    const ps = read('scripts', 'window-outline.ps1');
+    expect(ps).toContain("[string]$Color     = '#f59e0b'");
+    expect(ps).toContain('[int]   $Thickness = 3,');
+    // The paused form's flag is a parameter of its own: the drawer does not depend on it landing in $args.
+    expect(ps).toContain('[switch]$Paused');
+    expect(ps).toContain('SetLayeredWindowAttributes(Handle, 0, 255, 2)');
+    expect(ps).toContain('int b = Math.Max(2, (int)Math.Round(thickness * dpi / 96.0));');
+    expect(ps).toContain('CombineRgn(frame, frame, hole, 4)');
+    // Nothing of the beam: no per-pixel strips, no monitor frame for the desktop, no window title for the pill to find.
+    expect(ps).not.toMatch(/UpdateLayeredWindow|BeamStrip|EnumDisplayMonitors|CLAWD_PILL_PID|IsDesktop|clawdcursor beam/);
+    expect(read('scripts', 'banner.ps1')).not.toMatch(/clawdcursor beam|Raise\(\)/);
+  });
+
+  // A window can be the one in front while Windows shows nothing of it (hidden, or cloaked on another virtual desktop),
+  // and its frame bounds still read as if it were there: the outline then framed empty space.
+  it('the Windows outline goes round no window that Windows does not show, even the one in front', () => {
+    const ps = read('scripts', 'window-outline.ps1');
+    expect(ps).toContain('static extern bool IsWindowVisible(IntPtr hWnd);');
+    expect(ps).toMatch(/GetForegroundWindow\(\) == t && !IsIconic\(t\) && IsWindowVisible\(t\)/);
+    expect(ps).toContain('(DwmGetWindowAttribute(t, 14, out cloaked, 4) != 0 || cloaked == 0)');   // DWMWA_CLOAKED
   });
 });

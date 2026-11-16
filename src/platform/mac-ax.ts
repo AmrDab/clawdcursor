@@ -852,7 +852,8 @@ export function createMacAx(deps: MacAxDeps): MacAx {
           ['pagetext', '--timeout-ms', String(HELPER_FIND_DEADLINE_MS)],
           HELPER_FIND_DEADLINE_MS + HELPER_GRACE_MS,
           'page text',
-          { waitForBuild: false },
+          // Waits for the helper's first build (up to BUILD_WAIT_MS): only the helper reads a document's text, and the
+          // fallback is the tree's names.
         );
         return reply && typeof reply.text === 'string' && reply.text.trim() ? { text: reply.text } : null;
       } catch {
@@ -872,10 +873,14 @@ export function createMacAx(deps: MacAxDeps): MacAx {
         if (!raw) return null;
         const el = toUiElement(raw, undefined, raw.processId ?? processId);
         el.controlType = FOCUSED_TYPE_NAMES[raw.controlType] ?? el.controlType;
+        if (raw.controlType === 'AXTextArea') el.multiline = true;   // TextEdit's document reads as "Edit" too
         return el;
       }
       const out = await viaJxa('get-focused-element.jxa', [], JXA_LIST_TIMEOUT_MS, what);
-      return out ? toUiElement({ ...out, enabled: out.isEnabled }, undefined, out.processId) : null;
+      if (!out) return null;
+      const el = toUiElement({ ...out, enabled: out.isEnabled }, undefined, out.processId);
+      if (out.multiline) el.multiline = true;
+      return el;
     },
 
     async find(q: ElementQuery): Promise<UiElement[]> {

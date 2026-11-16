@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { SessionLog, classifyCall, outcomeOf, readSession, listSessions, endAllSessions, safeStack, errorClass } from '../surface/session-log';
+import { SessionLog, classifyCall, outcomeOf, readSession, listSessions, endAllSessions, safeStack, errorClass, runId } from '../surface/session-log';
 import { buildSessionReport, issueUrl, reportMarkdown } from '../surface/report';
 
 beforeEach(() => {
@@ -391,5 +391,17 @@ describe('session files', () => {
       const b = new SessionLog({ version: 't', surface: 'compact' });
       expect(a.file).not.toBe(b.file);
     } finally { vi.useRealTimers(); }
+  });
+});
+
+describe('the clawdcursor task run that started a server', () => {
+  it('is written in the session header, so `clawdcursor logs --run` can join the two', () => {
+    expect(runId({ CLAWDCURSOR_RUN_ID: '2026-11-15T07-00-43-532Z' })).toEqual({ run: '2026-11-15T07-00-43-532Z' });
+    expect(runId({})).toEqual({});
+  });
+  it('only in the shape of a run id: anything else in the variable is not written', () => {
+    expect(runId({ CLAWDCURSOR_RUN_ID: 'a b' })).toEqual({});
+    expect(runId({ CLAWDCURSOR_RUN_ID: 'x'.repeat(65) })).toEqual({});
+    expect(runId({ CLAWDCURSOR_RUN_ID: '../../etc' })).toEqual({});
   });
 });

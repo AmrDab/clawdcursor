@@ -16,7 +16,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
   <!--
-    AGENT-READABLE SUMMARY (v2.0.0)
+    AGENT-READABLE SUMMARY (v2.1.0)
     clawdcursor: a local MCP server that gives an AI agent control of the desktop.
 
     ── WHAT IT IS ──────────────────────────────────────────────────────────────
@@ -113,8 +113,8 @@
     irreversible action the user did not ask for, ask with system
     pause_for_user. Never type or ask for credentials.
     While an agent drives, a pill says what it is doing ("Typing in Edge") and
-    a border marks its window: an amber beam while working, steady blue while
-    waiting for the user.
+    a thin amber outline marks the window it works in (blue while waiting for
+    the user).
 
     ── PLATFORMS ───────────────────────────────────────────────────────────────
     Windows 10/11 (x64 + ARM64), macOS 12+ (Intel + Apple Silicon),
@@ -472,7 +472,7 @@
 
   <!-- Hero -->
   <div class="hero">
-    <div class="hero-badge"><div class="pulse"></div> v2.0.0 &middot; free and open source &middot; Windows, macOS, Linux</div>
+    <div class="hero-badge"><div class="pulse"></div> v2.1.0 &middot; free and open source &middot; Windows, macOS, Linux</div>
     <h1>Lets AI use your computer<br><span class="gr">in real time.</span></h1>
     <p>clawdcursor picks the fastest way into each app: the page itself in browsers, the accessibility tree in desktop apps, text recognition when there's no tree, and screenshots last. After every action it tells your AI whether it worked.</p>
     <div class="hero-btns">
@@ -649,7 +649,7 @@
       <div class="feat-card">
         <div class="feat-icon">🟧</div>
         <h4>An outline on the window</h4>
-        <p>A border marks the window being worked on: an amber beam runs round its edge while your AI works, and it turns a steady blue while it waits for you.</p>
+        <p>A thin amber outline marks the window your AI is working in and moves with it from window to window. It turns blue while your AI waits for you.</p>
       </div>
       <div class="feat-card">
         <div class="feat-icon">🟦</div>
@@ -664,7 +664,7 @@
       <div class="feat-card">
         <div class="feat-icon">🔒</div>
         <h4>Passwords are not read</h4>
-        <p>Password field values are never read through the accessibility tree, on Windows and macOS (Linux from the next release). Keys that lock the computer or end your session are never sent.</p>
+        <p>Password field values are never read through the accessibility tree, on Windows, macOS and Linux. Keys that lock the computer or end your session are never sent.</p>
       </div>
       <div class="feat-card">
         <div class="feat-icon">🔑</div>
@@ -805,8 +805,8 @@ claude plugin install clawdcursor@clawdcursor</code></pre>
       </div>
       <div class="feat-card">
         <div class="feat-icon">🧭</div>
-        <h4>Next: 2.1</h4>
-        <p>One standard benchmark across app types, OSes and models as the release gate, plus honest results, target resolution, perception without a tree, geometry and timing. Honest results, target resolution and perception are merged, as are confirm mode, <code>clawdcursor update</code> and error reports. <a href="https://github.com/AmrDab/clawdcursor/milestone/1" target="_blank" rel="noopener" style="color:var(--accent2);">2.1 milestone</a></p>
+        <h4>2.1</h4>
+        <p>One standard benchmark across app types, OSes and models as the release gate, plus honest results, target resolution, perception without a tree, geometry and timing. Honest results, target resolution and perception are in 2.1, as are confirm mode, <code>clawdcursor update</code> and error reports; geometry and timing are next. <a href="https://github.com/AmrDab/clawdcursor/milestone/1" target="_blank" rel="noopener" style="color:var(--accent2);">2.1 milestone</a></p>
       </div>
     </div>
     <p style="color:var(--text3);font-size:0.78rem;margin-top:14px;line-height:1.6;">
@@ -890,7 +890,7 @@ claude plugin install clawdcursor@clawdcursor</code></pre>
 clawdcursor consent          <span style="color:var(--text3)"># one-time desktop-control authorization (always required)</span>
 clawdcursor grant            <span style="color:var(--text3)"># macOS only: Accessibility + Screen Recording prompts. MCP setup ends here.</span>
 clawdcursor doctor           <span style="color:var(--text3)"># diagnose the install: version, consent, screen capture, accessibility, permissions</span>
-clawdcursor status           <span style="color:var(--text3)"># readiness check (consent, permissions)</span>
+clawdcursor status           <span style="color:var(--text3)"># readiness check (consent, permissions, whether the daemon is running)</span>
 clawdcursor versions         <span style="color:var(--text3)"># every installed copy and its version</span>
 clawdcursor update           <span style="color:var(--text3)"># update the global npm install, list the other copies to update (from 2.1)</span>
 clawdcursor telemetry        <span style="color:var(--text3)"># whether error reports are on, and every field sent (from 2.1)</span>
@@ -902,7 +902,7 @@ clawdcursor mcp              <span style="color:var(--text3)"># stdio MCP server
 clawdcursor mcp --compact    <span style="color:var(--text3)"># same, with the 6 compact tools (recommended)</span>
 clawdcursor agent            <span style="color:var(--text3)"># HTTP MCP server at 127.0.0.1:3847/mcp (--compact, --port, --no-vision)</span>
 clawdcursor stop             <span style="color:var(--text3)"># stop every running instance; agents stay stopped until resume</span>
-clawdcursor resume           <span style="color:var(--text3)"># continue a paused task, or give control back after a stop (--end to end the task)</span>
+clawdcursor resume           <span style="color:var(--text3)"># continue the daemon's paused task, or give control back after a stop (--end to end the task)</span>
 clawdcursor report           <span style="color:var(--text3)"># send a redacted report of the last session, after a preview</span>
 clawdcursor uninstall        <span style="color:var(--text3)"># remove all clawdcursor config and data</span></code></pre>
       </div>
@@ -924,7 +924,7 @@ clawdcursor uninstall        <span style="color:var(--text3)"># remove all clawd
 </div>
 
 <footer>
-  <p>clawd<strong>cursor</strong> v2.0.0 · localhost only · MIT ·
+  <p>clawd<strong>cursor</strong> v2.1.0 · localhost only · MIT ·
     <a href="https://clawdcursor.com">Home</a> ·
     <a href="https://github.com/AmrDab/clawdcursor">GitHub</a> ·
     <a href="https://github.com/AmrDab/clawdcursor/blob/main/CHANGELOG.md">Changelog</a> ·

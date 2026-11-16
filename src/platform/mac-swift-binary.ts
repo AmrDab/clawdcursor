@@ -23,6 +23,23 @@ const execFileAsync = promisify(execFile);
 const COMPILE_TIMEOUT_MS = 180_000;
 const DEFAULT_BIN_DIR = path.join(DATA_DIR, 'bin');
 
+/** Is process `pid` still running? (EPERM: it is, as another user's.) */
+function alive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch (err) { return (err as NodeJS.ErrnoException).code === 'EPERM'; }
+}
+
+/** Temp files of compiles whose process exited mid-build (a short run ends before swiftc does): nothing will finish them. */
+export function removeOrphans(binDir: string, prefix: string): void {
+  let names: string[];
+  try { names = fs.readdirSync(binDir); } catch { return; }
+  for (const name of names) {
+    const pid = name.startsWith(`${prefix}-`) ? Number(/\.(\d+)\.tmp$/.exec(name)?.[1]) : NaN;
+    if (pid > 0 && pid !== process.pid && !alive(pid)) {
+      try { fs.unlinkSync(path.join(binDir, name)); } catch { /* gone already */ }
+    }
+  }
+}
+
 /** One compiled Swift helper: content-addressed path, cache lookup, one-shot background compile. */
 function swiftBinary(prefix: string) {
   let compiling: Promise<string | null> | null = null;
@@ -62,6 +79,7 @@ function swiftBinary(prefix: string) {
       const tmp = `${out}.${process.pid}.tmp`;
       try {
         fs.mkdirSync(binDir, { recursive: true, mode: 0o700 });
+        removeOrphans(binDir, prefix);
         await execFileAsync('swiftc', ['-O', scriptPath, '-o', tmp], { timeout: COMPILE_TIMEOUT_MS });
         fs.chmodSync(tmp, 0o755);
         fs.renameSync(tmp, out);

@@ -840,12 +840,17 @@ function Cmd-ListWindows {
         $names[$id]
     }
     $list = @()
+    $shellPid = 0
     for ($h = [ScreenPM]::GetTopWindow([IntPtr]::Zero); $h -ne [IntPtr]::Zero; $h = [ScreenPM]::GetWindow($h, 2)) {
         if (-not [ScreenPM]::IsWindowVisible($h)) { continue }
         $cloaked = 0; [void][ScreenPM]::DwmGetWindowAttribute($h, 14, [ref]$cloaked, 4)  # DWMWA_CLOAKED
         if ($cloaked -ne 0) { continue }
         $cls = [ScreenPM]::ClassOf($h)
-        if ($script:ShellWindowClasses -contains $cls) { continue }
+        if ($script:ShellWindowClasses -contains $cls) {
+            # The desktop shell's process (explorer.exe): always running, so never evidence that a launch started an app.
+            if ($shellPid -eq 0) { [void][Win32UIA]::GetWindowThreadProcessId($h, [ref]$shellPid) }
+            continue
+        }
         $title = [LaunchWin]::TitleOf($h)
         if (-not $title -or $title.Trim().Length -eq 0) { continue }
         $wpid = 0
@@ -861,7 +866,7 @@ function Cmd-ListWindows {
         if ($hosted) { $w.hostedProcessId = $hosted.processId; $w.hostedProcessName = $hosted.processName; $w.hostedAppName = $hosted.appName }
         $list += $w
     }
-    return @{ windows = @($list) }
+    return @{ windows = @($list); shellProcessId = [int]$shellPid }
 }
 
 # The app's own display name: its exe's file description, else product name ("Designcenter NX" for ugraf.exe).

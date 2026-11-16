@@ -9,13 +9,13 @@ import * as path from 'path';
 import { PREFLIGHT_PROMPT, locateAgent, preflightFailure, runCli, runPreflight, sigOf, SERVER_NAME, type Adapter, type AgentJob, type CliCommand } from './common';
 import { tryRun } from '../proc';
 import type { CallSig } from '../types';
+import { CODEX_ISOLATION, codexAppBinary, toml } from '../../../packages/clawdcursor-agent/src/hosts';
+
+export { codexAppBinary };
 
 export const TOKEN_ENV = 'BENCH_CLAWDCURSOR_TOKEN';
 /** Model name that means "whatever Codex is configured to use": no -m flag. */
 export const CODEX_DEFAULT = 'default';
-
-/** Codex parses each -c value as TOML: a string must be quoted. */
-const toml = (s: string) => JSON.stringify(s);
 
 export function codexCommand(o: { exe: string; model: string; mcpUrl: string; token: string; workDir: string; lastMessagePath: string; prompt: string }): CliCommand {
   const server = `mcp_servers.${SERVER_NAME}`;
@@ -24,18 +24,11 @@ export function codexCommand(o: { exe: string; model: string; mcpUrl: string; to
     args: [
       'exec',
       '--json',                           // one JSON event per line: tool calls with their arguments
-      '--ignore-user-config',             // not the owner's config.toml: none of their MCP servers
-      '--ignore-rules',
-      '--skip-git-repo-check',
-      '--ephemeral',
-      '--sandbox', 'read-only',
-      '--disable', 'plugins',             // plugins bring their own MCP servers (a computer-use one among them)
-      '--disable', 'shell_tool',          // the desktop is reached through clawdcursor only
+      ...CODEX_ISOLATION,                 // none of the owner's config.toml, MCP servers, plugins or AGENTS.md; no shell tool
       '-c', `${server}.url=${toml(o.mcpUrl)}`,
       '-c', `${server}.bearer_token_env_var=${toml(TOKEN_ENV)}`,
       '-c', `${server}.default_tools_approval_mode=${toml('approve')}`,   // nobody is there to approve each call
       '-c', `approval_policy=${toml('never')}`,
-      '-c', 'project_doc_max_bytes=0',    // no AGENTS.md from the working directory or above it
       ...(o.model && o.model !== CODEX_DEFAULT ? ['--model', o.model] : []),
       '--cd', o.workDir,
       '--output-last-message', o.lastMessagePath,
@@ -50,8 +43,7 @@ export function codexCommand(o: { exe: string; model: string; mcpUrl: string; to
 export function codexPreflightCommand(o: { exe: string; model: string; workDir: string; lastMessagePath: string }): CliCommand {
   return {
     cmd: o.exe,
-    args: ['exec', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check', '--ephemeral', '--sandbox', 'read-only',
-      '--disable', 'plugins', '--disable', 'shell_tool', '-c', 'project_doc_max_bytes=0',
+    args: ['exec', ...CODEX_ISOLATION,
       ...(o.model && o.model !== CODEX_DEFAULT ? ['--model', o.model] : []),
       '--cd', o.workDir, '--output-last-message', o.lastMessagePath, '-'],
     stdin: PREFLIGHT_PROMPT,
@@ -105,19 +97,6 @@ export function codexServerFailure(text: string, stream: 'stdout' | 'stderr'): s
     }
   }
   return null;
-}
-
-/** The newest binary the Codex desktop app installed, when codex is not on PATH. */
-export function codexAppBinary(env: NodeJS.ProcessEnv = process.env): string | null {
-  const bin = env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, 'OpenAI', 'Codex', 'bin') : null;
-  if (!bin) return null;
-  let dirs: string[] = [];
-  try { dirs = fs.readdirSync(bin); } catch { return null; }
-  const found = dirs.flatMap(d => {
-    const exe = path.join(bin, d, 'codex.exe');
-    try { return [{ exe, at: fs.statSync(exe).mtimeMs }]; } catch { return []; }
-  }).sort((a, b) => b.at - a.at);
-  return found[0]?.exe ?? null;
 }
 
 export const codex: Adapter = {

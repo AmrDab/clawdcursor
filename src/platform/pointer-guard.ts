@@ -22,8 +22,8 @@ export async function beforePointerPress(): Promise<void> {
   try { await hook(); } catch { /* cosmetic */ }
 }
 
-/** A window the agent asked for by process, name or title. */
-export interface WindowQuery { processId?: number; processName?: string; title?: string }
+/** A window the agent asked for by process, name or title, or by its handle (Windows only: the fence, a Store app's frame). */
+export interface WindowQuery { processId?: number; processName?: string; title?: string; handle?: number }
 /**
  * Runs around every synthetic key, type, click, drag and scroll, in both input layers (the platform adapter and
  * NativeDesktop): core/control.ts refuses input while the user has stopped clawdcursor, or when the window in front is not

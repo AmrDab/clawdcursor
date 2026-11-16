@@ -22,22 +22,16 @@
 //                  text field on the card from the start (a click into it takes
 //                  the keyboard; Esc gives it back), replacing "Something else".
 //                  In a multiline field Return adds a line, Cmd+Return sends.
-//   overlay outline [--color #RRGGBB] [--paused]
+//   overlay outline [--color #RRGGBB]
 //                  a thin border around the window the agent works in, and nothing
 //                  else: no fill, nothing on the rest of the screen; clicks pass
 //                  straight through it. stdin: "TARGET <handle> <pid>" names the
 //                  process (a bare "TARGET": none). The border is drawn around the
 //                  process's frontmost window while that app is in front, and follows it.
-//                  When the target app is in front with no window of its own (Finder's
-//                  desktop), the border goes around the screen the pointer is on.
-//                  The border: an amber ring with a brighter run going round it (Border
-//                  Beam's turn, below), drawn cheaply (windowOutline); --paused: the
-//                  ring, still, in blue. With Reduce Motion on: the ring, still.
 //
-// The pill's orb is a port of Thinking Orbs, and the beam takes its turn from Border Beam, by Jakub Antalik (libraries.dev,
-// github.com/Jakubantalik/Libraries.dev, packages/border-beam and packages/thinking-orbs), MIT License,
-// Copyright (c) 2026 Jakub Antalik. The recipe table and the licence notice in full are at the top of
-// scripts/window-outline.ps1, the Windows drawer.
+// The pill's orb is a port of Thinking Orbs by Jakub Antalik (libraries.dev, github.com/Jakubantalik/Libraries.dev,
+// packages/thinking-orbs), MIT License,
+// Copyright (c) 2026 Jakub Antalik. The licence notice in full is at the top of scripts/banner.ps1, the Windows pill.
 //
 // When stdin closes (the parent is gone) the process exits.
 //
@@ -54,6 +48,20 @@ func emit(_ line: String) {
     FileHandle.standardOutput.write((line + "\n").data(using: .utf8)!)
 }
 
+func hexColor(_ hex: String, alpha: CGFloat = 1) -> NSColor {
+    var h = hex
+    if h.hasPrefix("#") { h.removeFirst() }
+    let v = UInt32(h, radix: 16) ?? 0xF59E0B
+    return NSColor(srgbRed: CGFloat((v >> 16) & 0xFF) / 255, green: CGFloat((v >> 8) & 0xFF) / 255,
+                   blue: CGFloat(v & 0xFF) / 255, alpha: alpha)
+}
+
+func option(_ name: String, _ fallback: String) -> String {
+    let args = CommandLine.arguments
+    if let i = args.firstIndex(of: name), i + 1 < args.count { return args[i + 1] }
+    return fallback
+}
+
 func rgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> NSColor {
     return NSColor(srgbRed: r / 255, green: g / 255, blue: b / 255, alpha: 1)
 }
@@ -68,12 +76,40 @@ let rowBg = rgb(34, 38, 46)
 let footerBg = rgb(44, 48, 57)
 let endRed = rgb(248, 113, 113)
 
-/// A panel that never becomes key or main: clicking it leaves focus where it was. The one exception is the user's own
-/// click on "Something else": then it may become key (a non-activating panel takes keystrokes without activating the app).
+/// A panel that never becomes key or main: clicking it leaves focus where it was. The exceptions are a press on the
+/// card's text box and a click on "Something else" (takeKeyboard): then it may become key (a non-activating panel takes
+/// keystrokes without activating the app).
 final class PillPanel: NSPanel {
     var allowKey = false
     override var canBecomeKey: Bool { allowKey }
     override var canBecomeMain: Bool { false }
+
+    /// The text box under a press at `point` (window coordinates), also when the press is on the field editor inside
+    /// it. Nil for any other press: a button must not take the keyboard on a press it may not complete.
+    func keyboardTarget(at point: NSPoint) -> NSView? {
+        guard let content = contentView else { return nil }
+        let local = content.superview?.convert(point, from: nil) ?? point
+        var view = content.hitTest(local)
+        while let v = view {
+            if v is ClickToTypeField { return v }
+            view = v.superview
+        }
+        return nil
+    }
+
+    /// AppKit makes a clicked window key here, before the view's mouseDown, and drops that if canBecomeKey is false at
+    /// that moment (Mac run 2026-11-16: no focus ring, clicks ignored with the Claude app in front).
+    override func sendEvent(_ event: NSEvent) {
+        guard event.type == .leftMouseDown, !isKeyWindow,
+              let target = keyboardTarget(at: event.locationInWindow) else {
+            super.sendEvent(event)
+            return
+        }
+        typingReply = true
+        allowKey = true
+        super.sendEvent(event)   // for a text field this runs the mouse tracking until mouse-up
+        if !isKeyWindow { takeKeyboard(self, target) }
+    }
 }
 
 /// Set while the user types an answer: focus is not handed back then.
@@ -85,19 +121,35 @@ final class FirstClickButton: NSButton {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
-/// The text box that is on the card from the start (pause_for_user's `input`): a click into it makes the panel key, so
-/// the user can type; nothing else ever gives the panel the keyboard.
+/// The text box that is on the card from the start (pause_for_user's `input`): a press into it (or into its field
+/// editor) makes the panel key in PillPanel.sendEvent, so the user can type; nothing else ever gives the panel the keyboard.
 final class ClickToTypeField: NSTextField {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func mouseDown(with event: NSEvent) {
-        if let panel = window as? PillPanel, !panel.allowKey {
-            typingReply = true
-            panel.allowKey = true
-            panel.makeKeyAndOrderFront(nil)
-            panel.makeFirstResponder(self)
-        }
-        super.mouseDown(with: event)
+}
+
+/// Give the card the keyboard for the user's answer ("Something else", and the fallback when a press on the box did not
+/// make the panel key). A non-activating panel normally becomes key without activating this app; when the app in
+/// front keeps the keyboard anyway (the Claude desktop app in front, Mac run 2026-11-15: no focus ring, keys went
+/// nowhere), this app is activated for the answer. Focus goes back on Send (sendReply -> giveFocusBack), Esc
+/// (releaseKeyboard) or a choice.
+func takeKeyboard(_ panel: PillPanel, _ field: NSView) {
+    typingReply = true
+    panel.allowKey = true
+    panel.makeKeyAndOrderFront(nil)
+    if !panel.isKeyWindow {
+        // The app in front kept the keyboard: ask for activation, inside the user's click (on macOS 14+ a request the
+        // system may refuse). activate() is only in the macOS 14 SDK (Swift 5.9 / Xcode 15); an older toolchain
+        // (macOS 12) must still build.
+        #if compiler(>=5.9)
+        if #available(macOS 14.0, *) { NSApp.activate() } else { NSApp.activate(ignoringOtherApps: true) }
+        #else
+        NSApp.activate(ignoringOtherApps: true)
+        #endif
+        panel.makeKeyAndOrderFront(nil)
     }
+    // A box already being edited keeps its field editor: making the box first responder again would select all of the
+    // answer typed so far, and the next key would replace it.
+    if (field as? NSControl)?.currentEditor() == nil { panel.makeFirstResponder(field) }
 }
 
 final class PillView: NSView {
@@ -127,13 +179,36 @@ func label(_ text: String, size: CGFloat, color: NSColor, bold: Bool = false, se
 
 /// The app the user was last in (frontmost at start, then kept current as they
 /// switch apps while the overlay is up): focus goes back there.
-var previousApp = NSWorkspace.shared.frontmostApplication
+var previousApp: NSRunningApplication? = NSWorkspace.shared.frontmostApplication.flatMap { isOverlay($0) ? nil : $0 }
+
+/// This process, or the other overlay process (the pill and the outline are this same binary, run twice). The other one
+/// is never the user's app: activating it leaves no window that can take keys.
+func isOverlay(_ app: NSRunningApplication) -> Bool {
+    if app.processIdentifier == ProcessInfo.processInfo.processIdentifier { return true }
+    guard let mine = Bundle.main.executableURL, let theirs = app.executableURL else { return false }
+    return mine.resolvingSymlinksInPath() == theirs.resolvingSymlinksInPath()
+}
+
+/// Cooperative activation (macOS 14): yield, then activate, which is honoured while this app is active; deactivating
+/// first gave that up. Refused anyway: this app still steps down, so it is never left active with nothing to type in.
+/// yieldActivation(to:) is macOS 14 SDK, so it stays inside the compiler check (app.activate() is activate(options:)
+/// with its default, in every SDK).
+func handBack(to app: NSRunningApplication) {
+    #if compiler(>=5.9)
+    if #available(macOS 14.0, *) {
+        NSApp.yieldActivation(to: app)
+        if !app.activate() { NSApp.deactivate() }
+        return
+    }
+    #endif
+    NSApp.deactivate()
+    app.activate(options: [])
+}
 
 func giveFocusBack() {
-    guard !typingReply, NSApp.isActive, let prev = previousApp,
-          prev.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
-    NSApp.deactivate()
-    if #available(macOS 14.0, *) { prev.activate() } else { prev.activate(options: []) }
+    guard !typingReply, NSApp.isActive else { return }
+    guard let prev = previousApp, !prev.isTerminated, !isOverlay(prev) else { NSApp.deactivate(); return }
+    handBack(to: prev)
 }
 
 /// Thinking Orbs' default state, "working", at its 20 pt size: particles running on tilted orbits around a slowly
@@ -216,7 +291,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
                                                           object: nil, queue: .main) { note in
             if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-               app.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+               !isOverlay(app) {
                 previousApp = app
             }
         }
@@ -326,12 +401,9 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         sendButton?.isHidden = !on
         typingReply = on
         if on, let panel = pillPanel, let field = replyField {
-            panel.allowKey = true
-            panel.makeKeyAndOrderFront(nil)
-            panel.makeFirstResponder(field)
+            takeKeyboard(panel, field)
         } else {
-            pillPanel?.allowKey = false
-            giveFocusBack()
+            releaseKeyboard()   // the panel may be key while this app is not active: giveFocusBack() alone did nothing
         }
     }
 
@@ -392,8 +464,8 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var inlineInput = false
     var multilineInput = false
 
-    /// Esc in the card's own box: the panel stops being key and the user's app gets the keyboard back (what was typed
-    /// stays). A key non-activating panel never made this app active, so giveFocusBack() (guarded by NSApp.isActive)
+    /// Esc in the card's own box (what was typed stays), or in "Something else" (back to the buttons): the panel stops
+    /// being key and the user's app gets the keyboard back. A key non-activating panel never made this app active, so giveFocusBack() (guarded by NSApp.isActive)
     /// would do nothing here: the panel has to leave the screen to resign key, then come back, and the app is activated
     /// directly. Deferred a turn so it does not run inside the field editor's own command handling.
     func releaseKeyboard() {
@@ -405,9 +477,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 panel.orderOut(nil)
                 panel.orderFrontRegardless()
             }
-            if let prev = previousApp, prev.processIdentifier != ProcessInfo.processInfo.processIdentifier {
-                if #available(macOS 14.0, *) { prev.activate() } else { prev.activate(options: []) }
-            }
+            if let prev = previousApp, !prev.isTerminated, !isOverlay(prev) { handBack(to: prev) } else { NSApp.deactivate() }
         }
     }
 
@@ -645,50 +715,29 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     /// The process whose window gets the outline ("TARGET <handle> <pid>" on stdin); 0: none.
     var targetPid = 0
 
-    /// The screen the pointer is on (where the agent's last click went), in AppKit coordinates: the part of it below
-    /// the menu bar and beside the Dock, which are above the outline and would hide a side of it.
-    func pointerScreen() -> (frame: NSRect, screen: Bool)? {
-        let at = NSEvent.mouseLocation
-        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(at) }) ?? NSScreen.main else { return nil }
-        return (frame: screen.visibleFrame, screen: true)
-    }
-
-    /// What the outline goes around, in AppKit coordinates, and whether that is a whole screen: the target process's
-    /// frontmost ordinary window while that app is in front (the windows are listed only then; the list is front to
-    /// back), or the pointer's screen when that app is in front with no window of its own (Finder's desktop).
-    func targetFrame() -> (frame: NSRect, screen: Bool)? {
+    /// The frame, in AppKit coordinates, of the target process's frontmost ordinary window while that app is in front.
+    /// The windows are listed only then (the list is front to back). A window nobody sees is passed over: one that is
+    /// see-through (alpha 0), or a sliver under 40 pt that an app keeps for itself.
+    func targetFrame() -> NSRect? {
         guard targetPid != 0,
               NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(targetPid),
               let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
               let primary = NSScreen.screens.first else { return nil }
-        guard let front = list.first(where: {
-                  ($0[kCGWindowOwnerPID as String] as? Int) == targetPid && ($0[kCGWindowLayer as String] as? Int) == 0
-              }),
-              let bounds = front[kCGWindowBounds as String] as? NSDictionary,
-              let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { return pointerScreen() }
-        // Quartz measures down from the top of the primary display, AppKit up from its bottom.
-        return (frame: NSRect(x: rect.minX, y: primary.frame.height - rect.maxY, width: rect.width, height: rect.height), screen: false)
+        for w in list where (w[kCGWindowOwnerPID as String] as? Int) == targetPid && (w[kCGWindowLayer as String] as? Int) == 0 {
+            guard ((w[kCGWindowAlpha as String] as? Double) ?? 1) > 0.01,
+                  let bounds = w[kCGWindowBounds as String] as? NSDictionary,
+                  let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary),
+                  rect.width >= 40, rect.height >= 40 else { continue }
+            // Quartz measures down from the top of the primary display, AppKit up from its bottom.
+            return NSRect(x: rect.minX, y: primary.frame.height - rect.maxY, width: rect.width, height: rect.height)
+        }
+        return nil
     }
 
-    /// The border beam (#392, #414): a thin ring at the edge of the frame, amber while the agent works and blue while it
-    /// waits, and while it works a brighter run of the ring going round clockwise once in 1.96 s (Border Beam's turn).
-    /// Drawn for power before looks (#414: the first port, a turning conic mask over window-sized gradient layers,
-    /// rendered the whole area off screen every frame - 55% of an M1's GPU around a full screen). Here:
-    ///   - the ring and its glow are layer borders, a 2 pt line over an 8 pt band at low alpha, rounded like the window:
-    ///     no texture, nothing drawn again;
-    ///   - the running part is two dashes, a soft 8 pt one with a bright 2 pt one in its middle, each on four
-    ///     CAShapeLayers (a side and the corner after it), so a layer is only as big as its side's band; Core Animation
-    ///     moves the dashes (lineDashPhase) with no code of ours running per frame;
-    ///   - no masks, shadows, filters or window-sized gradients, so the GPU's work follows the edge, not the area.
-    /// --paused, or Reduce Motion on: the ring alone, brighter and still: nothing changes once it is drawn.
     func windowOutline() {
-        let paused = CommandLine.arguments.contains("--paused")
-        let still = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        let turning = !paused && !still
-
         let win = NSWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: false)
         win.isOpaque = false
-        win.backgroundColor = .clear   // only the beam is drawn: nothing over the middle of the window
+        win.backgroundColor = .clear   // only the border is drawn: nothing over the window's content
         win.hasShadow = false
         win.ignoresMouseEvents = true
         win.level = .floating   // above ordinary windows, below the pill and the menu bar
@@ -696,125 +745,26 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         win.sharingType = .none  // the outline is not captured either
         let view = NSView()
         view.wantsLayer = true
+        view.layer?.borderColor = hexColor(option("--color", "#f59e0b")).cgColor
+        view.layer?.borderWidth = 3   // points: AppKit scales it for each display
+        // Rounded like the window's own corners, or a wedge of what is behind shows at each one. The system does not
+        // give a window's radius: about 16 pt for a standard window on macOS 26 (which reports itself as 16 to a
+        // binary built with an older SDK), about 10 pt before.
+        view.layer?.cornerRadius = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 16 ? 16 : 10
         win.contentView = view
-
-        let stage = CALayer()
-        stage.allowsGroupOpacity = false   // the fade in applies to each layer: no off-screen pass over the frame
-        view.layer?.addSublayer(stage)
-
-        let amber = rgb(245, 158, 11)
-        let tint = paused ? blue : amber
-        let glow = CALayer()
-        glow.borderWidth = 8
-        glow.borderColor = tint.withAlphaComponent(turning ? 0.08 : 0.16).cgColor
-        let ring = CALayer()
-        ring.borderWidth = 2
-        ring.borderColor = tint.withAlphaComponent(turning ? 0.35 : 0.9).cgColor
-        stage.addSublayer(glow)
-        stage.addSublayer(ring)
-
-        // The running part: each dash's line width, colour and share of the ring; the bright one is drawn last, on top.
-        let dashes: [(width: CGFloat, color: NSColor, share: CGFloat)] = turning
-            ? [(width: 8, color: amber.withAlphaComponent(0.3), share: 0.3), (width: 2, color: rgb(255, 200, 60), share: 0.12)]
-            : []
-        let runs: [[CAShapeLayer]] = dashes.map { dash -> [CAShapeLayer] in
-            return (0..<4).map { _ -> CAShapeLayer in
-                let side = CAShapeLayer()
-                side.fillColor = nil
-                side.strokeColor = dash.color.cgColor
-                side.lineWidth = dash.width
-                stage.addSublayer(side)
-                return side
-            }
-        }
-        let start = CACurrentMediaTime()
-
-        // The layers for a frame of this size. A whole screen has square corners; a window's are rounded like its own,
-        // or a wedge of what is behind shows at each one. The system does not give a window's radius: about 16 pt for a
-        // standard window on macOS 26 (which reports itself as 16 to a binary built with an older SDK), about 10 pt before.
-        let windowRadius: CGFloat = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 16 ? 16 : 10
-        func layout(_ size: NSSize, screen: Bool) {
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            let bounds = CGRect(origin: .zero, size: size)
-            let radius = screen ? 0 : windowRadius
-            for layer in [stage, glow, ring] {
-                layer.frame = bounds
-                layer.cornerRadius = radius
-            }
-            for (dash, sides) in zip(dashes, runs) {
-                // The middle of the dash's line: inset by half its width, its corners to match.
-                let rect = bounds.insetBy(dx: dash.width / 2, dy: dash.width / 2)
-                let r = max(0, min(radius - dash.width / 2, min(rect.width, rect.height) / 2))
-                // Clockwise from the end of the top-left corner (y grows upward here): a side and the corner after it each.
-                let starts = [CGPoint(x: rect.minX + r, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.maxY - r),
-                              CGPoint(x: rect.maxX - r, y: rect.minY), CGPoint(x: rect.minX, y: rect.minY + r)]
-                let corners = [CGPoint(x: rect.maxX, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.minY),
-                               CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.minX, y: rect.maxY)]
-                let arc = CGFloat.pi * r / 2
-                let lengths = [rect.width - 2 * r + arc, rect.height - 2 * r + arc, rect.width - 2 * r + arc, rect.height - 2 * r + arc]
-                let perimeter = lengths.reduce(0, +)
-                let lit = dash.share * perimeter
-                var along: CGFloat = 0
-                for (k, side) in sides.enumerated() {
-                    let path = CGMutablePath()
-                    path.move(to: starts[k])
-                    if r > 0 {
-                        path.addArc(tangent1End: corners[k], tangent2End: starts[(k + 1) % 4], radius: r)
-                    } else {
-                        path.addLine(to: corners[k])
-                    }
-                    // The layer is only as big as its piece of the ring.
-                    let box = path.boundingBoxOfPath.insetBy(dx: -(dash.width / 2 + 1), dy: -(dash.width / 2 + 1))
-                    var shift = CGAffineTransform(translationX: -box.minX, y: -box.minY)
-                    side.contentsScale = win.backingScaleFactor   // added by hand, so 1 otherwise: soft on Retina
-                    side.frame = box
-                    side.path = path.copy(using: &shift)
-                    // One dash per ring: a point `along` it is lit while (along + phase) mod perimeter < lit. The phase
-                    // falls by a whole ring per turn (clockwise); both dashes keep their middle on the same share of it.
-                    side.lineDashPattern = [NSNumber(value: Double(lit)), NSNumber(value: Double(perimeter - lit))]
-                    let run = CABasicAnimation(keyPath: "lineDashPhase")
-                    run.fromValue = Double(along + lit / 2 + perimeter)
-                    run.toValue = Double(along + lit / 2)
-                    run.duration = 1.96
-                    run.beginTime = start   // the same clock for every layer and every size: the dash runs on unbroken
-                    run.repeatCount = .infinity
-                    side.add(run, forKey: "run")
-                    along += lengths[k]
-                }
-            }
-            CATransaction.commit()
-        }
-
         windows.append(win)
         listenForCommands()
-        var laidOut: (NSSize, Bool)? = nil
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            guard let target = self?.targetFrame(), target.frame.width > 8, target.frame.height > 8 else { win.orderOut(nil); return }
-            let frame = target.frame
+            guard let frame = self?.targetFrame() else { win.orderOut(nil); return }
             if win.frame != frame { win.setFrame(frame, display: true) }
-            if laidOut == nil || laidOut!.0 != frame.size || laidOut!.1 != target.screen {
-                layout(frame.size, screen: target.screen)
-                laidOut = (frame.size, target.screen)
-            }
-            if !win.isVisible {
-                win.orderFrontRegardless()
-                if turning {
-                    // Coming up: from clear to full over .6 s (a still ring, as on Windows, just appears).
-                    let rise = CABasicAnimation(keyPath: "opacity")
-                    rise.fromValue = 0
-                    rise.toValue = 1
-                    rise.duration = 0.6
-                    stage.add(rise, forKey: "rise")
-                }
-            }
+            if !win.isVisible { win.orderFrontRegardless() }
         }
     }
 }
 
 let mode = CommandLine.arguments.dropFirst().first ?? ""
 guard mode == "pill" || mode == "outline" else {
-    FileHandle.standardError.write("usage: overlay pill | outline [--color #RRGGBB] [--paused]\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: overlay pill | outline [--color #RRGGBB]\n".data(using: .utf8)!)
     exit(2)
 }
 let app = NSApplication.shared
