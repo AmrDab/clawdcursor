@@ -9,8 +9,8 @@ All notable changes to Clawd Cursor will be documented in this file.
   (particles on tilted orbits, in amber) in place of the blinking dot, on Windows and macOS; the Linux pill keeps its
   dot. It is redrawn about 10 times a second, and does not move where the system is set to reduce motion (Windows
   "Animation effects" off, macOS Reduce Motion).
-  - The outline is unchanged from 2.0.0: a thin amber line around the window the agent is working in, blue while it
-    waits for you, moving with the agent from window to window.
+  - The outline is 2.0.0's: a thin amber line around the window the agent is working in, blue while it waits for
+    you, moving with the agent from window to window.
   - **Credit:** the orb follows **Thinking Orbs** by Jakub Antalik
     ([github.com/Jakubantalik/Libraries.dev](https://github.com/Jakubantalik/Libraries.dev), `packages/thinking-orbs`),
     MIT License, Copyright (c) 2026 Jakub Antalik, redrawn natively (WinForms on Windows, AppKit on macOS). The MIT
@@ -20,8 +20,11 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **Linux: password field values stay out of tree reads**, as on Windows and macOS. An AT-SPI `password text` element now
   returns no value or text in `read_tree`, `find`, the focused element and page text. A screenshot or OCR can still show
   whatever is visible on screen.
-- **Windows: the outline is not drawn around a hidden window.** A window Windows reports as hidden or cloaked could be
-  the one in front with nothing on screen, and the outline framed empty space.
+- **The outline is not drawn around a window nobody can see.** On Windows, a window Windows reports as hidden or
+  cloaked could be the one in front with nothing on screen, and the outline framed empty space. On macOS, an app's
+  see-through window or a sliver under 40 pt is passed over for its next window.
+- **A pause after the agent has been idle for 30 s still outlines its window in blue.** The card named the app, but the
+  outline had forgotten the window and drew nothing.
 - **`clawdcursor stop` and `uninstall` never signal a process they can't prove is clawdcursor.** They used to signal
   whatever pid a lock file named, and lock files go stale while pids get reused (often on Windows), so an unrelated app
   could be killed. Now a pid is signalled only when its lock is complete and the live process started when the lock

@@ -13,7 +13,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import { controlBanner, outlineFlags } from '../core/banner';
-import { stopControl, __setControlDirForTests } from '../core/control';
+import { stopControl, __setControlDirForTests, __setForegroundReaderForTests } from '../core/control';
+import { guardInputMethods } from '../platform/pointer-guard';
 import type { ChildProcess } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { dirname, join } from 'path';
@@ -224,6 +225,21 @@ describe('the outline around the window the agent works in', () => {
     controlBanner.showPaused({ id: 1, message: 'Sign in', since: 0 }, () => {});
     expect(outlines[0].killed).toBe(true);
     expect(live()[0].written).toEqual(['TARGET 1440 100']);
+  });
+
+  it('a pause after the idle hide goes round the window the card names, not nothing', async () => {
+    // The idle hide forgets the outline's window; the card still names the app the agent last worked in (control.ts).
+    __setForegroundReaderForTests(async () => ({ processId: 100, processName: 'msedge', title: 'Inbox - Edge', handle: 0x5a0 }));
+    try {
+      controlBanner.touch();
+      await guardInputMethods({ async keyPress(_k: string) {} }).keyPress('a');
+      vi.advanceTimersByTime(30_001);   // the idle hide
+      expect(live()).toEqual([]);
+      controlBanner.showPaused({ id: 1, message: 'Sign in', since: 0 }, () => {});
+      expect(live()[0].written).toEqual(['TARGET 1440 100']);
+    } finally {
+      __setForegroundReaderForTests(null);
+    }
   });
 
   it('the next session does not open on the last one\'s window', () => {

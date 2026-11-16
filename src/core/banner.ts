@@ -1,6 +1,6 @@
 /**
  * Control banner — the on-screen "desktop control in progress" indicators:
- *   - the pill: topmost, never-focused; a small dotted orb, what the agent is doing
+ *   - the pill: topmost, never-focused; a small dotted orb (a pulsing dot on Linux), what the agent is doing
  *     ("Typing in Edge", sent as `ACTIVITY <text>` on its stdin), the time since
  *     it appeared, and a Stop button (a double-click anywhere stops too).
  *   - the outline: a thin, click-through amber border around the window the
@@ -335,6 +335,9 @@ class ControlBanner {
     this.activity = ''; // after the answer the pill says "Working" until the agent's next input, not what it did before
     this.onAnswer = onAnswer;
     this.onRefocus = onRefocus;
+    // After an idle hide the outline has forgotten the window, but the card still names the app the agent worked in
+    // (control.ts): the blue outline goes round that same window.
+    if (!this.working) this.working = workingWindow();
     this.clearIdleTimer();
     this.killChildren();
     this.show();
