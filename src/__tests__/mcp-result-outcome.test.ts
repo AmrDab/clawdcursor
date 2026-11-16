@@ -357,7 +357,7 @@ describe('--no-vision: no screenshot reaches the MCP client\'s model', () => {
       expect(r.isError).toBe(true);
       expect(r.content.some(c => c.type === 'image')).toBe(false);
       // A batch has no outcome line of its own; the step's [blocked] status is the refusal (logged as refused).
-      expect(text(r)).toMatch(/halted at step 0 — step 0 .*: vision is disabled on this server[\s\S]*0\. \[blocked\]/);
+      expect(text(r)).toMatch(/halted at step 1 — step 1 .*: vision is disabled on this server[\s\S]*1\. \[blocked\]/);
       expect(await latestShot()).toBeNull();
     });
   });
@@ -428,26 +428,27 @@ describe('the first screenshot of a session that read nothing is nudged to blind
     expect(text(await capturedHandlers.get('computer')!({ action: 'screenshot' }))).not.toMatch(/strokes/);
   });
 
-  // Live 2026-11-10: copy_all_text pressed Ctrl+A / Ctrl+C in the app and the session log still called it a blind read.
-  it('copy_all_text that pressed keys is logged as an action and as text read, alone and as a batch step; one that read the tree is only a blind read', async () => {
-    let clip = 'mine';
+  // 2026-11-15: copy_all_text never presses select-all + copy (in a browser it did, and was logged as an action): in a
+  // browser or not, alone or as a batch step, it is a read.
+  it('copy_all_text is logged as a blind read only, alone and as a batch step: it presses no key', async () => {
     let processName = 'msedge';
     const platform = {
       getActiveWindow: vi.fn(async () => ({ processName, title: 'Doc', processId: 1 })),
-      keyPress: vi.fn(async (k: string) => { if (k === 'mod+c') clip = 'page text'; }),
-      readClipboard: vi.fn(async () => clip), writeClipboard: vi.fn(async (t: string) => { clip = t; }),
+      keyPress: vi.fn(async () => {}),
+      readClipboard: vi.fn(async () => 'mine'), writeClipboard: vi.fn(async () => {}),
       getUiTree: vi.fn(async () => [{ name: 'Total: 42' }]),
     };
     const ctx = { ...fakeCtx(), platform: platform as any, a11y: { invalidateCache() {} } as any };
     const { sessionLog } = await createMcpServer({ ctx, compact: true });
     const r = await capturedHandlers.get('system')!({ action: 'copy_all_text' });
-    expect(text(r)).toMatch(/Pressed (Ctrl|Cmd)\+A and (Ctrl|Cmd)\+C in \["msedge"\] "Doc"/);
-    expect(sessionLog.summary).toMatchObject({ blind: 1, actOther: 1 });
+    expect(text(r)).toMatch(/names only/);
+    expect(sessionLog.summary).toMatchObject({ blind: 1 });
     await capturedHandlers.get('batch')!({ steps: [{ name: 'system', arguments: { action: 'copy_all_text' } }] });
-    expect(sessionLog.summary).toMatchObject({ blind: 2, actOther: 2 });
     processName = 'someapp';
     await capturedHandlers.get('system')!({ action: 'copy_all_text' });
-    expect(sessionLog.summary).toMatchObject({ blind: 3, actOther: 2 });
-    expect(platform.keyPress).toHaveBeenCalledTimes(4);
+    expect(sessionLog.summary).toMatchObject({ blind: 3 });
+    expect(sessionLog.summary.actOther ?? 0).toBe(0);
+    expect(platform.keyPress).not.toHaveBeenCalled();
+    expect(platform.writeClipboard).not.toHaveBeenCalled();
   });
 });

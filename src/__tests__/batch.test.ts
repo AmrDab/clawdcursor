@@ -132,12 +132,42 @@ describe('executeBatch — halting', () => {
     expect(r.steps[1].status).toBe('unknown_tool');
   });
 
+  it('accepts a step named the way the agent\'s host shows the tool (mcp__<server>__<tool>)', async () => {
+    tools.accessibility = okTool('accessibility');
+    tools.mouse_click = okTool('mouse_click');
+    const r = await executeBatch([
+      { name: 'mcp__clawdcursor__accessibility' },
+      { name: 'mcp__plugin_clawdcursor_clawdcursor__mouse_click' },
+    ], ctx);
+    expect(r.allDone).toBe(true);
+    expect(tools.accessibility.handler).toHaveBeenCalledTimes(1);
+    expect(tools.mouse_click.handler).toHaveBeenCalledTimes(1);
+    const miss = await executeBatch([{ name: 'mcp__clawdcursor__nope' }], ctx);
+    expect(miss.steps[0].status).toBe('unknown_tool');
+    // Another server's tool never runs as clawdcursor's, whatever its bare name.
+    const other = await executeBatch([{ name: 'mcp__claude-in-chrome__mouse_click' }], ctx);
+    expect(other.steps[0].status).toBe('unknown_tool');
+    expect(tools.mouse_click.handler).toHaveBeenCalledTimes(1);
+  });
+
   it('caps the number of executed steps', async () => {
     tools.t = okTool('t');
     const steps = Array.from({ length: 5 }, () => ({ name: 't' }));
     const r = await executeBatch(steps, ctx, { maxSteps: 3 });
     expect(r.completed).toBe(3);
     expect(r.stopReason).toMatch(/capped at 3/);
+  });
+});
+
+// A batch whose sixth step failed said "5/6 completed, halted at step 5 — step 5 (...)", which reads as the fifth failing.
+describe('batch tool — the text numbers steps from 1, as the agent counts them', () => {
+  it('the sixth step failing is step 6 in the head, the reason and its own line', async () => {
+    tools.t = okTool('t');
+    tools.bad = tool('bad', vi.fn(async () => ({ text: 'boom', isError: true })));
+    const steps = [...Array.from({ length: 5 }, () => ({ name: 't' })), { name: 'bad' }];
+    const r = await getBatchTools()[0].handler({ steps }, ctx);
+    expect(r.text).toContain('batch: 5/6 completed, halted at step 6 — step 6 (bad) errored\n  1. [ok] t — t ok\n');
+    expect(r.text).toContain('\n  6. [error] bad — boom');
   });
 });
 
@@ -151,7 +181,7 @@ describe('executeBatch — guards (re-perceive precondition)', () => {
     );
     expect(r.steps[0].status).toBe('guard_failed');
     expect(tools.type_text.handler).not.toHaveBeenCalled(); // action blocked by failed precondition
-    expect(r.stopReason).toMatch(/precondition failed/);
+    expect(r.stopReason).toMatch(/^precondition failed at step 1 — /);
   });
 
   it('proceeds when the guard matches the foreground window', async () => {
@@ -270,9 +300,9 @@ describe('batch tool — the final image and repeated steps', () => {
     ];
     const r = await getBatchTools()[0].handler({ steps }, ctx);
     expect(r.image).toEqual({ data: 'img2', mimeType: 'image/png' });
-    expect(r.text).toContain("all 5 steps completed. The image attached is step 4's.");
-    expect(r.text).toContain('  1. [ok] computer.click — clicked 1\n  2. [ok] computer.click — clicked 2\n  3. [ok] computer.click — clicked 3');
-    expect(r.text).toContain('  0. [ok] computer.screenshot_region — zoomed');
+    expect(r.text).toContain("all 5 steps completed. The image attached is step 5's.");
+    expect(r.text).toContain('  2. [ok] computer.click — clicked 1\n  3. [ok] computer.click — clicked 2\n  4. [ok] computer.click — clicked 3');
+    expect(r.text).toContain('  1. [ok] computer.screenshot_region — zoomed');
     expect(r.steps).toHaveLength(5);   // the session log still gets every step
   });
 

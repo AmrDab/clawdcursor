@@ -4,11 +4,11 @@
  * Code plugin's pinned version, and npx's cache — and flags stale ones. All
  * paths here are a fake home in a temp dir; nothing real is read.
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { findInstalledCopies, describeCopies, type CopyRoots } from '../surface/installed-copies';
+import { findInstalledCopies, describeCopies, versionsLines, type CopyRoots } from '../surface/installed-copies';
 
 let root: string;
 const write = (file: string, data: unknown) => {
@@ -90,5 +90,27 @@ describe('describeCopies', () => {
 
   it('without a release check the newest copy found is the reference', () => {
     expect(describeCopies(copies, {}).stale.map(c => c.kind)).toEqual(['desktop-extension']);
+  });
+});
+
+// The Mac check (2026-11-16): a 2.1.0 source checkout running, a global v1.5.23, the latest release 2.0.0. doctor said
+// "older than v2.0.0", versions "older than v2.1.0" (the running copy's own version, which npm's latest does not install).
+describe('versions: the same reference as doctor, the latest release', () => {
+  const release = (body: unknown, status = 200) => vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(body), { status })));
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('flags a copy against the latest release, not the running copy\'s version', async () => {
+    release({ tag_name: 'v2.0.0' });
+    expect(await versionsLines([{ kind: 'global', version: '1.5.23', path: '/g' }], '/checkout')).toEqual([
+      'v1.5.23  global install (npm)  ⚠ older than v2.0.0 — run: npm install -g clawdcursor@latest',
+    ]);
+  });
+
+  it('the release cannot be read: the newest copy found is the reference, as in doctor', async () => {
+    const copies = [{ kind: 'global' as const, version: '2.0.15', path: '/g' }, { kind: 'desktop-extension' as const, version: '2.0.11', path: '/e' }];
+    release({ message: 'API rate limit exceeded' }, 403);
+    expect(await versionsLines(copies, '/g')).toEqual(describeCopies(copies, { running: '/g' }).lines);
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed'); }));
+    expect(await versionsLines(copies, '/g')).toEqual(describeCopies(copies, { running: '/g' }).lines);
   });
 });

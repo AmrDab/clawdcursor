@@ -16,7 +16,7 @@ import { DEFAULT_CONFIG } from '../types';
 import { getPackageRoot } from '../paths';
 import { hasConsent } from './onboarding';
 import { checkPermissionsQuick, requestPermissions, screenRecordingGranted, nativeBuildHint, isMacOS } from '../platform/native-helper';
-import { findInstalledCopies, describeCopies } from './installed-copies';
+import { findInstalledCopies, describeCopies, fetchLatestRelease } from './installed-copies';
 import { installMethod, howToUpdate } from './update';
 
 interface DiagResult {
@@ -195,15 +195,10 @@ function printSummary(results: DiagResult[]): void {
   console.log(`\n${'═'.repeat(50)}`);
   if (allOk) {
     console.log(`✅ All systems go!\n`);
-    console.log(`   Two ways to use clawdcursor — pick the one that fits your setup:\n`);
-    console.log(`   ${pc.bold('1. As an MCP server for your editor')} ${pc.gray('(Claude Code, Cursor, Windsurf, Zed)')}`);
-    console.log(`      Register ${pc.cyan('clawdcursor mcp')} in your editor's MCP config.`);
-    console.log(`      Your editor's AI gets the desktop tools (or 6 compound via ${pc.cyan('--compact')}).`);
-    console.log(`      Stdio transport — no daemon, no port, no token.\n`);
-    console.log(`   ${pc.bold('2. As a local HTTP daemon')} ${pc.gray('(for any HTTP client)')}`);
-    console.log(`      Run ${pc.cyan('clawdcursor agent')} — exposes the same tools at ${pc.cyan('POST /mcp')} on ${pc.cyan(':3847')}.\n`);
-    console.log(`   Run now:`);
-    console.log(`     ${pc.cyan('clawdcursor agent')}   ${pc.gray('# or skip the daemon and wire `clawdcursor mcp` into your editor')}`);
+    console.log(`   Next:`);
+    console.log(`     ${pc.cyan('clawdcursor agent')}           run it, with a live log of every action on this computer`);
+    console.log(`     ${pc.cyan('clawdcursor task "<task>"')}   test an agent (with ${pc.cyan('clawdcursor agent')} open, its actions show in the live log)\n`);
+    console.log(pc.gray(`   Editors (Claude Code, Cursor, Windsurf, Zed) run their own clawdcursor: register \`clawdcursor mcp\` in the editor's MCP config.`));
   } else {
     const failures = results.filter(r => !r.ok);
     console.log(`⚠️  ${failures.length} issue(s) detected:`);
@@ -262,17 +257,8 @@ async function checkForUpdates(results: DiagResult[]): Promise<string | undefine
     const currentVersion = pkg.version || '0.0.0';
     console.log(`   Current: v${currentVersion}`);
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-
-    const res = await fetch(
-      'https://api.github.com/repos/AmrDab/clawdcursor/releases/latest',
-      {
-        headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'clawdcursor-doctor' },
-        signal: controller.signal,
-      },
-    );
-    clearTimeout(timeout);
+    // The same release `versions` flags copies against (installed-copies.ts latestRelease).
+    const res = await fetchLatestRelease();
 
     if (res.ok) {
       const data = await res.json() as any;

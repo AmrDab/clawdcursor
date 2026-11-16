@@ -130,6 +130,15 @@ export function endAllSessions(reason: string): void {
   for (const s of [...live]) if (s.used) s.end(reason);
 }
 
+/**
+ * The `clawdcursor task` run that started this server (it passes CLAWDCURSOR_RUN_ID to the MCP server it configures):
+ * written in the session header so the run log and the session can be joined. Only a run id's own shape is kept.
+ */
+export function runId(env: NodeJS.ProcessEnv = process.env): { run?: string } {
+  const id = env.CLAWDCURSOR_RUN_ID;
+  return id && /^[\w.-]{1,64}$/.test(id) ? { run: id } : {};
+}
+
 export class SessionLog {
   readonly file: string | null;
   private tally: SessionTally = { calls: 0, blind: 0, vision: 0, actName: 0, actCoords: 0, actOther: 0, errors: 0, refused: 0, visionAfterBlind: 0, firstPerception: null, blindEmpty: 0, visionAfterBlindMiss: 0 };
@@ -218,7 +227,7 @@ export class SessionLog {
   private writeHeader(client?: { name?: string; version?: string }): void {
     if (this.headerWritten || !this.file) return;
     fs.appendFileSync(this.file, JSON.stringify({ type: 'session', started: new Date().toISOString(), ...this.meta,
-      platform: process.platform, pid: process.pid,
+      platform: process.platform, pid: process.pid, ...runId(),
       client: client?.name ? `${client.name} ${client.version ?? ''}`.trim() : undefined }) + '\n');
     this.headerWritten = true;
   }

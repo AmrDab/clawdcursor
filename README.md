@@ -103,7 +103,7 @@ In tool terms:
 - **OCR:** text recognition, reading the words in a picture of the screen. It runs on your computer.
 - **Playwright and CDP:** Playwright is a library that controls Chrome and Edge from the inside, over the Chrome DevTools Protocol (CDP), the browser's own debugging connection. Apps built on a browser engine (Electron or WebView2) can be reached the same way; `system detect_webview` finds them.
 - **Compact tools:** the six tools your AI sees with `--compact`. Without it there are 89 smaller tools, one per action. See [The tools](#the-tools).
-- **The pill and the outline:** while your AI is working, a pill on screen says what it is doing ("Typing in Edge") and a border marks the window it is working in: an amber beam that runs round its edge while your AI works, steady blue while it waits for you. Clicks go through it, and it stays out of your AI's screenshots.
+- **The pill and the outline:** while your AI is working, a pill on screen says what it is doing ("Typing in Edge") and a thin amber outline marks the window it is working in, moving with it from window to window; it turns blue while your AI waits for you. Clicks go through it, and it stays out of your AI's screenshots.
 
 ---
 
@@ -125,7 +125,7 @@ What is enforced, whatever your AI sends:
 - **A Stop button.** Press Stop on the pill (or double-click it), or run `clawdcursor stop`. Every Clawd Cursor process stops, including a call or batch already running, and stays stopped across restarts until you resume.
 - **The pause card.** For a sign-in or a 2FA code your AI hands that one step to you with `system pause_for_user`: a card on screen says what is needed and can offer choices or a text box, and your AI continues when you click Resume, or as soon as its `done_when` condition shows on screen. While the card is up, no other tool call runs. A choice or a typed reply on the card comes only from you: your AI cannot click its own card or the pill. On the granular surface an agent can also end a pause with `resume_task`; that is reported as unverified, never as your answer.
 - **No typing into AI assistant windows.** Input is refused when the window in front is an AI assistant your AI did not focus or open on purpose, or is no longer the window it was working in.
-- **Password values are never read.** Password field values are never returned by tree, find or value reads on Windows and macOS (Linux from the next release). A screenshot or OCR can still show whatever is visible on screen.
+- **Password values are never read.** Password field values are never returned by tree, find or value reads on Windows, macOS and Linux. A screenshot or OCR can still show whatever is visible on screen.
 - **A short list of keys that are never sent**, because they lock the machine or end the session. Windows: `Win+L`, `Ctrl+Alt+Del`. macOS: `Ctrl+Cmd+Q`, `Cmd+Shift+Q`, anything with Power or Eject. Linux: `Super+L`, `Ctrl+Alt+Del`, `Ctrl+Alt+Backspace`, `Ctrl+Alt+F1`&ndash;`F12`, SysRq, Power. Every other shortcut is allowed.
 - **Local only, with a token.** `clawdcursor agent` binds `127.0.0.1` only and requires the bearer token. `clawdcursor mcp` (stdio) opens no port.
 - **Screen text is marked as data.** Page text, OCR, the clipboard, titles and element names reach your AI inside `<untrusted-screen-content>` or quoted, and cannot break out of that wrapping. Whether the model obeys text it reads is the model's and the host's side of prompt-injection defence.
@@ -151,7 +151,7 @@ Privacy:
 
 ## Error reports
 
-2.0.0 sends nothing. **From 2.1**, Clawd Cursor sends anonymous error reports by default, so bugs get found and fixed. Every value is a number or comes from a fixed list, and tool and action names are Clawd Cursor's own.
+2.0.0 sent nothing. **From 2.1**, Clawd Cursor sends anonymous error reports by default, so bugs get found and fixed. Every value is a number or comes from a fixed list, and tool and action names are Clawd Cursor's own.
 
 - **With every report:** a random install id made on your computer (not derived from your hardware or accounts), the Clawd Cursor version and your OS family.
 - **`start`, when the server starts:** OS major version, CPU architecture, Node.js major version, which AI app started it (from a fixed list: Claude Code, Claude Desktop, Cursor, Codex and others; anything else is "other"), and compact or granular tools.
@@ -335,7 +335,7 @@ Restart the host afterwards so it starts the new server. `clawdcursor versions` 
 
 Earlier releases are in the [changelog](CHANGELOG.md).
 
-**Next: 2.1.** One standard benchmark across app types, OSes and models becomes the release gate, with five general mechanisms behind it: honest results, target resolution, perception without a tree, screen geometry and timing. The first three are merged, and so are an opt-in confirm mode ([#373](https://github.com/AmrDab/clawdcursor/issues/373)), `clawdcursor update`, anonymous error reports and an amber beam around the agent's window in place of the thin outline. See the [2.1 milestone](https://github.com/AmrDab/clawdcursor/milestone/1).
+**2.1.** One standard benchmark across app types, OSes and models becomes the release gate, with five general mechanisms behind it: honest results, target resolution, perception without a tree, screen geometry and timing. The first three are in 2.1, and so are an opt-in confirm mode ([#373](https://github.com/AmrDab/clawdcursor/issues/373)), `clawdcursor update`, anonymous error reports and an orb in the pill; the thin outline around the agent's window stays as in 2.0. Screen geometry and timing are next: see the [2.1 milestone](https://github.com/AmrDab/clawdcursor/milestone/1).
 
 ---
 
@@ -385,17 +385,31 @@ The full guide for agents is [SKILL.md](SKILL.md); it ships in the npm package a
 
 ## CLI
 
-For people setting up or diagnosing an install. Agents connect over MCP.
+For people setting up or diagnosing an install. Agents connect over MCP. Start here:
+
+```
+clawdcursor doctor          Check the install and set it up
+clawdcursor agent           Run clawdcursor, with a live log of every action on this computer
+clawdcursor task "<task>"   Test an agent: it does <task> with clawdcursor as its only tool, then PASS or FAIL
+```
+
+In a terminal, `clawdcursor agent` prints one line per action, whichever clawdcursor did it: the one your Claude app or
+editor started, a `clawdcursor task` run, or the daemon itself. Each line has the time, who did it (`agent` or
+`mcp <pid>`), the tool and action, the outcome (`ok`, `refused`, `failed`, ...) with its result code, and how long
+it took. A server connecting or leaving, a pause waiting for you, and a stop or resume get a line too. Names and codes
+only: no typed text, clipboard or screen text. Ctrl+C ends it. Run as a service or piped, it prints nothing extra.
+
+Every command:
 
 ```
 clawdcursor consent         Desktop-control consent (--accept / --revoke / --status)
 clawdcursor grant           Request macOS permissions (macOS only)
 clawdcursor mcp             stdio MCP server; your host starts this (--compact for the six tools)
-clawdcursor agent           HTTP MCP server on 127.0.0.1:3847 (--port, --compact, --no-vision)
+clawdcursor agent           HTTP MCP server on 127.0.0.1:3847, with the live log in a terminal (--port, --compact, --no-vision)
 clawdcursor stop            Stop every running instance; agents stay stopped until resume
-clawdcursor resume          Continue a paused task or give control back after a stop (--end to end the task)
+clawdcursor resume          Continue the daemon's paused task or give control back after a stop (--end to end the task)
 clawdcursor doctor          Diagnose the install (version, consent, screen capture, accessibility, permissions)
-clawdcursor status          Readiness check (consent, permissions)
+clawdcursor status          Readiness check (consent, permissions, whether the daemon is running)
 clawdcursor versions        Every installed copy and its version
 clawdcursor update          Update the global npm install, then list the other copies to update (from 2.1)
 clawdcursor telemetry       Whether error reports are on, and every field sent (from 2.1)
@@ -403,9 +417,41 @@ clawdcursor optout          Turn error reports off; optin turns them back on (fr
 clawdcursor report          Send a redacted report of the last session, after a preview (--save-only)
 clawdcursor register-skill  Register the usage skill in detected agents again
 clawdcursor uninstall       Remove all config, data and skill registrations
+clawdcursor task "<task>"   Developer add-on: a test agent with clawdcursor as its only tool (see below)
+clawdcursor logs            Developer add-on: the logs, readably (-f, --session, --tool, --errors, --since, --run)
 ```
 
 `--no-banner` (or `CLAWD_NO_BANNER=1`) on `mcp` and `agent` turns the on-screen pill and outline off.
+
+### Testing clawdcursor on its own
+
+For developers who want to see what an agent does when clawdcursor is the **only** tool it has. Optional: two small
+add-ons, downloaded from npm the first time you use them and only after you say yes.
+
+```
+clawdcursor task "Open a text editor and type hello"     # the agent does it, then PASS or FAIL
+clawdcursor logs --run last                              # that run, joined with clawdcursor's own log
+clawdcursor doctor --setup                               # pick the default runner and model, run a test call
+```
+
+- **Your subscription, no API key.** `task` runs your installed Claude Code (`claude -p`) or Codex (`codex exec`) on
+  your own sign-in. The agent gets one MCP server, this clawdcursor (`mcp --compact`, or `--granular`), and none of its
+  built-in tools, settings, plugins or skills. `--with claude|codex` picks one; by default it is the one `doctor --setup`
+  chose, else the installed and signed-in CLI, Claude Code first. `--model` names a model.
+- **API keys are optional:** `--with anthropic` (`ANTHROPIC_API_KEY`, or a key stored by `doctor --setup`) and
+  `--with openai-compatible` (base URL, key and model: OpenAI, Ollama, LM Studio, OpenRouter) run a small tool-calling
+  loop over the same MCP server.
+- **What you see:** each tool call with its action and a one-line result, and the agent's short messages. The agent
+  ends with a `PASS: …` or `FAIL: …` line, and the exit code follows it: 0 PASS, 1 FAIL or error, 130 Ctrl-C (the agent
+  and its clawdcursor are stopped).
+- **What is kept:** every event of the run in `~/.clawdcursor/runs/<time>.jsonl` (screenshots left out), with the id of
+  the clawdcursor session it drove. `logs` shows the day log's tool calls with their outcome, result code and where the
+  time went, and stop, pause, refusals and server start and exit; `--session last`, `--tool click`, `--errors`,
+  `--since 10m`, `-f` narrow or follow it.
+- **The add-ons:** `clawdcursor-agent` (`task` and `logs`) and `clawdcursor-doctor` (`doctor --setup`), installed with
+  `npm install --prefix ~/.clawdcursor/addons` at clawdcursor's own version. With no terminal to ask in, the command is
+  printed and nothing is downloaded; `--yes` installs without asking (CI). `doctor --setup` stores an API key in
+  `~/.clawdcursor/agent.json`, readable only by you, or just the name of the variable that holds it.
 
 ---
 
@@ -418,6 +464,8 @@ npm run build       # tsc + postbuild + bundle  ->  dist/surface/cli.js
 npm test            # vitest
 npm run lint        # eslint
 npm link            # global `clawdcursor` shim
+npm run build:addons                             # the developer add-ons in packages/
+CLAWDCURSOR_ADDONS_DIR=$PWD/packages clawdcursor task "..."   # use them from the repo: nothing is downloaded
 ```
 
 | Directory | What lives here |
@@ -426,6 +474,7 @@ npm link            # global `clawdcursor` shim
 | `src/tools/` | The granular tools, the five compound tools and `batch`. |
 | `src/platform/` | The `PlatformAdapter` for Windows, macOS, Linux and Wayland; OCR; the CDP driver; the hard key list. |
 | `src/surface/` | CLI, MCP server (stdio and HTTP), dashboard, doctor, consent. |
+| `packages/` | The optional developer add-ons: `clawdcursor-agent` (`task`, `logs`) and `clawdcursor-doctor` (`doctor --setup`). |
 
 CI runs the tests on Node 20 and 22 on Ubuntu, macOS and Windows, with a coverage threshold, a performance smoke test and an `npm audit` gate.
 
@@ -440,6 +489,8 @@ MIT. See [LICENSE](LICENSE).
 ## Acknowledgments
 
 Built on the Model Context Protocol SDK, nut-js, Playwright, sharp, and the AT-SPI, UI Automation and AX accessibility APIs.
+
+The pill's orb follows **Thinking Orbs** by Jakub Antalik ([libraries.dev](https://libraries.dev), [github.com/Jakubantalik/Libraries.dev](https://github.com/Jakubantalik/Libraries.dev)), MIT License, Copyright (c) 2026 Jakub Antalik. Its values (orbits, sizes, timings) are used in `scripts/banner.ps1` and `scripts/mac/overlay.swift`; the full MIT notice is at the top of `scripts/banner.ps1`.
 
 ---
 

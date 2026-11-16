@@ -22,7 +22,7 @@ import type { UnifiedTool, AgentToolContext } from './types';
 import { buildBatchTool } from './batch-tool';
 import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength, setLastFrame } from './coord-scale';
 import { ensureTargetForeground, sameProcess } from './focus-guard';
-import { resolveAlias, appNameRefusal, startedNoWindowText, notConfirmedText } from '../router/aliases';
+import { resolveAlias, appNameRefusal, startedNoWindowText, notConfirmedText, startMenuNote } from '../router/aliases';
 import { openFilePath } from '../../tools/open-file';
 import { resolveSchemeHandlerExecutable, launchHandlerAndVerify } from '../../platform/uri-handler';
 import type { InvokeAction, UiElement } from '../../platform/types';
@@ -40,7 +40,7 @@ import { wrapUntrustedScreenContent, screenJson } from '../untrusted-screen-cont
 import { resolveRef } from '../sense/ui-map-resolve';
 import { ensureVisible } from '../sense/ui-map-visible';
 import { findActionButton, findInputField } from '../sense/ui-map-find';
-import { waitForPaste, writeClipboardVerified, readBackTyped, setResult, setVerdict, fieldRead, typesAsKeys, EMPTY_AFTER_TYPING, type Retyped } from '../../tools/paste-guard';
+import { waitForPaste, writeClipboardVerified, readBackTyped, setResult, setVerdict, fieldRead, typesAsKeys, EMPTY_AFTER_TYPING, selectAllScope, type Retyped } from '../../tools/paste-guard';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../control';
 import { timeWait } from '../observability/steps';
 import { unguarded } from '../../platform/pointer-guard';
@@ -406,6 +406,13 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           if (!seen.ok) return { success: false, text: `set_field_value ref rejected: ${seen.error}`, isError: true };
           const [bx, by, bw, bh] = seen.bounds;
           await ctx.platform.mouseClick(Math.round(bx + bw / 2), Math.round(by + bh / 2));
+          // No select-all when the click put the focus on the page or a document itself, or on a list or button: there it
+          // selects the whole page or every item. A text field or text area takes it; an unread focus keeps the old way.
+          const fe = await (async () => ctx.platform.getFocusedElement())().catch(() => null);
+          const scope = selectAllScope(fe);
+          if (scope === 'other' || (scope === 'document' && !fe?.multiline)) {
+            return { success: false, text: `set_field_value: clicked ${plan.element.id}, but the focus is not in a text field, so nothing was typed. Find the field (find_field) and set it by its element_id.`, isError: true };
+          }
           // Replace, don't append: a set_value that types after the old text
           // left "old textnew" in the Save-As box (live Windows check).
           await ctx.platform.keyPress('mod+a');
@@ -983,7 +990,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
 
     {
       name: 'key',
-      description: 'Press a key or key combo. "mod" is this OS\'s shortcut modifier (cmd on macOS, ctrl on Windows and Linux). Use "+" for a chord (e.g. "mod+s", "shift+Tab"). Space-separate for a sequence ("Down Down End"). Examples: "Return", "Tab", "Escape", "F5", "mod+a".',
+      description: 'Press a key or key combo. "mod" is this OS\'s shortcut modifier (cmd on macOS, ctrl on Windows and Linux). Use "+" for a chord (e.g. "mod+s", "shift+Tab"). Space-separate for a sequence ("Down Down End"). Examples: "Return", "Tab", "Escape", "F5", "mod+s".',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1095,14 +1102,15 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           return { success: false, text: `Failed to launch ${quoteScreenText(name)}: ${err instanceof Error ? err.message : String(err)}` };
         }
         await sleep(800);
-        if (res.title) return { success: true, text: `Opened ${quoteScreenText(name)} (pid=${res.pid}, window="${res.title}")` };
+        const via = startMenuNote(res);
+        if (res.title) return { success: true, text: `Opened ${quoteScreenText(name)} (pid=${res.pid}, window="${res.title}")${via}` };
         // Running but no window yet: a slow app still loading. Not a failure —
         // a failure invites a second launch.
         if (res.pid) {
-          return { success: true, text: startedNoWindowText(quoteScreenText(name), res, 'agent') };
+          return { success: true, text: startedNoWindowText(quoteScreenText(name), res, 'agent') + via };
         }
         // No process and no window is not a launch: say so instead of "Launched".
-        return { success: false, text: notConfirmedText(quoteScreenText(name), name, 'agent') };
+        return { success: false, text: notConfirmedText(quoteScreenText(name), name, 'agent') + via };
       },
     },
 

@@ -1,0 +1,36 @@
+{
+  "name": "clawdcursor-agent",
+  "version": "2.1.0",
+  "description": "Optional developer add-on for clawdcursor: `clawdcursor task` (a test agent on your Claude Code or Codex sign-in, with clawdcursor as its only tool) and `clawdcursor logs`. clawdcursor downloads it on first use, after asking.",
+  "homepage": "https://clawdcursor.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AmrDab/clawdcursor.git",
+    "directory": "packages/clawdcursor-agent"
+  },
+  "author": "Amr Dabbas",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "files": [
+    "dist/",
+    "!dist/**/*.map"
+  ],
+  "scripts": {
+    "build": "tsc -p ."
+  },
+  "peerDependencies": {
+    "clawdcursor": "2.1.0"
+  },
+  "peerDependenciesMeta": {
+    "clawdcursor": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
+    "@modelcontextprotocol/sdk": "^1.32.1"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

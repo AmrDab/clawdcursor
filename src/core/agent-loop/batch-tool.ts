@@ -124,15 +124,16 @@ export function buildBatchTool(): UnifiedTool {
       let snap: Snap | null = await captureSnapshot(ctx.platform).catch(() => null);
       if (snap?.activeWindow?.processName) activeApp = snap.activeWindow.processName;
 
+      // The trace and halt lines number steps from 1, as the agent counts them (and as the MCP batch does).
       for (let i = 0; i < steps.length; i++) {
         const step = steps[i];
         const a = step.args ?? step.arguments ?? {};
         const label = step.label || `${step.name}${a.action ? '.' + String(a.action) : ''}`;
 
-        if (i >= MAX_STEPS) { trace.push(`  ${i}. [skipped] ${label}`); return halt(`batch: ${done}/${steps.length} done — capped at ${MAX_STEPS}; submit the rest as a new batch.`); }
+        if (i >= MAX_STEPS) { trace.push(`  ${i + 1}. [skipped] ${label}`); return halt(`batch: ${done}/${steps.length} done — capped at ${MAX_STEPS}; submit the rest as a new batch.`); }
 
         const tool = byName.get(step.name);
-        if (!tool) { trace.push(`  ${i}. [unknown] ${label}`); return halt(`batch halted: tool "${step.name}" is not available inside a batch.`); }
+        if (!tool) { trace.push(`  ${i + 1}. [unknown] ${label}`); return halt(`batch halted: tool "${step.name}" is not available inside a batch.`); }
 
         // Precondition. `precheck` is canonical; a legacy OBJECT `expect`
         // is accepted as the same thing (the two shapes used to share one
@@ -153,15 +154,15 @@ export function buildBatchTool(): UnifiedTool {
               // NBSP in "Microsoft Edge") that defeats a plain substring compare.
               const got = `${snap.activeWindow?.processName ?? ''} ${snap.activeWindow?.title ?? ''}`;
               if (!windowTextIncludes(got, precheck.window)) {
-                trace.push(`  ${i}. [guard_failed] ${label} — window "${precheck.window}" not focused (active: ${snap.activeWindow?.processName ?? 'unknown'})`);
-                return halt(`batch halted at step ${i}: precondition failed (window "${precheck.window}" not focused) — re-plan from current state.`);
+                trace.push(`  ${i + 1}. [guard_failed] ${label} — window "${precheck.window}" not focused (active: ${snap.activeWindow?.processName ?? 'unknown'})`);
+                return halt(`batch halted at step ${i + 1}: precondition failed (window "${precheck.window}" not focused) — re-plan from current state.`);
               }
             }
             if (precheck.element) {
               const found = snap.elements.some(e => windowTextIncludes(e.name, precheck.element));
               if (!found) {
-                trace.push(`  ${i}. [guard_failed] ${label} — element "${precheck.element}" not present`);
-                return halt(`batch halted at step ${i}: precondition failed (element "${precheck.element}" not present) — re-plan from current state.`);
+                trace.push(`  ${i + 1}. [guard_failed] ${label} — element "${precheck.element}" not present`);
+                return halt(`batch halted at step ${i + 1}: precondition failed (element "${precheck.element}" not present) — re-plan from current state.`);
               }
             }
           } else {
@@ -169,20 +170,20 @@ export function buildBatchTool(): UnifiedTool {
             // rather than blocking the batch outright.
             const tree = await perceiveTree({ ...ctx, activeApp });
             if (precheck.window && !windowTextIncludes(tree, precheck.window)) {
-              trace.push(`  ${i}. [guard_failed] ${label} — window "${precheck.window}" not focused`);
-              return halt(`batch halted at step ${i}: precondition failed (window "${precheck.window}" not focused) — re-plan from current state.`);
+              trace.push(`  ${i + 1}. [guard_failed] ${label} — window "${precheck.window}" not focused`);
+              return halt(`batch halted at step ${i + 1}: precondition failed (window "${precheck.window}" not focused) — re-plan from current state.`);
             }
             if (precheck.element && !windowTextIncludes(tree, precheck.element)) {
-              trace.push(`  ${i}. [guard_failed] ${label} — element "${precheck.element}" not present`);
-              return halt(`batch halted at step ${i}: precondition failed (element "${precheck.element}" not present) — re-plan from current state.`);
+              trace.push(`  ${i + 1}. [guard_failed] ${label} — element "${precheck.element}" not present`);
+              return halt(`batch halted at step ${i + 1}: precondition failed (element "${precheck.element}" not present) — re-plan from current state.`);
             }
           }
         }
 
         const ownUi = ownUiRefusal(a, isPauseSafeCall(step.name), isStopSafeCall(step.name));
         if (ownUi) {
-          trace.push(`  ${i}. [blocked] ${label}`);
-          return halt(`batch halted at step ${i} (${label}): ${ownUi}`);
+          trace.push(`  ${i + 1}. [blocked] ${label}`);
+          return halt(`batch halted at step ${i + 1} (${label}): ${ownUi}`);
         }
 
         // Layer C per step — the assertion-array `expect` lives in the step's
@@ -193,8 +194,8 @@ export function buildBatchTool(): UnifiedTool {
         const assertionExpect = a.expect !== undefined ? a.expect : (Array.isArray(legacyExpect) ? legacyExpect : undefined);
         const expectError = validateExpect(assertionExpect);
         if (expectError) {
-          trace.push(`  ${i}. [error] ${label} — expect rejected (nothing executed)`);
-          return halt(`batch halted at step ${i} (${label}): expect rejected (nothing executed): ${expectError}`);
+          trace.push(`  ${i + 1}. [error] ${label} — expect rejected (nothing executed)`);
+          return halt(`batch halted at step ${i + 1} (${label}): expect rejected (nothing executed): ${expectError}`);
         }
 
         let res: UnifiedToolResult;
@@ -227,10 +228,10 @@ export function buildBatchTool(): UnifiedTool {
         if (reactive) res = { ...res, success: reactive.success, text: reactive.text };
 
         if (!res.success) {
-          trace.push(`  ${i}. [error] ${label} — ${(res.text || '').slice(0, 100)}`);
-          return halt(`batch halted at step ${i} (${label}): ${(res.text || '').slice(0, 200)}`);
+          trace.push(`  ${i + 1}. [error] ${label} — ${(res.text || '').slice(0, 100)}`);
+          return halt(`batch halted at step ${i + 1} (${label}): ${(res.text || '').slice(0, 200)}`);
         }
-        trace.push(`  ${i}. [ok] ${label} — ${(res.text || '').slice(0, 80)}`);
+        trace.push(`  ${i + 1}. [ok] ${label} — ${(res.text || '').slice(0, 80)}`);
         done++;
       }
       return { success: true, text: `batch: all ${steps.length} steps completed.\n${trace.join('\n')}` };

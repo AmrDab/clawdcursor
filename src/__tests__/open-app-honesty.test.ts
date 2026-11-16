@@ -6,6 +6,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { getOrchestrationTools } from '../tools/orchestration';
+import { resolveAlias } from '../core/router/aliases';
 import { buildUnifiedTools } from '../core/agent-loop/tools';
 import type { ToolContext } from '../tools/types';
 
@@ -131,5 +132,56 @@ describe('open_app — the launch was handed to a process that was already runni
     expect(r.text).toMatch(/handed off to the running msedge(\.exe)?, pid=6001/);
     expect(r.text).toContain('window {"action":"focus","processName":"msedge"}');
     expect(r.text).toMatch(/Do not launch it again/);
+  });
+});
+
+describe('open_app — the Windows Start-menu fallback is said, not hidden (it pressed keys and typed on the desktop)', () => {
+  const NOTE = '(opened through the Start menu after Start-Process showed no window in 4 s)';
+  const viaMenu = async () => ({ pid: 800, title: 'Untitled - Paint', startMenuAfter: 'Start-Process' });
+
+  it('MCP and agent loop: an opened window says it came through the Start menu', async () => {
+    const r = await mcpOpenApp.handler({ name: 'mspaint' }, mcpCtx(viaMenu));
+    expect(r.isError).toBeFalsy();
+    expect(r.text).toBe(`Opened "mspaint" (pid=800, window="Untitled - Paint") ${NOTE}`);
+    const a = await agentOpenApp.execute({ name: 'mspaint' }, agentCtx(viaMenu));
+    expect(a.success).toBe(true);
+    expect(a.text).toContain(NOTE);
+  });
+
+  it('a direct launch keeps its wording', async () => {
+    const r = await mcpOpenApp.handler({ name: 'mspaint' }, mcpCtx(async () => ({ pid: 800, title: 'Untitled - Paint' })));
+    expect(r.text).toBe('Opened "mspaint" (pid=800, window="Untitled - Paint")');
+  });
+
+  it('a fallback that found nothing says the Start menu was searched too', async () => {
+    const r = await mcpOpenApp.handler({ name: 'calculator' }, mcpCtx(async () => ({ startMenuAfter: 'shell:AppsFolder' })));
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/no window appeared/);
+    expect(r.text).toContain('(shell:AppsFolder showed no window in 4 s; a Start-menu search found none either)');
+  });
+});
+
+describe('open_app "File Explorer" starts explorer.exe, not the display name (live 2026-11-14)', () => {
+  // The alias row had no executable, so the display name "File Explorer" went to Start-Process as the program.
+  it('the alias rows name the program', () => {
+    expect(resolveAlias('File Explorer')?.executable).toBe('explorer.exe');
+    expect(resolveAlias('explorer')?.executable).toBe('explorer.exe');
+  });
+
+  it('on Windows both surfaces launch explorer.exe, with explorer as the app\'s process', async () => {
+    const win = { launchApp: vi.fn(async () => ({ pid: 9100, title: 'Home - File Explorer' })), platform: 'win32' };
+    const real = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    try {
+      await mcpOpenApp.handler({ name: 'File Explorer' }, { ...mcpCtx(async () => ({})), platform: win } as unknown as ToolContext);
+    } finally {
+      Object.defineProperty(process, 'platform', { value: real });
+    }
+    await agentOpenApp.execute({ name: 'File Explorer' }, { platform: win } as any);
+    for (const call of win.launchApp.mock.calls as unknown[][]) {
+      expect(call[0]).toBe('explorer.exe');
+      expect(call[1]).toEqual(expect.objectContaining({ processNames: ['explorer'] }));
+    }
+    expect(win.launchApp).toHaveBeenCalledTimes(2);
   });
 });

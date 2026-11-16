@@ -471,9 +471,9 @@ export function getDesktopTools(): ToolDefinition[] {
 
     {
       name: 'key_press',
-      description: 'Press a keyboard key or key combination. Use "+" for a chord (e.g. "mod+s", "shift+enter"); "mod" is this OS\'s shortcut modifier (cmd on macOS, ctrl on Windows and Linux). Separate multiple presses with SPACES to send them in sequence (e.g. "Down Down End", "mod+a Delete"). Single keys: "Return", "Tab", "Escape", "Backspace", "Delete", "F1"-"F12", "Left/Right/Up/Down".',
+      description: 'Press a keyboard key or key combination. Use "+" for a chord (e.g. "mod+s", "shift+enter"); "mod" is this OS\'s shortcut modifier (cmd on macOS, ctrl on Windows and Linux). Separate multiple presses with SPACES to send them in sequence (e.g. "Down Down End"). Single keys: "Return", "Tab", "Escape", "Backspace", "Delete", "F1"-"F12", "Left/Right/Up/Down".',
       parameters: {
-        key: { type: 'string', description: 'Key/combo to press (e.g. "Return", "mod+a", "F5"). Space-separate combos for a sequence ("Down Down End").', required: true },
+        key: { type: 'string', description: 'Key/combo to press (e.g. "Return", "mod+s", "F5"). Space-separate combos for a sequence ("Down Down End").', required: true },
       },
       category: 'keyboard',
       compactGroup: 'computer',
@@ -485,7 +485,7 @@ export function getDesktopTools(): ToolDefinition[] {
         // message instead (the `computer` compound names this field `combo`,
         // with `key` accepted as an alias).
         if (typeof key !== 'string' || key.trim() === '') {
-          return { text: 'key_press: "key" is required — the key or combo to press, e.g. "Return" or "mod+a". (On the `computer` compound the field is `combo`; `key` is also accepted.)', isError: true };
+          return { text: 'key_press: "key" is required — the key or combo to press, e.g. "Return" or "mod+s". (On the `computer` compound the field is `combo`; `key` is also accepted.)', isError: true };
         }
         // "+" joins a chord; whitespace separates combos pressed in sequence.
         const combos = key.trim().split(/\s+/);

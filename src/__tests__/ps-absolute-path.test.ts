@@ -171,6 +171,25 @@ describe('review round: windir, a hardened run dir, the interactive console, lau
   });
 });
 
+describe('a PowerShell that runs Start-Process for the user is never detached (live 2026-11-14)', () => {
+  // A detached PowerShell (DETACHED_PROCESS) runs `Start-Process explorer.exe <folder>`, and Explorer opens no window:
+  // open_file on a folder and open_app "File Explorer" showed nothing. The same PowerShell not detached opens it.
+  it('no PowerShell spawn in the sources is detached', () => {
+    const src = path.join(__dirname, '..');
+    const files: string[] = [];
+    (function walk(dir: string) {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) { if (e.name !== '__tests__') walk(p); } else if (p.endsWith('.ts')) files.push(p);
+      }
+    })(src);
+    const calls = files.flatMap(f => [...fs.readFileSync(f, 'utf8').matchAll(/\bspawn\(\s*powershellExe\(\)[^;]*;/g)]
+      .map(m => ({ f: path.relative(src, f), text: m[0] })));
+    expect(calls.length).toBeGreaterThanOrEqual(4);   // the scan sees the launchers (windows, uri-handler, electron) and the bridge
+    expect(calls.filter(c => /detached/.test(c.text)).map(c => c.f)).toEqual([]);
+  });
+});
+
 describe('every program started by name is a macOS / Linux one', () => {
   // The only bare names allowed in spawn / exec / execFile calls: tools that exist on macOS or Linux alone (their calls sit on
   // non-Windows code paths), and `npm`, resolved from PATH by the user's own uninstall command (run with a private cwd).

@@ -156,6 +156,35 @@ const TARGETS: SyncTarget[] = [
   // intentionally NOT touched) and plugins[0].version (the clawdcursor release
   // version, synced here). The regex is anchored to the plugin's `"source": "./"
   // line so it only rewrites the plugin-entry version, never metadata.version.
+  // The developer add-ons (packages/): core installs them at its own version and loads only that version, so each
+  // package's version and its `clawdcursor` peer pin move with core's.
+  ...['clawdcursor-agent', 'clawdcursor-doctor'].flatMap((pkg): SyncTarget[] => [
+    {
+      file: `packages/${pkg}/package.json`,
+      pattern: /("version":\s*")\d+\.\d+\.\d+(")/,
+      replacement: `$1${VERSION}$2`,
+      desc: `${pkg} add-on version`,
+    },
+    {
+      file: `packages/${pkg}/package.json`,
+      pattern: /("clawdcursor":\s*")\d+\.\d+\.\d+(")/,
+      replacement: `$1${VERSION}$2`,
+      desc: `${pkg} add-on peer pin on clawdcursor`,
+    },
+  ]),
+  {
+    file: 'packages/clawdcursor-agent/package-lock.json',
+    pattern: /("name":\s*"clawdcursor-agent",\s*"version":\s*")\d+\.\d+\.\d+(")/g,
+    replacement: `$1${VERSION}$2`,
+    desc: 'clawdcursor-agent lockfile root version',
+  },
+  {
+    file: 'packages/clawdcursor-agent/package-lock.json',
+    pattern: /("clawdcursor":\s*")\d+\.\d+\.\d+(")/,
+    replacement: `$1${VERSION}$2`,
+    desc: 'clawdcursor-agent lockfile peer pin',
+  },
+
   {
     file: '.claude-plugin/marketplace.json',
     pattern: /("source":\s*"\.\/",[\s\S]*?"version":\s*")\d+\.\d+\.\d+(")/,
