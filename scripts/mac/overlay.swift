@@ -68,23 +68,22 @@ let rowBg = rgb(34, 38, 46)
 let footerBg = rgb(44, 48, 57)
 let endRed = rgb(248, 113, 113)
 
-/// A panel that never becomes key or main: clicking it leaves focus where it was. The exceptions are the card's text
-/// box and "Something else": a press on either may make it key (a non-activating panel takes keystrokes without
-/// activating the app).
+/// A panel that never becomes key or main: clicking it leaves focus where it was. The exceptions are a press on the
+/// card's text box and a click on "Something else" (takeKeyboard): then it may become key (a non-activating panel takes
+/// keystrokes without activating the app).
 final class PillPanel: NSPanel {
     var allowKey = false
     override var canBecomeKey: Bool { allowKey }
     override var canBecomeMain: Bool { false }
 
-    /// What a press at `point` (window coordinates) would give the keyboard to: the text box (or the field editor
-    /// inside it) or "Something else". Nil for any other press.
+    /// The text box under a press at `point` (window coordinates), also when the press is on the field editor inside
+    /// it. Nil for any other press: a button must not take the keyboard on a press it may not complete.
     func keyboardTarget(at point: NSPoint) -> NSView? {
         guard let content = contentView else { return nil }
         let local = content.superview?.convert(point, from: nil) ?? point
         var view = content.hitTest(local)
         while let v = view {
             if v is ClickToTypeField { return v }
-            if let b = v as? FirstClickButton { return b.takesKeyboard ? b : nil }
             view = v.superview
         }
         return nil
@@ -101,7 +100,7 @@ final class PillPanel: NSPanel {
         typingReply = true
         allowKey = true
         super.sendEvent(event)   // for a text field this runs the mouse tracking until mouse-up
-        if !isKeyWindow, target is ClickToTypeField { takeKeyboard(self, target) }
+        if !isKeyWindow { takeKeyboard(self, target) }
     }
 }
 
@@ -111,7 +110,6 @@ var typingReply = false
 /// Buttons in a non-key panel must act on the first click.
 final class FirstClickButton: NSButton {
     var line = ""
-    var takesKeyboard = false   // "Something else" opens the text box; no other button takes the keyboard
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
@@ -141,7 +139,9 @@ func takeKeyboard(_ panel: PillPanel, _ field: NSView) {
         #endif
         panel.makeKeyAndOrderFront(nil)
     }
-    panel.makeFirstResponder(field)
+    // A box already being edited keeps its field editor: making the box first responder again would select all of the
+    // answer typed so far, and the next key would replace it.
+    if (field as? NSControl)?.currentEditor() == nil { panel.makeFirstResponder(field) }
 }
 
 final class PillView: NSView {
@@ -182,12 +182,14 @@ func isOverlay(_ app: NSRunningApplication) -> Bool {
 }
 
 /// Cooperative activation (macOS 14): yield, then activate, which is honoured while this app is active; deactivating
-/// first gave that up.
+/// first gave that up. Refused anyway: this app still steps down, so it is never left active with nothing to type in.
+/// yieldActivation(to:) is macOS 14 SDK, so it stays inside the compiler check (app.activate() is activate(options:)
+/// with its default, in every SDK).
 func handBack(to app: NSRunningApplication) {
     #if compiler(>=5.9)
     if #available(macOS 14.0, *) {
         NSApp.yieldActivation(to: app)
-        app.activate()
+        if !app.activate() { NSApp.deactivate() }
         return
     }
     #endif
@@ -393,8 +395,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         if on, let panel = pillPanel, let field = replyField {
             takeKeyboard(panel, field)
         } else {
-            pillPanel?.allowKey = false
-            giveFocusBack()
+            releaseKeyboard()   // the panel may be key while this app is not active: giveFocusBack() alone did nothing
         }
     }
 
@@ -455,8 +456,8 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var inlineInput = false
     var multilineInput = false
 
-    /// Esc in the card's own box: the panel stops being key and the user's app gets the keyboard back (what was typed
-    /// stays). A key non-activating panel never made this app active, so giveFocusBack() (guarded by NSApp.isActive)
+    /// Esc in the card's own box (what was typed stays), or in "Something else" (back to the buttons): the panel stops
+    /// being key and the user's app gets the keyboard back. A key non-activating panel never made this app active, so giveFocusBack() (guarded by NSApp.isActive)
     /// would do nothing here: the panel has to leave the screen to resign key, then come back, and the app is activated
     /// directly. Deferred a turn so it does not run inside the field editor's own command handling.
     func releaseKeyboard() {
@@ -468,7 +469,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 panel.orderOut(nil)
                 panel.orderFrontRegardless()
             }
-            if let prev = previousApp, !prev.isTerminated, !isOverlay(prev) { handBack(to: prev) }
+            if let prev = previousApp, !prev.isTerminated, !isOverlay(prev) { handBack(to: prev) } else { NSApp.deactivate() }
         }
     }
 
@@ -604,7 +605,6 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                                    frame: NSRect(x: pad, y: footerY, width: 132, height: 30),
                                    color: gray, textColor: headerBlue)
                 o.action = #selector(somethingElse(_:))
-                o.takesKeyboard = true
                 other = o
             }
             if let other = other { choiceButtons = [resume, other, end] } else { choiceButtons = [resume, end] }
