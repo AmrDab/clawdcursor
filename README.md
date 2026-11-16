@@ -385,13 +385,27 @@ The full guide for agents is [SKILL.md](SKILL.md); it ships in the npm package a
 
 ## CLI
 
-For people setting up or diagnosing an install. Agents connect over MCP.
+For people setting up or diagnosing an install. Agents connect over MCP. Start here:
+
+```
+clawdcursor doctor          Check the install and set it up
+clawdcursor agent           Run clawdcursor, with a live log of every action on this computer
+clawdcursor task "<task>"   Test an agent: it does <task> with clawdcursor as its only tool, then PASS or FAIL
+```
+
+In a terminal, `clawdcursor agent` prints one line per action, whichever clawdcursor did it: the one your Claude app or
+editor started, a `clawdcursor task` run, or the daemon itself. Each line has the time, who did it (`agent` or
+`mcp <pid>`), the tool and action, the outcome (`ok`, `refused`, `failed`, ...) with its result code, and how long
+it took. A server connecting or leaving, a pause waiting for you, and a stop or resume get a line too. Names and codes
+only: no typed text, clipboard or screen text. Ctrl+C ends it. Run as a service or piped, it prints nothing extra.
+
+Every command:
 
 ```
 clawdcursor consent         Desktop-control consent (--accept / --revoke / --status)
 clawdcursor grant           Request macOS permissions (macOS only)
 clawdcursor mcp             stdio MCP server; your host starts this (--compact for the six tools)
-clawdcursor agent           HTTP MCP server on 127.0.0.1:3847 (--port, --compact, --no-vision)
+clawdcursor agent           HTTP MCP server on 127.0.0.1:3847, with the live log in a terminal (--port, --compact, --no-vision)
 clawdcursor stop            Stop every running instance; agents stay stopped until resume
 clawdcursor resume          Continue the daemon's paused task or give control back after a stop (--end to end the task)
 clawdcursor doctor          Diagnose the install (version, consent, screen capture, accessibility, permissions)

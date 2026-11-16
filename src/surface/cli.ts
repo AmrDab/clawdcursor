@@ -113,6 +113,7 @@ import { e } from './format';
 import { claimPidFile, releasePidFile, isProcessAlive, recordLockPort, daemonPortForClient, stopLockHolder } from './pidfile';
 import { userArgs, parsePort } from './argv';
 import { endAllSessions } from './session-log';
+import { startAgentLiveLog, type LiveLog } from './live-log';
 import { spoolBeforeExit, setTelemetryEnabled, offReason, telemetryStatusText, STATE_FILE as TELEMETRY_FILE } from '../core/observability/telemetry';
 import { privateRunDir } from '../platform/ps-spawn';
 
@@ -141,7 +142,14 @@ async function isClawdInstance(port: number): Promise<boolean> {
 program
   .name('clawdcursor')
   .description('🐾 Desktop control for AI agents: an MCP tool layer your agent drives')
-  .version(VERSION);
+  .version(VERSION)
+  .addHelpText('before', [
+    'Start here:',
+    '  clawdcursor doctor          check and set up',
+    '  clawdcursor agent           run, with a live log of every action',
+    '  clawdcursor task "<task>"   test an agent',
+    '',
+  ].join('\n'));
 
 // ── Agent mode (v0.9 PR7.4) ────────────────────────────────────────────
 //
@@ -247,12 +255,15 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
 
   console.log(`${pc.green('✓')} ${pc.bold('clawdcursor')} ${pc.gray(`v${VERSION}`)} ${pc.gray(`— desktop control active on ${BIND_HOST}:${resolved.port}`)}`);
 
+  let liveLog: LiveLog | null = null;
+
   // ── HTTP utility surface (/, /health, /stop) + MCP transport at /mcp ──
   const app = createUtilityServer({
     host: BIND_HOST,
     onStop: async () => {
       endAllSessions('stopped with clawdcursor stop (POST /stop)');  // synchronous: in the log before the exit
       releasePidFile('start');  // like the SIGINT/SIGTERM exits: a stale lock must not outlive the daemon
+      liveLog?.stop();
     },
   });
 
@@ -346,9 +357,12 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
     console.log(`\nAll mutating endpoints require: ${pc.cyan('Authorization: Bearer <token>')}`);
 
     console.log(`\nReady. ${e('🐾', '')}`);
+    // In a terminal: every action from any clawdcursor on this computer, as it happens (live-log.ts).
+    liveLog = startAgentLiveLog();
   });
 
   process.on('SIGINT', () => {
+    liveLog?.stop();
     console.log(`\n${e('👋', '--')} Shutting down...`);
     endAllSessions('SIGINT (Ctrl+C)');
     releasePidFile('start');
@@ -356,6 +370,7 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
     process.exit(0);
   });
   process.on('SIGTERM', () => {
+    liveLog?.stop();
     endAllSessions('SIGTERM (a kill or the system stopped the daemon)');
     releasePidFile('start');
     spoolBeforeExit();

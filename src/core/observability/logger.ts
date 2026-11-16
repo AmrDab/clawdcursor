@@ -123,7 +123,7 @@ const C: Record<'dim' | 'bold' | 'gray' | 'red' | 'green' | 'yellow' | 'blue' | 
 };
 
 let logDir: string | null = null;
-function getLogDir(): string {
+export function getLogDir(): string {
   if (logDir) return logDir;
   // CLAWDCURSOR_LOG_DIR: tests point this at a temp dir — the suite's stub-model
   // runs used to fill the user's real ~/.clawdcursor/logs.
@@ -132,10 +132,14 @@ function getLogDir(): string {
   return logDir;
 }
 
-function currentLogPath(): string {
-  const d = new Date();
+/** The day log of `d`'s UTC day: every clawdcursor process on this computer appends to the same one. */
+export function dayLogName(d: Date = new Date()): string {
   const day = `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
-  return path.join(getLogDir(), `clawdcursor-${day}.log`);
+  return `clawdcursor-${day}.log`;
+}
+
+function currentLogPath(): string {
+  return path.join(getLogDir(), dayLogName());
 }
 
 function rotateIfNeeded(filePath: string): void {
@@ -487,6 +491,10 @@ function formatMs(ms: number): string {
 
 // ─── Public logger entry points ─────────────────────────────────────
 
+/** Events the agent's live log (surface/live-log.ts) already prints in this terminal: the file still gets them, the terminal not twice. */
+const quietOnTerminal = new Set<string>();
+export function keepOffTerminal(msgs: Iterable<string>): void { for (const m of msgs) quietOnTerminal.add(m); }
+
 function emit(level: Level, msg: string, meta?: Record<string, unknown>): void {
   telemetry(msg, meta);   // allowlisted bug reports (telemetry.ts), whatever the log level
   if (LEVEL_ORDER[level] < minLevel) return;
@@ -500,6 +508,7 @@ function emit(level: Level, msg: string, meta?: Record<string, unknown>): void {
     ...(meta && Object.keys(meta).length ? { meta } : {}),
   };
   writeJsonLine(JSON.stringify(record));
+  if (quietOnTerminal.has(msg)) return;
 
   // TTY: pretty if we're a TTY / user opted in. Otherwise raw JSON-line.
   if (prettyMode) {

@@ -117,6 +117,7 @@ export async function runSetup(ctx: SetupContext): Promise<number> {
   const r = await agent.runTask({ task: TEST_TASK, with: runner, ...(cfg.model ? { model: cfg.model } : {}) }, ctx);
   out(r.verdict === 'PASS'
     ? '\n✅ The test agent works. Try: clawdcursor task "Open a text editor and type hello"'
+      + '\n   With clawdcursor agent running in another terminal, its live log shows every action the agent takes.'
     : `\n❌ The test call did not pass${r.reason ? `: ${r.reason}` : ''}. Fix that, then run \`clawdcursor doctor --setup\` again.`);
   return r.exitCode;
 }

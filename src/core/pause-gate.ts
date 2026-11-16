@@ -280,6 +280,7 @@ class PauseGate {
     const promise = new Promise<PauseResult>(resolve => { settle = resolve; });
     const entry: Pending = { info, key: req.key, promise, settle };
     this.pending = entry;
+    logger.info('pause.start');   // never the message: the agent wrote it, and it can quote the screen
 
     const timer = setTimeout(() => this.finish(entry, { outcome: 'timeout' }), timeoutMs());
     timer.unref?.();

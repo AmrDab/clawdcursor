@@ -5,6 +5,10 @@ All notable changes to Clawd Cursor will be documented in this file.
 ## [2.1.0] - 2026-11-16
 
 ### Added
+- **`clawdcursor agent` shows a live log of every action.** In a terminal, one line per action from any clawdcursor on
+  the computer: the one Claude started, `clawdcursor task` runs, the daemon's own. Only in a terminal; a service or a
+  pipe gets nothing extra. `clawdcursor --help` now starts with the three commands to begin with: `doctor`, `agent`
+  and `task`. The day log gains a `pause.start` line (no message text) so the live log can say "waiting for you".
 - **Anonymous error reports are on by default. Turn them off with `clawdcursor optout`** (#404, #416). So that bugs get
   found without anyone filing a report, clawdcursor sends a small anonymous report when it fails, runs slowly or
   crashes. It says so in one line on stderr the first time one is queued. Details are in `docs/telemetry.md`.
