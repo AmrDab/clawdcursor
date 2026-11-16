@@ -193,12 +193,12 @@ function follow(dir: string, f: Filter, p: Paint, out: (l: string) => void, last
     setInterval(() => {
       const now = today();
       if (now !== file) { file = now; offset = 0; rest = ''; }
-      let size = 0;
-      try { size = fs.statSync(file).size; } catch { return; }
-      if (size < offset) { offset = 0; rest = ''; }   // rotated: a new file under the same name
-      if (size === offset) return;
-      const fd = fs.openSync(file, 'r');
+      let fd: number;
+      try { fd = fs.openSync(file, 'r'); } catch { return; }
       try {
+        const size = fs.fstatSync(fd).size;   // the size of the file that is open, not of whatever has the name now
+        if (size < offset) { offset = 0; rest = ''; }   // rotated: a new file under the same name
+        if (size === offset) return;
         const buf = Buffer.alloc(size - offset);
         fs.readSync(fd, buf, 0, buf.length, offset);
         offset = size;
