@@ -145,6 +145,9 @@ jobs:
             VER="$(node -p "require('./packages/$p/package.json').version")"
             if npm view "$p@$VER" version >/dev/null 2>&1; then
               echo "$p@$VER is already on npm, skipped."
+            elif ! npm view "$p" name >/dev/null 2>&1; then
+              # Trusted publishing works only for a package that exists: its first version is published by hand.
+              echo "::warning::$p is not on npm yet, so it was not published. Publish its first version by hand (npm publish --access public in packages/$p), then add this workflow as its trusted publisher."
             else
               (cd "packages/$p" && npm publish --access public)
             fi
