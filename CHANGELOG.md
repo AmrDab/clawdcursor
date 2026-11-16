@@ -139,8 +139,9 @@ All notable changes to Clawd Cursor will be documented in this file.
   on-screen prompt is available" while the overlay was still compiling. They now wait for that compile, and fail only
   if it fails. A compile cut short by an exiting run no longer leaves its temp file behind.
 - **macOS: the pause card's answer box takes typing with any app in front** (#434). With the Claude app in front, a
-  click into the box showed no focus ring and the keys went nowhere, so the agent waited out the whole pause. The box
-  now takes the keyboard on every click, and Send, Esc or a choice hands it back to your app.
+  click into the box often did nothing (no focus ring, the keys went nowhere), so the agent waited out the whole pause.
+  The card refused the keyboard at the moment macOS handled the click; now the first click into the box takes it,
+  every time, and Send or Esc hands it back to your app. Esc in "Something else" now gives the keyboard back too.
 - **`batch` accepts steps named the way the host shows the tool** (#434). A step named `mcp__clawdcursor__accessibility`
   (or `mcp__plugin_clawdcursor_clawdcursor__…`) stopped the batch with "unknown tool". Only a clawdcursor server's
   prefix is accepted, so another server's `computer` never runs as clawdcursor's.
