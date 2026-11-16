@@ -452,7 +452,9 @@ program
   .description('📊 Check readiness status (consent, permissions)')
   .action(async () => {
     const { printStatusReport } = await import('./readiness');
-    await printStatusReport();
+    // Where `stop` / `resume` look for the daemon, and the same probe: /health answers, nothing is started.
+    const port = clientPort(undefined);
+    await printStatusReport({ port, running: await isClawdInstance(port) });
   });
 
 program
