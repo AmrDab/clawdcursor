@@ -273,6 +273,49 @@ describe('no overlay outlives its parent', () => {
   });
 });
 
+// Mac run 2026-11-15: with the Claude desktop app in front, a click into the pause card's box gave it no keyboard.
+describe('the macOS pause card takes the keyboard for an answer', () => {
+  const swift = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'mac', 'overlay.swift'), 'utf8');
+  it('the panel opens allowKey for a press on the box before AppKit handles it, not only the first time', () => {
+    // AppKit makes a clicked window key in NSWindow.sendEvent, before mouseDown; with canBecomeKey false then, that is dropped.
+    const panel = swift.slice(swift.indexOf('final class PillPanel'), swift.indexOf('/// Set while the user types'));
+    expect(panel).toMatch(/override func sendEvent\(_ event: NSEvent\)/);
+    expect(panel).toMatch(/event\.type == \.leftMouseDown, !isKeyWindow,\s*let target = keyboardTarget\(at: event\.locationInWindow\)/);
+    expect(panel).toMatch(/typingReply = true\s*\n\s*allowKey = true\s*\n\s*super\.sendEvent\(event\)/);
+    expect(panel).toMatch(/if !isKeyWindow \{ takeKeyboard\(self, target\) \}/);
+    // Only the box (or its field editor): a button press can be dragged off, and must not leave the card holding the keys.
+    const target = panel.slice(panel.indexOf('func keyboardTarget('), panel.indexOf('override func sendEvent('));
+    expect(target).toMatch(/v is ClickToTypeField \{ return v \}/);
+    expect(target).not.toMatch(/FirstClickButton/);
+    const field = swift.slice(swift.indexOf('final class ClickToTypeField'), swift.indexOf('func takeKeyboard('));
+    expect(field).not.toMatch(/mouseDown/);
+  });
+  it('takeKeyboard is synchronous and asks for activation only when the panel is still not key; "Something else" goes the same way', () => {
+    const take = swift.slice(swift.indexOf('func takeKeyboard('), swift.indexOf('final class PillView'));
+    expect(take).not.toMatch(/DispatchQueue/);
+    expect(take).toMatch(/if !panel\.isKeyWindow \{[\s\S]*NSApp\.activate\(\)[\s\S]*panel\.makeKeyAndOrderFront\(nil\)\s*\n\s*\}/);
+    // A box being edited keeps its field editor (re-making it first responder selects the whole answer).
+    expect(take).toMatch(/if \(field as\? NSControl\)\?\.currentEditor\(\) == nil \{ panel\.makeFirstResponder\(field\) \}/);
+    // NSApp.activate() exists only in the macOS 14 SDK: older toolchains (macOS 12 is supported) get the old call.
+    expect(take).toMatch(/#if compiler\(>=5\.9\)\s*\n\s*if #available\(macOS 14\.0, \*\) \{ NSApp\.activate\(\) \}[^\n]*\n\s*#else\s*\n\s*NSApp\.activate\(ignoringOtherApps: true\)\s*\n\s*#endif/);
+    expect(swift.match(/NSApp\.activate\(\)/g)).toHaveLength(1);
+    expect(swift).toMatch(/if on, let panel = pillPanel, let field = replyField \{\s*takeKeyboard\(panel, field\)/);
+  });
+  it('focus is handed back cooperatively, never to the other overlay process', () => {
+    // yieldActivation(to:) is macOS 14 SDK: only inside the compiler check. A refused hand-back still steps down.
+    const hand = swift.slice(swift.indexOf('func handBack('), swift.indexOf('func giveFocusBack('));
+    expect(hand).toMatch(/#if compiler\(>=5\.9\)\s*\n\s*if #available\(macOS 14\.0, \*\) \{\s*\n\s*NSApp\.yieldActivation\(to: app\)\s*\n\s*if !app\.activate\(\) \{ NSApp\.deactivate\(\) \}[\s\S]*#endif\s*\n\s*NSApp\.deactivate\(\)\s*\n\s*app\.activate\(options: \[\]\)/);
+    expect(swift.match(/NSApp\.yieldActivation\(/g)).toHaveLength(1);
+    expect(swift).toMatch(/var previousApp: NSRunningApplication\? = NSWorkspace\.shared\.frontmostApplication\.flatMap \{ isOverlay\(\$0\) \? nil : \$0 \}/);
+    expect(swift).toMatch(/executableURL[\s\S]*resolvingSymlinksInPath\(\) == theirs\.resolvingSymlinksInPath\(\)/);
+    expect(swift).toMatch(/!isOverlay\(app\) \{\s*\n\s*previousApp = app/);
+    expect(swift).toMatch(/!prev\.isTerminated, !isOverlay\(prev\) \{ handBack\(to: prev\) \}/);
+    expect(swift).not.toMatch(/prev\.activate/);
+    // Esc in "Something else" gives the keyboard back too: giveFocusBack() alone did nothing for a key, inactive panel.
+    expect(swift).toMatch(/takeKeyboard\(panel, field\)\s*\} else \{\s*releaseKeyboard\(\)/);
+  });
+});
+
 // The drawers put real windows on screen, so these read the source: nothing draws on a whole screen any more.
 describe('no full-screen glow', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');

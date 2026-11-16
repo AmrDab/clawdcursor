@@ -132,6 +132,24 @@ describe('executeBatch — halting', () => {
     expect(r.steps[1].status).toBe('unknown_tool');
   });
 
+  it('accepts a step named the way the agent\'s host shows the tool (mcp__<server>__<tool>)', async () => {
+    tools.accessibility = okTool('accessibility');
+    tools.mouse_click = okTool('mouse_click');
+    const r = await executeBatch([
+      { name: 'mcp__clawdcursor__accessibility' },
+      { name: 'mcp__plugin_clawdcursor_clawdcursor__mouse_click' },
+    ], ctx);
+    expect(r.allDone).toBe(true);
+    expect(tools.accessibility.handler).toHaveBeenCalledTimes(1);
+    expect(tools.mouse_click.handler).toHaveBeenCalledTimes(1);
+    const miss = await executeBatch([{ name: 'mcp__clawdcursor__nope' }], ctx);
+    expect(miss.steps[0].status).toBe('unknown_tool');
+    // Another server's tool never runs as clawdcursor's, whatever its bare name.
+    const other = await executeBatch([{ name: 'mcp__claude-in-chrome__mouse_click' }], ctx);
+    expect(other.steps[0].status).toBe('unknown_tool');
+    expect(tools.mouse_click.handler).toHaveBeenCalledTimes(1);
+  });
+
   it('caps the number of executed steps', async () => {
     tools.t = okTool('t');
     const steps = Array.from({ length: 5 }, () => ({ name: 't' }));
