@@ -4,7 +4,7 @@
  * Two output surfaces:
  *
  *   1. JSON file log (stable machine-readable contract) — one
- *      `{ts, level, msg, meta}` line per event, rotated at 10 MB, 5 backups,
+ *      `{ts, level, msg, pid, meta}` line per event, rotated at 10 MB, 5 backups,
  *      never changes format between releases. Greppable, tailable.
  *
  *   2. TTY pretty-print (the default when stderr is a TTY) — layer-tagged,
@@ -495,6 +495,8 @@ function emit(level: Level, msg: string, meta?: Record<string, unknown>): void {
     ts: new Date().toISOString(),
     level,
     msg,
+    // Which process wrote it: several servers (one per MCP host) share the day file; `clawdcursor logs --session` needs it.
+    pid: process.pid,
     ...(meta && Object.keys(meta).length ? { meta } : {}),
   };
   writeJsonLine(JSON.stringify(record));

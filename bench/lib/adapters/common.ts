@@ -2,9 +2,10 @@
 import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { findShim, killTree, start, which } from '../proc';
+import { findShim, which } from '../proc';
+import { runCli, SERVER_NAME, type CliCommand } from '../../../packages/clawdcursor-agent/src/hosts';
 
-export { which };
+export { which, runCli, SERVER_NAME, type CliCommand };
 
 /** The binaries named with --claude-bin / --codex-bin, by program name ("claude", "codex"). */
 const binOverrides = new Map<string, string>();
@@ -106,12 +107,6 @@ export async function runPreflight(c: CliCommand, workDir: string, signal: Abort
   return { exitCode, out, err };
 }
 
-/** `unsetEnv`: variables of this process the agent must not inherit. */
-export interface CliCommand { cmd: string; args: string[]; env?: Record<string, string>; unsetEnv?: string[]; stdin?: string }
-
-/** The MCP server's name in every host: tools are mcp__clawdcursor__<tool> in Claude Code. */
-export const SERVER_NAME = 'clawdcursor';
-
 /** Stable JSON: keys sorted, so the same arguments give the same signature. */
 function stable(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(stable).join(',')}]`;
@@ -125,35 +120,4 @@ function stable(v: unknown): string {
 export function sigOf(tool: string, args: unknown): CallSig {
   const name = tool.replace(/^mcp__clawdcursor__/, '').replace(/^clawdcursor[./_]+/, '');
   return { tool: name, sig: createHash('sha1').update(`${name}\n${stable(args ?? {})}`).digest('hex').slice(0, 16) };
-}
-
-/** Run a CLI agent: stdout goes to `onLine` line by line, the prompt (if any) to stdin. Stops the process tree on abort. */
-export function runCli(c: CliCommand, o: { cwd: string; signal: AbortSignal; onLine(line: string): void; onErr?(text: string): void; logFile?: string }): Promise<number | null> {
-  return new Promise((resolve, reject) => {
-    // The executable itself with its arguments as an array: no shell, so nothing in a path or the environment is parsed
-    // as a command. (A .cmd shim cannot be run this way: `which` only returns real executables.)
-    const env: NodeJS.ProcessEnv = { ...process.env, ...c.env };
-    for (const k of c.unsetEnv ?? []) delete env[k];
-    const child = start(c.cmd, c.args, { cwd: o.cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
-    const log = o.logFile ? fs.createWriteStream(o.logFile, { flags: 'wx', mode: 0o600 }) : null;
-    const onAbort = () => killTree(child.pid);
-    o.signal.addEventListener('abort', onAbort, { once: true });
-    let rest = '';
-    child.stdout!.on('data', (d: Buffer) => {
-      log?.write(d);
-      const lines = (rest + d.toString('utf8')).split('\n');
-      rest = lines.pop() ?? '';
-      for (const l of lines) if (l.trim()) o.onLine(l);
-    });
-    child.stderr!.on('data', (d: Buffer) => { log?.write(d); o.onErr?.(d.toString('utf8')); });
-    child.once('error', err => { o.signal.removeEventListener('abort', onAbort); log?.end(); reject(err); });
-    child.once('close', code => {
-      o.signal.removeEventListener('abort', onAbort);
-      if (rest.trim()) o.onLine(rest);
-      log?.end();
-      resolve(code);
-    });
-    child.stdin!.on('error', () => { /* the agent exited before reading */ });
-    child.stdin!.end(c.stdin ?? '');
-  });
 }

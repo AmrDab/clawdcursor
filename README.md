@@ -403,9 +403,41 @@ clawdcursor optout          Turn error reports off; optin turns them back on (fr
 clawdcursor report          Send a redacted report of the last session, after a preview (--save-only)
 clawdcursor register-skill  Register the usage skill in detected agents again
 clawdcursor uninstall       Remove all config, data and skill registrations
+clawdcursor task "<task>"   Developer add-on: a test agent with clawdcursor as its only tool (see below)
+clawdcursor logs            Developer add-on: the logs, readably (-f, --session, --tool, --errors, --since, --run)
 ```
 
 `--no-banner` (or `CLAWD_NO_BANNER=1`) on `mcp` and `agent` turns the on-screen pill and outline off.
+
+### Testing clawdcursor on its own
+
+For developers who want to see what an agent does when clawdcursor is the **only** tool it has. Optional: two small
+add-ons, downloaded from npm the first time you use them and only after you say yes.
+
+```
+clawdcursor task "Open a text editor and type hello"     # the agent does it, then PASS or FAIL
+clawdcursor logs --run last                              # that run, joined with clawdcursor's own log
+clawdcursor doctor --setup                               # pick the default runner and model, run a test call
+```
+
+- **Your subscription, no API key.** `task` runs your installed Claude Code (`claude -p`) or Codex (`codex exec`) on
+  your own sign-in. The agent gets one MCP server, this clawdcursor (`mcp --compact`, or `--granular`), and none of its
+  built-in tools, settings, plugins or skills. `--with claude|codex` picks one; by default it is the one `doctor --setup`
+  chose, else the installed and signed-in CLI, Claude Code first. `--model` names a model.
+- **API keys are optional:** `--with anthropic` (`ANTHROPIC_API_KEY`, or a key stored by `doctor --setup`) and
+  `--with openai-compatible` (base URL, key and model: OpenAI, Ollama, LM Studio, OpenRouter) run a small tool-calling
+  loop over the same MCP server.
+- **What you see:** each tool call with its action and a one-line result, and the agent's short messages. The agent
+  ends with a `PASS: …` or `FAIL: …` line, and the exit code follows it: 0 PASS, 1 FAIL or error, 130 Ctrl-C (the agent
+  and its clawdcursor are stopped).
+- **What is kept:** every event of the run in `~/.clawdcursor/runs/<time>.jsonl` (screenshots left out), with the id of
+  the clawdcursor session it drove. `logs` shows the day log's tool calls with their outcome, result code and where the
+  time went, and stop, pause, refusals and server start and exit; `--session last`, `--tool click`, `--errors`,
+  `--since 10m`, `-f` narrow or follow it.
+- **The add-ons:** `clawdcursor-agent` (`task` and `logs`) and `clawdcursor-doctor` (`doctor --setup`), installed with
+  `npm install --prefix ~/.clawdcursor/addons` at clawdcursor's own version. With no terminal to ask in, the command is
+  printed and nothing is downloaded; `--yes` installs without asking (CI). `doctor --setup` stores an API key in
+  `~/.clawdcursor/agent.json`, readable only by you, or just the name of the variable that holds it.
 
 ---
 
@@ -418,6 +450,8 @@ npm run build       # tsc + postbuild + bundle  ->  dist/surface/cli.js
 npm test            # vitest
 npm run lint        # eslint
 npm link            # global `clawdcursor` shim
+npm run build:addons                             # the developer add-ons in packages/
+CLAWDCURSOR_ADDONS_DIR=$PWD/packages clawdcursor task "..."   # use them from the repo: nothing is downloaded
 ```
 
 | Directory | What lives here |
@@ -426,6 +460,7 @@ npm link            # global `clawdcursor` shim
 | `src/tools/` | The granular tools, the five compound tools and `batch`. |
 | `src/platform/` | The `PlatformAdapter` for Windows, macOS, Linux and Wayland; OCR; the CDP driver; the hard key list. |
 | `src/surface/` | CLI, MCP server (stdio and HTTP), dashboard, doctor, consent. |
+| `packages/` | The optional developer add-ons: `clawdcursor-agent` (`task`, `logs`) and `clawdcursor-doctor` (`doctor --setup`). |
 
 CI runs the tests on Node 20 and 22 on Ubuntu, macOS and Windows, with a coverage threshold, a performance smoke test and an `npm audit` gate.
 
