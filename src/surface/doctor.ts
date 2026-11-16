@@ -16,7 +16,7 @@ import { DEFAULT_CONFIG } from '../types';
 import { getPackageRoot } from '../paths';
 import { hasConsent } from './onboarding';
 import { checkPermissionsQuick, requestPermissions, screenRecordingGranted, nativeBuildHint, isMacOS } from '../platform/native-helper';
-import { findInstalledCopies, describeCopies } from './installed-copies';
+import { findInstalledCopies, describeCopies, fetchLatestRelease } from './installed-copies';
 import { installMethod, howToUpdate } from './update';
 
 interface DiagResult {
@@ -262,17 +262,8 @@ async function checkForUpdates(results: DiagResult[]): Promise<string | undefine
     const currentVersion = pkg.version || '0.0.0';
     console.log(`   Current: v${currentVersion}`);
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-
-    const res = await fetch(
-      'https://api.github.com/repos/AmrDab/clawdcursor/releases/latest',
-      {
-        headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'clawdcursor-doctor' },
-        signal: controller.signal,
-      },
-    );
-    clearTimeout(timeout);
+    // The same release `versions` flags copies against (installed-copies.ts latestRelease).
+    const res = await fetchLatestRelease();
 
     if (res.ok) {
       const data = await res.json() as any;
