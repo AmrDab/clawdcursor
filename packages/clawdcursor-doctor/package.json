@@ -1,6 +1,6 @@
 {
   "name": "clawdcursor-doctor",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Optional developer add-on for clawdcursor: `clawdcursor doctor --setup` sets up the test agent behind `clawdcursor task`. clawdcursor downloads it on first use, after asking.",
   "homepage": "https://clawdcursor.com",
   "repository": {
@@ -19,7 +19,7 @@
     "build": "tsc -p ."
   },
   "peerDependencies": {
-    "clawdcursor": "2.0.0"
+    "clawdcursor": "2.1.0"
   },
   "peerDependenciesMeta": {
     "clawdcursor": {

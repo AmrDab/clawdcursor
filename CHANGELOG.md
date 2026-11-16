@@ -2,9 +2,73 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
-## [Unreleased]
+## [2.1.0] - 2026-11-15
 
 ### Added
+- **Anonymous error reports are on by default. Turn them off with `clawdcursor optout`** (#404, #416). So that bugs get
+  found without anyone filing a report, clawdcursor sends a small anonymous report when it fails, runs slowly or
+  crashes. It says so in one line on stderr the first time one is queued. Details are in `docs/telemetry.md`.
+  - **What is sent:** a random install id (made on your machine, not from your hardware or accounts), the clawdcursor
+    version and the OS family on every report. Then, by kind:
+    - at start: OS version, CPU architecture, Node major version, the host app (from a fixed list, else `other`) and
+      whether the compact or granular tools are in use;
+    - a failed, timed-out or empty call: the tool and action name, the result code, how long it took, and whether the
+      app was a browser, Electron or native (never which app);
+    - a call that took over 10 s of clawdcursor's own work: the tool and action, the time, and its slow internal steps
+      by helper-program name. Time spent waiting on you (`pause_for_user`, confirm mode, `wait`, `wait_for_element`) is
+      not counted, and a find that found nothing is not a failure;
+    - an exit during a call, or a crash: the reason, the call that was cut off, the error class and code, and
+      clawdcursor's own `file:line` frames.
+  - **What is never sent:** error messages, typed text, clipboard contents, screen or OCR text, screenshots, window
+    titles, app names, URLs, element names, file paths outside clawdcursor, user names, emails or IP addresses. The
+    server that receives reports does not read or store your IP address, drops anything not on its fixed lists, and
+    deletes reports after 90 days. At most 200 reports leave a process per day.
+  - **Off:** `clawdcursor optout` (`clawdcursor optin` turns it back on), or your agent calls `system
+    {"action":"telemetry_optout"}` (an agent can turn reports off, never on), or `CLAWD_TELEMETRY=0` or `DO_NOT_TRACK=1`
+    in the environment. They are always off in CI, in test runs and in benchmark runs. `clawdcursor telemetry` shows the
+    status and every field. The choice is kept in `~/.clawdcursor/telemetry.json`. Opting out drops anything queued.
+  - A report that cannot be sent at exit is kept in `~/.clawdcursor/telemetry-spool.jsonl` and sent at the next start.
+- **Opt-in confirm mode: the pause card asks before Send, Delete, Pay or Close** (#402). Off by default. Set
+  `CLAWD_CONFIRM=1` in the server's environment, or switch on "Ask before Send / Delete / Pay / Close" when installing
+  the Claude Desktop extension. Then a click, double-click or accessibility press on an element named Send, Delete,
+  Remove, Pay, Buy, Submit, Close or Discard, a browser click on one, closing a window, and the keys `alt+f4`,
+  `mod+w`, `mod+q`, `mod+enter` and `shift+delete` are held, and the pause card names the act and the window.
+  - Only your click on Resume on the pill lets it through. `clawdcursor resume`, `POST /resume`, End task, a typed
+    reply, an agent's `resume_task`, `done_when` and a timeout do not; the call returns `not confirmed` (`NOT_CONFIRMED`).
+    A held call waits up to 45 s.
+  - Limits: button names are matched in English only. Some coordinate clicks are not held (a menu that opens as its own
+    popup, a window not in front, a target with no readable name, any coordinate click on Linux without AT-SPI), and
+    neither is a press made from `mouse_down` + `mouse_up`, page scripts (`evaluate`), or Return alone. `SECURITY.md`
+    lists them.
+- **`clawdcursor update`** (#407). Installs the latest version when clawdcursor was installed with `npm install -g`, and
+  prints `vOLD -> vNEW` and a reminder to restart your MCP host. It lists other copies that are now behind (a Claude
+  Desktop extension, a Claude Code plugin) with the fix for each. For any other install (npx, a source checkout, the
+  Desktop extension, pnpm or yarn) it changes nothing, says what to run instead and exits 1. If npm fails it says nothing
+  was elevated and, on macOS and Linux, prints the `sudo` command for you to run yourself.
+- **Screenshots can be smaller, say what they cost, and a click can follow a path** (#405). `screenshot` and
+  `screenshot_region` take `max_edge` (64-1280, default unchanged), and every screenshot reply now says its size, such
+  as `640x400px, about 340 image tokens`. `computer click` takes `path` (up to 100 points) and `interval_ms` (default
+  100), so a pen stroke is one call; Stop refuses the next point. `batch` returns the image from its last step that made
+  one, so "act several times, then look once" is one call.
+- **Help is shown when there is no tree to read** (#405). `read_tree` and `find` lines show an element's tooltip as
+  `help="..."` (Windows, macOS and Linux). `read_tree` adds an `Opaque area` line where a large part of a window (a
+  canvas) has nothing readable in it, and after an empty read the next screenshot gets advice for drawing surfaces
+  instead of the generic hint; the screenshot-count nudge now shows once per run of screenshots. `SKILL.md` gains a
+  "Draw on a canvas" pattern.
+- **The `browser` tool reaches into iframes** (#403). A by-name click, type, select or wait that finds nothing on the
+  page now looks in the page's visible iframes. The page always wins over an iframe, and same-origin iframes are searched
+  automatically.
+  - A cross-origin iframe (an ad, a third-party widget) is acted in only when you name it with the new `frame` argument
+    (a URL or origin substring) on `click`, `type`, `select_option`, `wait_for`, `read_text` and `page_context`.
+    Otherwise nothing is done and the result is `refused - CROSS_ORIGIN_FRAME`, naming the origin.
+  - `read_text` adds each same-origin iframe's text after the page's (1,500 characters each) and lists cross-origin ones
+    without reading them. `page_context` lists iframe controls (at most 60). Frames are named by origin, not full URL.
+  - Hidden and zero-size iframes are skipped, and an iframe that does not answer within 1.5 s is skipped, so one cannot
+    hang a call. A miss now says how many iframes were searched.
+- **`copy_all_text` pages and searches long text** (#422). A result is cut at 20,000 characters at a line break and says
+  how much was shown and the next call (`offset:N`). New `find:"<text>"` returns only the matching lines with two lines
+  around each (20 matches at most), so one value in a long page takes two calls or fewer. `accessibility find` also takes
+  `offset` now; before, it ignored it and returned the first 20 again.
 - **The beam is back on the screen's edge, on every monitor** (#392). The border beam goes round the whole display
   again, not the agent's window: on each monitor, from the moment the overlay starts, the gold `pulse-inner` beam
   (unchanged: radius 23, 3.9 s, glow 28 px deep) lies just inside the screen's edge. It tracks no window, so it can no
@@ -74,6 +138,12 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **macOS: the first pause after an install or upgrade reaches the user.** `pause_for_user` and confirm mode said "no
   on-screen prompt is available" while the overlay was still compiling. They now wait for that compile, and fail only
   if it fails. A compile cut short by an exiting run no longer leaves its temp file behind.
+- **macOS: the pause card's answer box takes typing with any app in front** (#434). With the Claude app in front, a
+  click into the box showed no focus ring and the keys went nowhere, so the agent waited out the whole pause. The box
+  now takes the keyboard on every click, and Send, Esc or a choice hands it back to your app.
+- **`batch` accepts steps named the way the host shows the tool** (#434). A step named `mcp__clawdcursor__accessibility`
+  (or `mcp__plugin_clawdcursor_clawdcursor__…`) stopped the batch with "unknown tool". Only a clawdcursor server's
+  prefix is accepted, so another server's `computer` never runs as clawdcursor's.
 - **`clawdcursor doctor` returns to the prompt.** After "All systems go!" it never exited: the accessibility bridge it
   started kept the process alive (2.0.0 too).
 - **Windows: `open_app` starts apps directly again, not through the Start menu (10–12 s per launch).** The PowerShell that runs
@@ -105,10 +175,84 @@ All notable changes to Clawd Cursor will be documented in this file.
   explorer.exe is also the desktop shell (taskbar, desktop) and is always running, so it was claimed as the app, and
   the agent was told to wait for a window that would never come. The shell's process no longer counts as a launched
   or already-running app. File Explorer is now started as `explorer.exe`, not by its display name.
+- **Replies say what actually changed.** (#406, #397)
+  - `computer type`, `smart_type`, browser `type` and browser `select_option` read the field back. A browser type ends
+    `[confirmed]` or fails with `READBACK_MISMATCH` (a page script rewrote or cleared it); a select is confirmed only when
+    the chosen option's label or value is the one asked for. A field that reads back empty is reported as a success that
+    is NOT verified, with a warning, not as a plain success. Password inputs are never read back.
+  - `select` on a Windows list box now tells the app about the pick (the highlight moved but the app never heard, which
+    showed up as `ok` with the app's state unchanged). If the shown value still differs it types the option and reads
+    again, and it never presses Enter. The result is confirmed, NOT verified or a failure that quotes what the control
+    shows, on every OS.
+  - `set_value` without a settable value types only after checking the field has focus, says why a retry was skipped,
+    and clears a Windows field with select-all + Delete, confirmed when it reads back empty.
+  - Clicks, drags and batches end with an effect line (`effect: window same`, or which other window or app is in
+    front). The "focus not confirmed" warning now fires only when activation failed or another app is in front, not when
+    a tab switch or a closing dialog changes the title, and it no longer says "Windows foreground-lock" on Linux.
+  - The session log names the app for browser acts and for by-name acts on a background window.
+- **A Microsoft Store app is named as itself, not "Application Frame Host"** (#395, #406). The pill ("Clicking in
+  Application Frame Host"), the session log and the window effect now name the app the frame hosts, such as Calculator.
+- **One rule decides which element a name means, on every OS** (#408). Visible beats hidden; an exact name beats a name
+  that starts with it, which beats one that only contains it; a control beats its label; a focused dialog beats the
+  window behind it.
+  - A match that only contains the name ("What's New" for "New") is no longer pressed, even when it is the only one. It
+    comes back as AMBIGUOUS (`inexact`) and the agent calls again with the full name. This holds for Windows, Linux and
+    macOS with the Swift helper; macOS without the helper (the JXA fallback) is not changed.
+  - A tie lists each candidate with its window, dialog or document. `invoke` and `smart_click` take `within` to pick one
+    by that container's name (macOS without the Swift helper refuses `within`; `smart_click` with `within` uses
+    accessibility only).
+  - The success line names the element that was pressed, for example `Clicked [Button] "Request tasks" (its name starts
+    with "Request")`.
+  - A minimized window's candidates say `minimized` instead of showing -32000 positions, and a name-only hidden link in
+    one is not pressed.
+  - On Windows, `find` reads the value of a spin box, and `read_tree` lists an app's own controls before an embedded web
+    view's text (a web view over 20 elements in an app with at least 20 controls of its own becomes one line;
+    `read_screen` with `offset` lists it).
+  - Linux: an element inside a page's modal dialog beats one behind it.
+- **Stop covers relative mouse moves** (#426). A relative pointer move still went out after you pressed Stop. Every
+  pointer method is now stop-checked (except the release of a held button), and `smart_type`'s browser fallback goes
+  through the same guard and no longer swallows a refusal.
+- **The dashboard works when clawdcursor runs on a port other than 3847** (#426). Its Resume, End and kill-switch
+  buttons got a 403 because the allowed origin was fixed to `:3847`; it is now the port the request came in on.
+- **`expect` and `verify` `file_changed_since_start` work over MCP** (#426). They always answered "no task-start
+  timestamp". The start is now when your agent's MCP session began, and the `verify` description says "since your MCP
+  session started".
+- **Typed text and values no longer travel in command-line arguments** (#427). Any program on the computer can read
+  arguments while a child runs, and a `set_value` into a password field put the password there. On Linux the AT-SPI
+  bridge (names, values, `within`, window title), Wayland typing (`ydotool`, `wtype`) and the macOS `osascript`
+  fallback now get them on stdin. Windows already did.
+- **Honest keys on Wayland and macOS** (#427). On Wayland with only `wtype`, `key_down` and `key_up` now fail, saying
+  `ydotool` is needed, instead of reporting success while holding nothing. An unknown modifier is refused before
+  anything is pressed (`Unknown modifier: "x"`), where a dropped modifier turned `opt+x` into a plain `x`; the macOS
+  keyboard path also refuses an unknown key name.
+- **Windows: `find` by `automationId` finds ids beyond the first 20 elements; a role filter on the accessibility bridge
+  now works; and `window` by title matches Edge** (#427). The role filter used to be dropped silently, and Edge's title,
+  which has a zero-width space or NBSP in it, never matched.
+- **`screenshot` with a `region` crops on macOS and Linux** (#427). It returned the whole screen there; only Windows
+  cropped.
+- **The `browser` tool in attach-only mode waits and says why it failed** (#403). With `CLAWD_AGENT_CDP_OFF=1` it
+  tried your browser's debug port once, so a browser started a few seconds earlier was missed. It now waits up to 10 s,
+  and `browser connect` and `navigate` say the reason (nothing listening, not a Chromium DevTools endpoint, no open
+  page, ...) and what to do next.
+- **`clawdcursor versions` no longer prints a Node `DEP0190` warning on Windows** (#407). It finds the global npm folder
+  without running npm.
+- **A Windows PowerShell cache folder no longer appears in the working directory** (#407). With a `USERPROFILE` that
+  is not an absolute Windows path, PowerShell wrote `Microsoft/ModuleAnalysisCache` into whatever folder clawdcursor
+  was started from; the process-start-time check now runs from its own private folder.
+- **The host-ancestry log says why the process table could not be read** (#407): "timed out", "killed by SIGx", "exit
+  code N" or the errno code, and it reads the table once more before giving up.
 
 ### Changed
-- README and clawdcursor.com describe 2.0: install per host, what protects you (including auto-approving hosts), and
-  the 2.1 roadmap. Five obsolete docs about removed features are deleted, and descriptions no longer say "safe".
+- **The pill's orb draws less often** (#419, part of #414). 10 frames a second on macOS (was 30) and about 10 on
+  Windows (was 16), and the Windows pill's labels no longer repaint the outline whenever the clock changes.
+- **The 2.1 site and README tell what clawdcursor does, show the benchmark and state the limits** (#401, #390). The
+  README, clawdcursor.com and `docs/llms.txt` open with what it does for a person, then the benchmark (Windows, one
+  agent, 15 tasks we built, with the one false "ok" it found), how the four steps (browser page, accessibility tree, OCR,
+  screenshots) work, where it is weak (apps without accessibility info, canvases, games, CAD; only Windows measured),
+  what protects you, and the error reports. They no longer say "no telemetry".
+- **Unused files are no longer shipped** (#407, #418). The old PowerShell and shell scripts that `ps-bridge.ps1` and the
+  macOS helper replaced, three 1.x smoke scripts, and the guides seed copy and marketplace spec are removed, along with
+  unused internal methods. No tool, command or flag is affected.
 
 ## [2.0.0] - 2026-11-11
 
