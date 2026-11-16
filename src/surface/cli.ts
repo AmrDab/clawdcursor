@@ -80,6 +80,7 @@ import { migrateFromLegacyDir, getPackageRoot } from '../paths';
 import { ensureHostAppRunning, stopHostApp } from '../platform/native-helper';
 import { UIMapHolder } from '../core/sense/ui-map-holder';
 import { stopControl, resumeControl, isStopped } from '../core/control';
+import { foreignOverlayState } from '../core/overlay-state';
 
 dotenv.config({ quiet: true });
 
@@ -598,7 +599,16 @@ program
     }
     if (!(await isClawdInstance(port))) {
       if (gaveBack) return;
-      console.log(`${e('🐾', '>')} No running instance found on port ${port}`);
+      // Only the daemon's pause is answered from here: a stdio MCP server's has no port to reach, and is left alone. Say so
+      // rather than "no running instance" (the Mac run, 2026-11-16: a stdio server's pause ended as this printed that, and it
+      // looked as if this command had ended it; nothing here can).
+      const other = foreignOverlayState();
+      if (other.paused) {
+        console.log(`${e('🐾', '>')} No daemon on port ${port}, so nothing was answered. The pause on screen is clawdcursor process ` +
+          `${other.pausedBy ?? '?'}'s, which this command cannot reach (an MCP server over stdio has no port): answer it on the card, Resume or End task.`);
+      } else {
+        console.log(`${e('🐾', '>')} No running instance found on port ${port}`);
+      }
       process.exitCode = 1;
       return;
     }
