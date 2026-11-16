@@ -151,7 +151,7 @@ Privacy:
 
 ## Error reports
 
-2.0.0 sends nothing. **From 2.1**, Clawd Cursor sends anonymous error reports by default, so bugs get found and fixed. Every value is a number or comes from a fixed list, and tool and action names are Clawd Cursor's own.
+2.0.0 sent nothing. **From 2.1**, Clawd Cursor sends anonymous error reports by default, so bugs get found and fixed. Every value is a number or comes from a fixed list, and tool and action names are Clawd Cursor's own.
 
 - **With every report:** a random install id made on your computer (not derived from your hardware or accounts), the Clawd Cursor version and your OS family.
 - **`start`, when the server starts:** OS major version, CPU architecture, Node.js major version, which AI app started it (from a fixed list: Claude Code, Claude Desktop, Cursor, Codex and others; anything else is "other"), and compact or granular tools.
@@ -335,7 +335,7 @@ Restart the host afterwards so it starts the new server. `clawdcursor versions` 
 
 Earlier releases are in the [changelog](CHANGELOG.md).
 
-**Next: 2.1.** One standard benchmark across app types, OSes and models becomes the release gate, with five general mechanisms behind it: honest results, target resolution, perception without a tree, screen geometry and timing. The first three are merged, and so are an opt-in confirm mode ([#373](https://github.com/AmrDab/clawdcursor/issues/373)), `clawdcursor update`, anonymous error reports and an orb in the pill; the thin outline around the agent's window stays as in 2.0. See the [2.1 milestone](https://github.com/AmrDab/clawdcursor/milestone/1).
+**2.1.** One standard benchmark across app types, OSes and models becomes the release gate, with five general mechanisms behind it: honest results, target resolution, perception without a tree, screen geometry and timing. The first three are in 2.1, and so are an opt-in confirm mode ([#373](https://github.com/AmrDab/clawdcursor/issues/373)), `clawdcursor update`, anonymous error reports and an orb in the pill; the thin outline around the agent's window stays as in 2.0. Screen geometry and timing are next: see the [2.1 milestone](https://github.com/AmrDab/clawdcursor/milestone/1).
 
 ---
 
