@@ -74,7 +74,8 @@ export function findRun(dataDir: string, idOrLast: string): string | null {
   return hit ? path.join(dir, hit) : null;
 }
 
-export interface SessionInfo { id: string; file: string; pid: number | null; started: string | null; ended: string | null; run?: string }
+/** `calls`: the calls the server recorded (one line each, a batch included). */
+export interface SessionInfo { id: string; file: string; pid: number | null; started: string | null; ended: string | null; run?: string; calls: number }
 
 function readSessionFile(file: string): SessionInfo | null {
   let lines: string[];
@@ -82,9 +83,17 @@ function readSessionFile(file: string): SessionInfo | null {
   let header: Record<string, any> = {};
   try { header = JSON.parse(lines[0] ?? '{}'); } catch { /* no header */ }
   let ended: string | null = null;
-  for (const l of lines) { try { const o = JSON.parse(l); if (o.type === 'end') { ended = o.t ?? null; break; } } catch { /* skip */ } }
+  let sawEnd = false;
+  let calls = 0;
+  for (const l of lines) {
+    try {
+      const o = JSON.parse(l);
+      if (o.type === 'end' && !sawEnd) { ended = o.t ?? null; sawEnd = true; }
+      else if (o.type === undefined && typeof o.tool === 'string') calls++;
+    } catch { /* skip */ }
+  }
   return { id: path.basename(file, '.jsonl'), file, pid: Number.isInteger(header.pid) ? header.pid : null, started: header.started ?? null, ended,
-    ...(typeof header.run === 'string' ? { run: header.run } : {}) };
+    ...(typeof header.run === 'string' ? { run: header.run } : {}), calls };
 }
 
 function sessionFiles(dir: string): string[] {
@@ -99,6 +108,18 @@ export function findSession(dir: string, idOrLast: string): SessionInfo | null {
   const want = idOrLast.replace(/\.jsonl$/, '');
   const hit = files.find(f => path.basename(f, '.jsonl') === want) ?? files.find(f => path.basename(f).startsWith(want));
   return hit ? readSessionFile(hit) : null;
+}
+
+/**
+ * The session of the server `pid` whose end line was written about `atMs`: the end the next server writes for one it found
+ * gone, at the moment it logs that. A pid is reused, the moment is not.
+ */
+export function sessionEndedAt(dir: string, pid: number, atMs: number): SessionInfo | null {
+  for (const f of sessionFiles(dir)) {
+    const s = readSessionFile(f);
+    if (s?.pid === pid && s.ended && Math.abs(Date.parse(s.ended) - atMs) < 60_000) return s;
+  }
+  return null;
 }
 
 /** The session the run's clawdcursor server wrote (its header carries the run id). Only files newer than the run are read. */

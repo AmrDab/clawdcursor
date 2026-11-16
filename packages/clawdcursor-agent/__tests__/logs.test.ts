@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { dayFiles, formatRecord, matches, parseLines, parseSince, sessionFilter, shown, stepsText, type LogRecord } from '../src/logs';
+import { dayFiles, formatRecord, matches, parseLines, parseSince, runLogs, sessionFilter, shown, stepsText, type LogRecord } from '../src/logs';
 import { findSession } from '../src/runlog';
 import { paint } from '../src/trace';
 
@@ -114,5 +114,68 @@ describe('logs files', () => {
     expect(s).toMatchObject({ pid: 100, run: 'r1', started: '2026-11-15T10:00:02.000Z', ended: '2026-11-15T10:00:10.000Z' });
     expect(sessionFilter(s)).toEqual({ pid: 100, fromMs: Date.parse('2026-11-15T10:00:02Z'), toMs: Date.parse('2026-11-15T10:00:15Z') });
     expect(findSession(dir, 'session-nope')).toBeNull();
+  });
+});
+
+// Mac check (2026-11-16): `logs --errors` listed every `clawdcursor task` run's own server as "killed or crashed". The run's
+// agent CLI stops that server when the run ends; the next server finds it gone with no clean exit.
+describe('logs: a task run\'s server that went down with its run', () => {
+  let dataDir: string;
+  const saved = { log: process.env.CLAWDCURSOR_LOG_DIR, sessions: process.env.CLAWDCURSOR_SESSION_DIR };
+  const restore = (k: string, v: string | undefined) => { if (v === undefined) delete process.env[k]; else process.env[k] = v; };
+  beforeEach(() => {
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdcursor-runs-'));
+    process.env.CLAWDCURSOR_LOG_DIR = path.join(dataDir, 'logs');
+    process.env.CLAWDCURSOR_SESSION_DIR = path.join(dataDir, 'sessions');
+  });
+  afterEach(() => {
+    restore('CLAWDCURSOR_LOG_DIR', saved.log);
+    restore('CLAWDCURSOR_SESSION_DIR', saved.sessions);
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const lines = (rows: object[]) => rows.map(r => JSON.stringify(r)).join('\n') + '\n';
+  const call = (id: string) => ({ type: 'event', t: '2026-11-16T01:04:00.000Z', src: 'claude', data: { type: 'assistant', message: { content: [
+    { type: 'tool_use', id, name: 'mcp__clawdcursor__system', input: { action: 'pause_for_user', message: 'Which colour?' } }] } } });
+  /** Server pid 200 of run R1 answered `answered` calls and died unlogged; the agent made `made`; server 300 reported it at its start. */
+  function write(o: { run?: string; answered: number; made: number }) {
+    for (const d of ['logs', 'sessions', 'runs']) fs.mkdirSync(path.join(dataDir, d));
+    fs.writeFileSync(path.join(dataDir, 'sessions', 'session-2026-11-16T01-03-20-000Z-200-1.jsonl'), lines([
+      { type: 'session', started: '2026-11-16T01:03:20.000Z', pid: 200, ...(o.run ? { run: o.run } : {}) },
+      ...Array.from({ length: o.answered }, () => ({ t: '2026-11-16T01:04:01.000Z', tool: 'system', action: 'pause_for_user', cls: 'act-other', ok: true, ms: 45000, outcome: 'ok' })),
+      { type: 'end', t: '2026-11-16T01:12:00.000Z', reason: 'killed or crashed: no clean exit was recorded', detectedAtNextStart: true },
+    ]));
+    fs.writeFileSync(path.join(dataDir, 'runs', 'R1.jsonl'), lines([
+      { type: 'run', id: 'R1', t: '2026-11-16T01:03:18.000Z', runner: 'claude' },
+      ...Array.from({ length: o.made }, (_, i) => call(`toolu_${i}`)),
+      { type: 'end', t: '2026-11-16T01:10:49.000Z', verdict: 'FAIL', exitCode: 1, session: 'session-2026-11-16T01-03-20-000Z-200-1' },
+    ]));
+    fs.writeFileSync(path.join(dataDir, 'logs', 'clawdcursor-20261116.log'), lines([
+      { ts: '2026-11-16T01:05:00.000Z', level: 'info', msg: 'tool.done', pid: 200, meta: { tool: 'window', action: 'focus', ms: 30, outcome: 'error', code: 'NOT_FOUND' } },
+      { ts: '2026-11-16T01:12:00.000Z', level: 'warn', msg: 'mcp.exit', pid: 300,
+        meta: { reason: 'killed or crashed: no clean exit was recorded', pid: 200, detectedAt: 'next start', lastFinishedCall: { tool: 'system', action: 'pause_for_user' } } },
+    ]));
+  }
+  const show = async (opts: { errors?: boolean }) => {
+    const out: string[] = [];
+    await runLogs(opts, { coreVersion: '2.1.0', coreEntry: '', node: process.execPath, dataDir }, { out: l => out.push(l), color: false });
+    return out.join('\n');
+  };
+
+  it('answered every call of a run that ended: not a crash, and not in --errors', async () => {
+    write({ run: 'R1', answered: 2, made: 2 });
+    expect(await show({ errors: true })).toContain('window.focus  error NOT_FOUND');
+    expect(await show({ errors: true })).not.toContain('mcp.exit');
+    expect(await show({})).toContain('○ mcp.exit  pid 200 · ended with its clawdcursor task run R1 (every call was answered) · last call system.pause_for_user');
+    expect(await show({})).not.toContain('killed or crashed');
+  });
+
+  it('a call it never answered, or no run named: still reported as killed or crashed', async () => {
+    write({ run: 'R1', answered: 2, made: 3 });
+    expect(await show({ errors: true })).toContain('○ mcp.exit  pid 200 · killed or crashed: no clean exit was recorded');
+    fs.rmSync(dataDir, { recursive: true, force: true });
+    fs.mkdirSync(dataDir);
+    write({ answered: 2, made: 2 });
+    expect(await show({ errors: true })).toContain('○ mcp.exit  pid 200 · killed or crashed: no clean exit was recorded');
   });
 });

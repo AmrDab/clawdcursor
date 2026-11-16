@@ -6,7 +6,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { findRun, findSession, readRun, sessionsDir, type SessionInfo } from './runlog';
+import { findRun, findSession, readRun, sessionEndedAt, sessionsDir, type SessionInfo } from './runlog';
 import { claudeEvents, codexEvents, elapsed, paint, renderEvent, type Paint, type TraceEvent } from './trace';
 import type { CoreContext } from './task';
 
@@ -66,6 +66,33 @@ export function matches(r: LogRecord, f: Filter): boolean {
     if (!bad) return false;
   }
   return true;
+}
+
+/**
+ * A `clawdcursor task` run's own server, gone when its run ended: the run's agent CLI stops it, Codex (and Claude Code on
+ * macOS) without leaving it time to log a clean exit, so the next server logs "killed or crashed" (every run in `logs
+ * --errors`, Mac check 2026-11-16). It is that only when its session names the run (CLAWDCURSOR_RUN_ID: only the task
+ * runner sets it), the run's log has its end, and the server recorded every call the agent made: a server that died
+ * mid-run left a call unanswered and is still reported. A hard kill after its last answer, before the agent stopped it,
+ * looks the same; the run needed it no more, and an exception there is logged as `crash` anyway.
+ */
+function endedWithRun(r: LogRecord, dataDir: string): string | null {
+  if (r.msg !== 'mcp.exit' || r.meta?.detectedAt !== 'next start' || typeof r.meta.pid !== 'number') return null;
+  try {
+    const s = sessionEndedAt(sessionsDir(dataDir), r.meta.pid, Date.parse(r.ts));
+    const file = s?.run ? findRun(dataDir, s.run) : null;
+    if (!s?.run || !file) return null;
+    const recs = readRun(file);
+    if (!recs.some(x => x.type === 'end')) return null;
+    const calls = recs.filter(x => x.type === 'event').flatMap(x => runEvents(x.src, x.data)).filter(e => e.kind === 'call').length;
+    return calls === s.calls ? s.run : null;
+  } catch { return null; }
+}
+
+/** A record as shown: the exit of a server that went down with its task run is not a crash (endedWithRun). */
+function asShown(r: LogRecord, dataDir: string): LogRecord {
+  const run = endedWithRun(r, dataDir);
+  return run ? { ...r, level: 'info', meta: { ...r.meta, reason: `ended with its clawdcursor task run ${run} (every call was answered)` } } : r;
 }
 
 const ms = (n: unknown) => (typeof n === 'number' ? (n >= 10_000 ? `${(n / 1000).toFixed(1)} s` : `${Math.round(n)} ms`) : '');
@@ -171,7 +198,8 @@ export async function runLogs(opts: LogsOptions, ctx: CoreContext, io: { out?(l:
   const dir = logDir(ctx);
   const from = f.sinceMs ?? (f.session ? f.session.fromMs - START_SLACK_MS : undefined);
   const files = dayFiles(dir, from);
-  const all = files.flatMap(file => { try { return parseLines(fs.readFileSync(file, 'utf8')); } catch { return []; } }).filter(r => matches(r, f));
+  const all = files.flatMap(file => { try { return parseLines(fs.readFileSync(file, 'utf8')); } catch { return []; } })
+    .map(r => asShown(r, ctx.dataDir)).filter(r => matches(r, f));
   const narrowed = f.sinceMs !== undefined || f.session !== undefined;
   const lastDay = { v: null as string | null };
   printRecords(narrowed ? all : all.slice(opts.follow ? -10 : -DEFAULT_TAIL), p, out, lastDay);
@@ -179,11 +207,11 @@ export async function runLogs(opts: LogsOptions, ctx: CoreContext, io: { out?(l:
     if (!all.length) out(p.dim(`(nothing matched in ${files.length ? files.map(x => path.basename(x)).join(', ') : `${dir} — no day log yet`})`));
     return 0;
   }
-  return follow(dir, f, p, out, lastDay);
+  return follow(dir, ctx.dataDir, f, p, out, lastDay);
 }
 
 /** Print new lines as they are written, across a day change and a rotation, until Ctrl-C. */
-function follow(dir: string, f: Filter, p: Paint, out: (l: string) => void, lastDay: { v: string | null }): Promise<number> {
+function follow(dir: string, dataDir: string, f: Filter, p: Paint, out: (l: string) => void, lastDay: { v: string | null }): Promise<number> {
   const today = () => { const d = new Date(); return path.join(dir, `clawdcursor-${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}.log`); };
   let file = today();
   let offset = (() => { try { return fs.statSync(file).size; } catch { return 0; } })();
@@ -205,7 +233,7 @@ function follow(dir: string, f: Filter, p: Paint, out: (l: string) => void, last
         const text = rest + buf.toString('utf8');
         const cut = text.lastIndexOf('\n');
         rest = cut < 0 ? text : text.slice(cut + 1);
-        printRecords(parseLines(cut < 0 ? '' : text.slice(0, cut)).filter(r => matches(r, f)), p, out, lastDay);
+        printRecords(parseLines(cut < 0 ? '' : text.slice(0, cut)).map(r => asShown(r, dataDir)).filter(r => matches(r, f)), p, out, lastDay);
       } finally { fs.closeSync(fd); }
     }, 500);
   });
@@ -241,7 +269,8 @@ function showRun(id: string, ctx: CoreContext, p: Paint, out: (l: string) => voi
   if (session) {
     const f: Filter = { session: sessionFilter(session) };
     const logs = dayFiles(logDir(ctx), f.session!.fromMs - START_SLACK_MS)
-      .flatMap(x => { try { return parseLines(fs.readFileSync(x, 'utf8')); } catch { return []; } }).filter(r => matches(r, f));
+      .flatMap(x => { try { return parseLines(fs.readFileSync(x, 'utf8')); } catch { return []; } })
+      .map(r => asShown(r, ctx.dataDir)).filter(r => matches(r, f));
     for (const r of logs) rows.push({ t: Date.parse(r.ts), line: `    ${p.dim('clawdcursor')} ${formatRecord(r, p)}` });
   }
   rows.sort((a, b) => a.t - b.t);
