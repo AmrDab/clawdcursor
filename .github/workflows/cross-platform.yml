@@ -75,6 +75,12 @@ jobs:
             swiftc -O "$f" -o "$RUNNER_TEMP/$(basename "$f" .swift)" || exit 1
           done
 
+      # The Linux overlay (pill, pause card and outline) runs under python3 on the user's desktop: a syntax error there
+      # fails its --probe, and the pill and pauses silently go. GTK needs a display, so it is only syntax-checked here.
+      - name: Syntax-check the Linux overlay
+        if: runner.os == 'Linux'
+        run: python3 -m py_compile scripts/linux/overlay.py
+
       # The benchmark's native fixtures (bench/, issue #384). The Windows one is built and self-tested by the unit tests.
       # macOS: compiled, then its self-test (no window is shown) must record the state the tasks read.
       - name: Build and self-test the benchmark's macOS fixture
