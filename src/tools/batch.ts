@@ -176,14 +176,14 @@ export async function executeBatch(
     if (ownUi) {
       logger.warn('safety.refused', { tool: tool.name, action: stepAction, guard: 'own_ui', reason: ownUi, batchStep: i });
       outcomes.push({ i, label, status: 'blocked', text: ownUi });
-      return halt(i, `step ${i} (${label}): ${ownUi}`);
+      return halt(i, `step ${i + 1} (${label}): ${ownUi}`);
     }
 
     if (guard) {
       const g = await checkGuard(guard, ctx);
       if (!g.ok) {
         outcomes.push({ i, label, status: 'guard_failed', text: `precondition failed: ${g.detail}` });
-        return halt(i, `precondition failed at step ${i} — re-plan from current state`);
+        return halt(i, `precondition failed at step ${i + 1} — re-plan from current state`);
       }
     }
 
@@ -193,7 +193,7 @@ export async function executeBatch(
       if (why) {
         logger.warn('safety.refused', { tool: tool.name, action: stepAction, guard: 'screen_binding', reason: why, batchStep: i });
         outcomes.push({ i, label, status: 'blocked', text: why.slice(0, 200) });
-        return halt(i, `step ${i} (${label}): ${why}`);
+        return halt(i, `step ${i + 1} (${label}): ${why}`);
       }
     }
 
@@ -209,14 +209,14 @@ export async function executeBatch(
     const target = actRecord(before);
     if (res.isError) {
       outcomes.push({ i, label, status: 'error', text: clipScreenText(res.text || '', 200), pressedKeys: res.pressedKeys, ...target });
-      return halt(i, `step ${i} (${label}) errored`);
+      return halt(i, `step ${i + 1} (${label}) errored`);
     }
 
     // High-security mode: refused as a direct call is, and never recorded as a screenshot the model has seen.
     if (ctx.disableVision && res.image) {
       logger.warn('safety.refused', { tool: tool.name, action: stepAction, guard: 'no_vision', reason: VISION_DISABLED_REFUSAL, batchStep: i });
       outcomes.push({ i, label, status: 'blocked', text: VISION_DISABLED_REFUSAL.slice(0, 200) });
-      return halt(i, `step ${i} (${label}): ${VISION_DISABLED_REFUSAL}`);
+      return halt(i, `step ${i + 1} (${label}): ${VISION_DISABLED_REFUSAL}`);
     }
 
     // A screenshot step names its id first, so it survives the step text's truncation.
@@ -229,12 +229,14 @@ export async function executeBatch(
   return { total: steps.length, completed, allDone: completed === steps.length, steps: outcomes, ...shot };
 }
 
+// Step numbers in the text count from 1, as the agent counts its steps: "5/6 completed, halted at step 5" read as the fifth
+// failing when the sixth had. `i`, `stoppedAt`, `imageStep` and the log's `batchStep` stay indexes.
 function renderResult(r: BatchResult): string {
-  const lines = r.steps.map(s => `  ${s.i}. [${s.status}] ${s.label} — ${s.text}`);
+  const lines = r.steps.map(s => `  ${s.i + 1}. [${s.status}] ${s.label} — ${s.text}`);
   const head = r.allDone
     ? `batch: all ${r.total} steps completed.`
-    : `batch: ${r.completed}/${r.total} completed, halted at step ${r.stoppedAt} — ${r.stopReason}`;
-  const image = r.imageStep !== undefined ? ` The image attached is step ${r.imageStep}'s.` : '';
+    : `batch: ${r.completed}/${r.total} completed, halted at step ${r.stoppedAt! + 1} — ${r.stopReason}`;
+  const image = r.imageStep !== undefined ? ` The image attached is step ${r.imageStep + 1}'s.` : '';
   return `${head}${image}\n${lines.join('\n')}`;
 }
 

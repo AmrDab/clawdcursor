@@ -357,7 +357,7 @@ describe('--no-vision: no screenshot reaches the MCP client\'s model', () => {
       expect(r.isError).toBe(true);
       expect(r.content.some(c => c.type === 'image')).toBe(false);
       // A batch has no outcome line of its own; the step's [blocked] status is the refusal (logged as refused).
-      expect(text(r)).toMatch(/halted at step 0 — step 0 .*: vision is disabled on this server[\s\S]*0\. \[blocked\]/);
+      expect(text(r)).toMatch(/halted at step 1 — step 1 .*: vision is disabled on this server[\s\S]*1\. \[blocked\]/);
       expect(await latestShot()).toBeNull();
     });
   });

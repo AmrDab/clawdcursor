@@ -63,7 +63,8 @@ describe('agent batch — halting', () => {
     unified.key = uTool('key');
     const r = await run([{ name: 'open_app' }, { name: 'type' }, { name: 'key' }]);
     expect(r.success).toBe(false);
-    expect(r.text).toMatch(/halted at step 1/);
+    // Counted from 1, as the agent counts its steps (and as the MCP batch does): the second step failed.
+    expect(r.text).toContain('batch halted at step 2 (type): no focus\n  1. [ok] open_app — open_app ok\n  2. [error] type — no focus');
     expect(unified.key.execute).not.toHaveBeenCalled();
   });
 
