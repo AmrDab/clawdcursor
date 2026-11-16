@@ -33,6 +33,20 @@
 # typing/clicking, and an activating window would redirect those keystrokes
 # (the exact focus-theft bug class fixed in v1.5.1). WS_EX_NOACTIVATE +
 # ShowWithoutActivation make it a zero-focus overlay; clicks still reach it.
+#
+# The running pill's orb (class Orb, below) is a port of Thinking Orbs by Jakub Antalik (libraries.dev,
+# github.com/Jakubantalik/Libraries.dev, packages/thinking-orbs), under this notice:
+# Thinking Orbs - MIT License - Copyright (c) 2026 Jakub Antalik
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+# documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in all copies or substantial portions of
+# the Software.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+# WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+# OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
@@ -41,7 +55,6 @@ Add-Type -AssemblyName System.Drawing
 Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Windows.Forms;
 
 public class NoActivateBannerForm : Form {
@@ -50,22 +63,6 @@ public class NoActivateBannerForm : Form {
     [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hWnd, int nIndex);
     [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
     [DllImport("user32.dll")] static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint affinity);
-    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
-    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hWnd, uint cmd);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int max);
-    // Back over the beam, without taking focus: the beam around a maximized window or a monitor reaches under the pill,
-    // and is raised over it whenever it is placed (window-outline.ps1 names its strips "clawdcursor beam"). Only when a
-    // strip is above the pill, so a menu, a tooltip or another clawdcursor's pill above it keeps its place.
-    // GW_HWNDPREV 3 walks up the z-order; HWND_TOPMOST (-1); SWP_NOSIZE 0x01 | SWP_NOMOVE 0x02 | SWP_NOACTIVATE 0x10.
-    public void Raise() {
-        if (!Visible) return;
-        StringBuilder name = new StringBuilder(20);
-        IntPtr h = GetWindow(Handle, 3);
-        for (int i = 0; h != IntPtr.Zero && i < 1000; i++, h = GetWindow(h, 3)) {
-            GetWindowText(h, name, 20);
-            if (name.ToString() == "clawdcursor beam") { SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013); return; }
-        }
-    }
     // The pill is for the person at the screen, never part of what the agent sees: WDA_EXCLUDEFROMCAPTURE (0x11) leaves
     // it out of every screenshot and OCR capture (Windows 10 2004+; older Windows ignores it). It sat over the app's own
     // toolbar in captures and hid it.
@@ -139,7 +136,7 @@ public class NoActivateBannerForm : Form {
 
 // The running pill's orb (#392), in place of the blinking dot. A PORT of Thinking Orbs by Jakub Antalik
 // (libraries.dev, github.com/Jakubantalik/Libraries.dev, packages/thinking-orbs, MIT License, Copyright (c) 2026 Jakub
-// Antalik; the notice is in full at the top of scripts/window-outline.ps1): its default state, "working", at its
+// Antalik; the notice is in full at the top of this file): its default state, "working", at its
 // 20 px size - particles running on tilted orbits around a slowly turning dotted sphere, in amber on the dark pill
 // (the library's tint: its ink ramp on #f59e0b instead of white).
 // The numbers are the library's (spec/orbs-spec.json, src/engine/orbits.ts and core.ts):
@@ -522,7 +519,6 @@ if ($env:CLAWD_BANNER_MODE -eq 'paused') {
         $script:bright = -not $script:bright
         if ($script:bright) { $dot.ForeColor = $blue }
         else                { $dot.ForeColor = [System.Drawing.Color]::FromArgb(25, 55, 110) }
-        $form.Raise()
     })
     $timer.Start()
 
@@ -593,7 +589,6 @@ $clock = [System.Diagnostics.Stopwatch]::StartNew()
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 700
 $timer.Add_Tick({
-    $form.Raise()
     $s = [int]$clock.Elapsed.TotalSeconds
     $t = '{0}:{1:00}' -f [int][Math]::Floor($s / 60), ($s % 60)
     if ($elapsed.Text -ne $t) { $elapsed.Text = $t; Update-Layout }

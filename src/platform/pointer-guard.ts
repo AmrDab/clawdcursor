@@ -28,8 +28,8 @@ export async function beforePointerPress(): Promise<void> {
  * the one the agent was working in (#294). Unlike the hooks above it throws — a refusal sends nothing. Releases (mouseUp,
  * keyUp) are never refused: a button or key the agent holds must always be let go.
  */
-/** A window the agent asked for by process, name or title. */
-export interface WindowQuery { processId?: number; processName?: string; title?: string }
+/** A window the agent asked for by process, name or title, or by its handle (Windows only: the fence, a Store app's frame). */
+export interface WindowQuery { processId?: number; processName?: string; title?: string; handle?: number }
 interface InputGuard {
   /** Throws while the user has stopped clawdcursor. */
   stopCheck(): void;

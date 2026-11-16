@@ -285,7 +285,7 @@ describe('no full-screen glow', () => {
     }
   });
 
-  it('no outline drawer sizes a window to a screen (only the desktop itself in front is outlined as its monitor)', () => {
+  it('no outline drawer sizes a window to a screen', () => {
     expect(read('scripts', 'window-outline.ps1')).not.toMatch(/AllScreens|PrimaryScreen|\.Bounds\b/);
     const swift = read('scripts', 'mac', 'overlay.swift');
     expect(swift.slice(swift.indexOf('func windowOutline()'))).not.toMatch(/screen\.frame|NSScreen\.screens/);
@@ -294,34 +294,60 @@ describe('no full-screen glow', () => {
     expect(py.slice(start, py.indexOf('\ndef ', start + 1))).not.toMatch(/get_monitor|get_n_monitors/);
   });
 
-  it('the beam is still where the OS is set to reduce motion, and the paused form does not turn (#392)', () => {
-    const ps = read('scripts', 'window-outline.ps1');
-    expect(ps).toContain('still = SystemParametersInfo(0x1042, 0, out animate, 0) && !animate;');
-    expect(ps).toContain('turning = !still && !paused;');
+  it('the pill\'s orb is still where the OS is set to reduce motion (#392)', () => {
     expect(read('scripts', 'banner.ps1')).toContain('if (SystemParametersInfo(0x1042, 0, out animate, 0) && !animate) return;');
     const swift = read('scripts', 'mac', 'overlay.swift');
-    expect(swift).toContain('let still = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion');
-    expect(swift).toContain('let turning = !paused && !still');
     expect(swift).toContain('if window == nil || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return }');
   });
 
-  // The look is a port of Border Beam and Thinking Orbs (libraries.dev, MIT): its notice goes with it.
-  it('the beam and the orb carry the library\'s licence notice (#392)', () => {
-    const ps = read('scripts', 'window-outline.ps1');
-    expect(ps).toContain('Border Beam - MIT License - Copyright (c) 2026 Jakub Antalik');
-    expect(ps).toContain('The above copyright notice and this permission notice shall be included in all copies or substantial portions of');
-    expect(read('scripts', 'mac', 'overlay.swift')).toContain('MIT License,\n// Copyright (c) 2026 Jakub Antalik');
-    expect(read('scripts', 'banner.ps1')).toContain('MIT License, Copyright (c) 2026 Jakub');
+  // The orb is a port of Thinking Orbs (libraries.dev, MIT): its notice goes with it. The outline is 2.0.0's again, so
+  // nothing of Border Beam is left to credit.
+  it('the orb carries the library\'s licence notice (#392)', () => {
+    const pill = read('scripts', 'banner.ps1');
+    expect(pill).toContain('Thinking Orbs - MIT License - Copyright (c) 2026 Jakub Antalik');
+    expect(pill).toContain('The above copyright notice and this permission notice shall be included in all copies or substantial portions of');
+    expect(pill).toContain('MIT License, Copyright (c) 2026 Jakub');
+    const swift = read('scripts', 'mac', 'overlay.swift');
+    expect(swift).toContain('MIT License,\n// Copyright (c) 2026 Jakub Antalik');
+    // Both ports point at the notice where it is.
+    expect(pill).toContain('the notice is in full at the top of this file');
+    expect(swift).toContain('The licence notice in full is at the top of scripts/banner.ps1');
+    for (const src of [pill, swift, read('scripts', 'window-outline.ps1'), read('scripts', 'linux', 'overlay.py')]) {
+      expect(src).not.toMatch(/Border Beam|border-beam/);
+    }
+  });
+
+  it('the macOS outline is the 2.0 border: 3 pt inside the agent\'s window, amber (blue when paused), still, click-through, under the pill', () => {
+    const swift = read('scripts', 'mac', 'overlay.swift');
+    const outline = swift.slice(swift.indexOf('func windowOutline()'));
+    expect(outline).toContain('view.layer?.borderColor = hexColor(option("--color", "#f59e0b")).cgColor');
+    expect(outline).toContain('view.layer?.borderWidth = 3');
+    expect(outline).toContain('win.ignoresMouseEvents = true');
+    expect(outline).toContain('win.level = .floating');
+    expect(outline).toContain('win.sharingType = .none');
+    expect(swift).toContain('panel.level = .screenSaver');
+    // Drawn once: no beam layers and nothing animated.
+    expect(outline).not.toMatch(/CAShapeLayer|CAGradientLayer|CABasicAnimation|CAKeyframeAnimation|lineDashPhase/);
+  });
+
+  it('the macOS outline goes only round a window of the app in front that is on screen and can be seen', () => {
+    const swift = read('scripts', 'mac', 'overlay.swift');
+    const find = swift.slice(swift.indexOf('func targetFrame()'), swift.indexOf('func windowOutline()'));
+    expect(find).toContain('NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(targetPid)');
+    expect(find).toContain('CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)');
+    expect(find).toContain('((w[kCGWindowAlpha as String] as? Double) ?? 1) > 0.01');
+    expect(find).toContain('rect.width >= 40, rect.height >= 40 else { continue }');
+    // No stand-in: with no such window nothing is drawn (the pill alone shows control).
+    expect(find).not.toMatch(/mouseLocation|visibleFrame|pointerScreen/);
+    expect(swift).toMatch(/line == "TARGET" \|\| line\.hasPrefix\("TARGET "\)/);
   });
 
   it('the Windows outline is click-through, never activates, and stays out of captures', () => {
     const ps = read('scripts', 'window-outline.ps1');
     for (const style of ['0x00080000', '0x00000020', '0x08000000', '0x00000080', '0x00000008']) expect(ps).toContain(style);
     expect(ps).toContain('SetWindowDisplayAffinity(Handle, 0x11)');
-    // Where the frame is, is read in physical pixels (per-monitor-v2); the strips themselves are not DPI aware, so
-    // Windows draws them at the monitor's scale.
-    expect(ps).toContain('IntPtr aware = SetThreadDpiAwarenessContext(new IntPtr(-4));   // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2');
-    expect(ps).toContain('SetThreadDpiAwarenessContext([IntPtr](-1))');
+    // Where the frame is, and where the border goes, are physical pixels on every monitor (per-monitor-v2).
+    expect(ps).toContain('SetThreadDpiAwarenessContext([IntPtr](-4))');
     // Re-placed only when it moved or is no longer above its window (walking up the z-order), never on every poll.
     expect(ps).toContain('if (placed && !moved) return;');
     // TARGET and HIDE act on receipt, not on the next poll: a capture follows HIDE after 90 ms.
@@ -329,5 +355,28 @@ describe('no full-screen glow', () => {
     // A byte-order mark in front of the first line (a .NET parent) does not lose the command.
     expect(ps).toContain('p[0].EndsWith("TARGET")');
     expect(ps).toContain('p[0].EndsWith("HIDE")');
+  });
+
+  it('the Windows outline is the thin border of 2.0.0: solid, opaque, 3 px at 100%, hollow, rounded like the window', () => {
+    const ps = read('scripts', 'window-outline.ps1');
+    expect(ps).toContain("[string]$Color     = '#f59e0b'");
+    expect(ps).toContain('[int]   $Thickness = 3,');
+    // The paused form's flag is a parameter of its own: the drawer does not depend on it landing in $args.
+    expect(ps).toContain('[switch]$Paused');
+    expect(ps).toContain('SetLayeredWindowAttributes(Handle, 0, 255, 2)');
+    expect(ps).toContain('int b = Math.Max(2, (int)Math.Round(thickness * dpi / 96.0));');
+    expect(ps).toContain('CombineRgn(frame, frame, hole, 4)');
+    // Nothing of the beam: no per-pixel strips, no monitor frame for the desktop, no window title for the pill to find.
+    expect(ps).not.toMatch(/UpdateLayeredWindow|BeamStrip|EnumDisplayMonitors|CLAWD_PILL_PID|IsDesktop|clawdcursor beam/);
+    expect(read('scripts', 'banner.ps1')).not.toMatch(/clawdcursor beam|Raise\(\)/);
+  });
+
+  // A window can be the one in front while Windows shows nothing of it (hidden, or cloaked on another virtual desktop),
+  // and its frame bounds still read as if it were there: the outline then framed empty space.
+  it('the Windows outline goes round no window that Windows does not show, even the one in front', () => {
+    const ps = read('scripts', 'window-outline.ps1');
+    expect(ps).toContain('static extern bool IsWindowVisible(IntPtr hWnd);');
+    expect(ps).toMatch(/GetForegroundWindow\(\) == t && !IsIconic\(t\) && IsWindowVisible\(t\)/);
+    expect(ps).toContain('(DwmGetWindowAttribute(t, 14, out cloaked, 4) != 0 || cloaked == 0)');   // DWMWA_CLOAKED
   });
 });
