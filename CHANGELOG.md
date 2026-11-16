@@ -5,33 +5,23 @@ All notable changes to Clawd Cursor will be documented in this file.
 ## [Unreleased]
 
 ### Added
-- **The outline is a border beam, and the pill has a thinking orb** (#392). The border around the agent's window is
-  now the Border Beam of [libraries.dev](https://libraries.dev/beam), in clawdcursor's colours: an **amber** beam that
-  goes round the window's edge every two seconds while the agent works, with a thin bright stroke and a soft glow just
-  inside it; and while the agent waits for you, the library's "pulse" in **blue**: the whole edge, held steady. The
-  running pill shows the "working" Thinking Orb (particles on tilted orbits, in amber) in place of the blinking dot.
-  - On a light window (a white document) the beam is stronger, with a dark highlight, so it is not lost (Windows).
-  - When the agent's window is the desktop itself (a click on the desktop), the beam goes around the monitor the
-    pointer is on (Windows and macOS). Nothing is drawn when the agent is idle or has no window, as before.
-  - Where the system is set to reduce motion (Windows "Animation effects" off, macOS Reduce Motion), the beam is one
-    still frame and the orb does not move.
-  - Still click-through, never focused, and out of the agent's screenshots. The glow reaches about 28 px into the
-    window's edge.
-  - Windows and macOS. On Linux the border stays a plain steady one for now.
-  - On macOS the beam is drawn for power (#414): a thin amber ring with a brighter run going round it, in plain Core
-    Animation layers along the edge, so its GPU cost follows the edge and not the window's area; paused, a still blue
-    ring. The orb moves about 10 times a second on both systems.
-  - **Credit:** the look is a port of **Border Beam** and **Thinking Orbs** by Jakub Antalik
-    ([github.com/Jakubantalik/Libraries.dev](https://github.com/Jakubantalik/Libraries.dev), `packages/border-beam`
-    and `packages/thinking-orbs`), MIT License, Copyright (c) 2026 Jakub Antalik. The beam uses the library's default
-    preset (its layers, gradient stops, opacities and timings) with an amber colour variant of ours and its "ocean"
-    blues, redrawn natively: layered windows on Windows, Core Animation on macOS. The MIT notice is in
-    `scripts/window-outline.ps1`.
+- **The pill has a thinking orb** (#392). While the agent works, the running pill shows the "working" Thinking Orb
+  (particles on tilted orbits, in amber) in place of the blinking dot, on Windows and macOS; the Linux pill keeps its
+  dot. It is redrawn about 10 times a second, and does not move where the system is set to reduce motion (Windows
+  "Animation effects" off, macOS Reduce Motion).
+  - The outline is unchanged from 2.0.0: a thin amber line around the window the agent is working in, blue while it
+    waits for you, moving with the agent from window to window.
+  - **Credit:** the orb follows **Thinking Orbs** by Jakub Antalik
+    ([github.com/Jakubantalik/Libraries.dev](https://github.com/Jakubantalik/Libraries.dev), `packages/thinking-orbs`),
+    MIT License, Copyright (c) 2026 Jakub Antalik, redrawn natively (WinForms on Windows, AppKit on macOS). The MIT
+    notice is in `scripts/banner.ps1`.
 
 ### Fixed
 - **Linux: password field values stay out of tree reads**, as on Windows and macOS. An AT-SPI `password text` element now
   returns no value or text in `read_tree`, `find`, the focused element and page text. A screenshot or OCR can still show
   whatever is visible on screen.
+- **Windows: the outline is not drawn around a hidden window.** A window Windows reports as hidden or cloaked could be
+  the one in front with nothing on screen, and the outline framed empty space.
 - **`clawdcursor stop` and `uninstall` never signal a process they can't prove is clawdcursor.** They used to signal
   whatever pid a lock file named, and lock files go stale while pids get reused (often on Windows), so an unrelated app
   could be killed. Now a pid is signalled only when its lock is complete and the live process started when the lock
@@ -40,6 +30,8 @@ All notable changes to Clawd Cursor will be documented in this file.
   daemon stopped from the dashboard or `POST /stop` now removes its lock file, like Ctrl+C does.
 
 ### Changed
+- **The Windows pill no longer repaints itself every second** (#419, part of #414). Its labels now have the pill's own
+  background instead of a transparent one, so the clock's tick no longer redraws the whole pill, as it did in 2.0.0.
 - README and clawdcursor.com describe 2.0: install per host, what protects you (including auto-approving hosts), and
   the 2.1 roadmap. Five obsolete docs about removed features are deleted, and descriptions no longer say "safe".
 
