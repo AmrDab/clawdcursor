@@ -149,7 +149,7 @@ that the agent did not focus or open on purpose, so text meant for an app never 
 At a roadblock (sign-in, 2FA, CAPTCHA) the agent pauses instead of failing: the
 prompt turns blue and says what to do, and the task continues when the
 user clicks Resume. Outside agents use
-`system pause_for_user` (ask for the one step only the user can do, and pass `done_when` so the pause ends as soon as they finish); `clawdcursor resume` answers from a terminal.
+`system pause_for_user` (ask for the one step only the user can do, and pass `done_when` so the pause ends as soon as they finish); `clawdcursor resume` answers a pause of the HTTP daemon (`clawdcursor agent`) from a terminal; a stdio server's pause is answered only on the card.
 While you are driving the desktop, the user is watching the screen, not your chat: ask them on
 the pause card (use `choices` when there are options), not in your own chat.
 `pause_for_user` takes `choices` (2-6 short options, one button each) and/or `input`

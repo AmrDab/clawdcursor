@@ -587,7 +587,7 @@ program
 
 program
   .command('resume')
-  .description('Continue a task paused for you (same as the on-screen Resume), or --end it. After a stop, gives control back.')
+  .description('Continue a task the daemon paused for you (same as the on-screen Resume), or --end it; a stdio MCP server\'s pause is answered on its card. After a stop, gives control back.')
   .option('--end', 'End the paused task')
   .option('--port <port>', 'API server port (default: the running daemon\'s port, else 3847)')
   .action(async (opts) => {

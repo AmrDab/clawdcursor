@@ -664,7 +664,7 @@
       <div class="feat-card">
         <div class="feat-icon">🔒</div>
         <h4>Passwords are not read</h4>
-        <p>Password field values are never read through the accessibility tree, on Windows and macOS (Linux from the next release). Keys that lock the computer or end your session are never sent.</p>
+        <p>Password field values are never read through the accessibility tree, on Windows, macOS and Linux. Keys that lock the computer or end your session are never sent.</p>
       </div>
       <div class="feat-card">
         <div class="feat-icon">🔑</div>
@@ -890,7 +890,7 @@ claude plugin install clawdcursor@clawdcursor</code></pre>
 clawdcursor consent          <span style="color:var(--text3)"># one-time desktop-control authorization (always required)</span>
 clawdcursor grant            <span style="color:var(--text3)"># macOS only: Accessibility + Screen Recording prompts. MCP setup ends here.</span>
 clawdcursor doctor           <span style="color:var(--text3)"># diagnose the install: version, consent, screen capture, accessibility, permissions</span>
-clawdcursor status           <span style="color:var(--text3)"># readiness check (consent, permissions)</span>
+clawdcursor status           <span style="color:var(--text3)"># readiness check (consent, permissions, whether the daemon is running)</span>
 clawdcursor versions         <span style="color:var(--text3)"># every installed copy and its version</span>
 clawdcursor update           <span style="color:var(--text3)"># update the global npm install, list the other copies to update (from 2.1)</span>
 clawdcursor telemetry        <span style="color:var(--text3)"># whether error reports are on, and every field sent (from 2.1)</span>
@@ -902,7 +902,7 @@ clawdcursor mcp              <span style="color:var(--text3)"># stdio MCP server
 clawdcursor mcp --compact    <span style="color:var(--text3)"># same, with the 6 compact tools (recommended)</span>
 clawdcursor agent            <span style="color:var(--text3)"># HTTP MCP server at 127.0.0.1:3847/mcp (--compact, --port, --no-vision)</span>
 clawdcursor stop             <span style="color:var(--text3)"># stop every running instance; agents stay stopped until resume</span>
-clawdcursor resume           <span style="color:var(--text3)"># continue a paused task, or give control back after a stop (--end to end the task)</span>
+clawdcursor resume           <span style="color:var(--text3)"># continue the daemon's paused task, or give control back after a stop (--end to end the task)</span>
 clawdcursor report           <span style="color:var(--text3)"># send a redacted report of the last session, after a preview</span>
 clawdcursor uninstall        <span style="color:var(--text3)"># remove all clawdcursor config and data</span></code></pre>
       </div>

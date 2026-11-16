@@ -125,7 +125,7 @@ What is enforced, whatever your AI sends:
 - **A Stop button.** Press Stop on the pill (or double-click it), or run `clawdcursor stop`. Every Clawd Cursor process stops, including a call or batch already running, and stays stopped across restarts until you resume.
 - **The pause card.** For a sign-in or a 2FA code your AI hands that one step to you with `system pause_for_user`: a card on screen says what is needed and can offer choices or a text box, and your AI continues when you click Resume, or as soon as its `done_when` condition shows on screen. While the card is up, no other tool call runs. A choice or a typed reply on the card comes only from you: your AI cannot click its own card or the pill. On the granular surface an agent can also end a pause with `resume_task`; that is reported as unverified, never as your answer.
 - **No typing into AI assistant windows.** Input is refused when the window in front is an AI assistant your AI did not focus or open on purpose, or is no longer the window it was working in.
-- **Password values are never read.** Password field values are never returned by tree, find or value reads on Windows and macOS (Linux from the next release). A screenshot or OCR can still show whatever is visible on screen.
+- **Password values are never read.** Password field values are never returned by tree, find or value reads on Windows, macOS and Linux. A screenshot or OCR can still show whatever is visible on screen.
 - **A short list of keys that are never sent**, because they lock the machine or end the session. Windows: `Win+L`, `Ctrl+Alt+Del`. macOS: `Ctrl+Cmd+Q`, `Cmd+Shift+Q`, anything with Power or Eject. Linux: `Super+L`, `Ctrl+Alt+Del`, `Ctrl+Alt+Backspace`, `Ctrl+Alt+F1`&ndash;`F12`, SysRq, Power. Every other shortcut is allowed.
 - **Local only, with a token.** `clawdcursor agent` binds `127.0.0.1` only and requires the bearer token. `clawdcursor mcp` (stdio) opens no port.
 - **Screen text is marked as data.** Page text, OCR, the clipboard, titles and element names reach your AI inside `<untrusted-screen-content>` or quoted, and cannot break out of that wrapping. Whether the model obeys text it reads is the model's and the host's side of prompt-injection defence.
@@ -393,9 +393,9 @@ clawdcursor grant           Request macOS permissions (macOS only)
 clawdcursor mcp             stdio MCP server; your host starts this (--compact for the six tools)
 clawdcursor agent           HTTP MCP server on 127.0.0.1:3847 (--port, --compact, --no-vision)
 clawdcursor stop            Stop every running instance; agents stay stopped until resume
-clawdcursor resume          Continue a paused task or give control back after a stop (--end to end the task)
+clawdcursor resume          Continue the daemon's paused task or give control back after a stop (--end to end the task)
 clawdcursor doctor          Diagnose the install (version, consent, screen capture, accessibility, permissions)
-clawdcursor status          Readiness check (consent, permissions)
+clawdcursor status          Readiness check (consent, permissions, whether the daemon is running)
 clawdcursor versions        Every installed copy and its version
 clawdcursor update          Update the global npm install, then list the other copies to update (from 2.1)
 clawdcursor telemetry       Whether error reports are on, and every field sent (from 2.1)
