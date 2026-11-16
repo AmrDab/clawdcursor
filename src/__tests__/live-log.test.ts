@@ -39,8 +39,8 @@ describe('formatLiveLine', () => {
   });
 
   it('a server connecting and leaving; a 2.0.0 writer has its pid only in the event', () => {
-    expect(line('mcp.start', { version: '2.1.0', pid: 44116, hostPid: 31464, surface: 'compact', readyMs: 4300 }))
-      .toBe('08:58:10  mcp 44116  connected (compact, v2.1.0)');
+    expect(line('mcp.start', { version: '1.9.3', pid: 44116, hostPid: 31464, surface: 'compact', readyMs: 4300 }))
+      .toBe('08:58:10  mcp 44116  connected (compact, v1.9.3)');
     expect(line('mcp.exit', { reason: 'the host closed the connection (stdin ended)', pid: 11044 }, { pid: undefined }))
       .toBe('08:58:10  mcp 11044  left (the host closed the connection (stdin ended))');
     // An unclean exit is written by the next server: the line is about the one that went.
