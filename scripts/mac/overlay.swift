@@ -68,12 +68,41 @@ let rowBg = rgb(34, 38, 46)
 let footerBg = rgb(44, 48, 57)
 let endRed = rgb(248, 113, 113)
 
-/// A panel that never becomes key or main: clicking it leaves focus where it was. The one exception is the user's own
-/// click on "Something else": then it may become key (a non-activating panel takes keystrokes without activating the app).
+/// A panel that never becomes key or main: clicking it leaves focus where it was. The exceptions are the card's text
+/// box and "Something else": a press on either may make it key (a non-activating panel takes keystrokes without
+/// activating the app).
 final class PillPanel: NSPanel {
     var allowKey = false
     override var canBecomeKey: Bool { allowKey }
     override var canBecomeMain: Bool { false }
+
+    /// What a press at `point` (window coordinates) would give the keyboard to: the text box (or the field editor
+    /// inside it) or "Something else". Nil for any other press.
+    func keyboardTarget(at point: NSPoint) -> NSView? {
+        guard let content = contentView else { return nil }
+        let local = content.superview?.convert(point, from: nil) ?? point
+        var view = content.hitTest(local)
+        while let v = view {
+            if v is ClickToTypeField { return v }
+            if let b = v as? FirstClickButton { return b.takesKeyboard ? b : nil }
+            view = v.superview
+        }
+        return nil
+    }
+
+    /// AppKit makes a clicked window key here, before the view's mouseDown, and drops that if canBecomeKey is false at
+    /// that moment (Mac run 2026-11-16: no focus ring, clicks ignored with the Claude app in front).
+    override func sendEvent(_ event: NSEvent) {
+        guard event.type == .leftMouseDown, !isKeyWindow,
+              let target = keyboardTarget(at: event.locationInWindow) else {
+            super.sendEvent(event)
+            return
+        }
+        typingReply = true
+        allowKey = true
+        super.sendEvent(event)   // for a text field this runs the mouse tracking until mouse-up
+        if !isKeyWindow, target is ClickToTypeField { takeKeyboard(self, target) }
+    }
 }
 
 /// Set while the user types an answer: focus is not handed back then.
@@ -82,41 +111,37 @@ var typingReply = false
 /// Buttons in a non-key panel must act on the first click.
 final class FirstClickButton: NSButton {
     var line = ""
+    var takesKeyboard = false   // "Something else" opens the text box; no other button takes the keyboard
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
-/// The text box that is on the card from the start (pause_for_user's `input`): a click into it makes the panel key, so
-/// the user can type; nothing else ever gives the panel the keyboard.
+/// The text box that is on the card from the start (pause_for_user's `input`): a press into it (or into its field
+/// editor) makes the panel key in PillPanel.sendEvent, so the user can type; nothing else ever gives the panel the keyboard.
 final class ClickToTypeField: NSTextField {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func mouseDown(with event: NSEvent) {
-        // Not "!allowKey": after the user clicks back into their app the panel is no longer key but allowKey stays
-        // set, and a second click into the box must take the keyboard again.
-        if let panel = window as? PillPanel, !panel.isKeyWindow { takeKeyboard(panel, self) }
-        super.mouseDown(with: event)
-    }
 }
 
-/// Give the card the keyboard for the user's answer. A non-activating panel normally becomes key without activating
-/// this app; when the app in front keeps the keyboard anyway (the Claude desktop app in front, Mac run 2026-11-15:
-/// no focus ring, keys went nowhere), this app is activated for the answer. Focus goes back on Send (sendReply ->
-/// giveFocusBack), Esc (releaseKeyboard) or a choice.
+/// Give the card the keyboard for the user's answer ("Something else", and the fallback when a press on the box did not
+/// make the panel key). A non-activating panel normally becomes key without activating this app; when the app in
+/// front keeps the keyboard anyway (the Claude desktop app in front, Mac run 2026-11-15: no focus ring, keys went
+/// nowhere), this app is activated for the answer. Focus goes back on Send (sendReply -> giveFocusBack), Esc
+/// (releaseKeyboard) or a choice.
 func takeKeyboard(_ panel: PillPanel, _ field: NSView) {
     typingReply = true
     panel.allowKey = true
     panel.makeKeyAndOrderFront(nil)
-    panel.makeFirstResponder(field)
-    DispatchQueue.main.async {
-        guard typingReply, !panel.isKeyWindow else { return }
-        // activate() is only in the macOS 14 SDK (Swift 5.9 / Xcode 15); an older toolchain (macOS 12) must still build.
+    if !panel.isKeyWindow {
+        // The app in front kept the keyboard: ask for activation, inside the user's click (on macOS 14+ a request the
+        // system may refuse). activate() is only in the macOS 14 SDK (Swift 5.9 / Xcode 15); an older toolchain
+        // (macOS 12) must still build.
         #if compiler(>=5.9)
         if #available(macOS 14.0, *) { NSApp.activate() } else { NSApp.activate(ignoringOtherApps: true) }
         #else
         NSApp.activate(ignoringOtherApps: true)
         #endif
         panel.makeKeyAndOrderFront(nil)
-        panel.makeFirstResponder(field)
     }
+    panel.makeFirstResponder(field)
 }
 
 final class PillView: NSView {
@@ -146,13 +171,34 @@ func label(_ text: String, size: CGFloat, color: NSColor, bold: Bool = false, se
 
 /// The app the user was last in (frontmost at start, then kept current as they
 /// switch apps while the overlay is up): focus goes back there.
-var previousApp = NSWorkspace.shared.frontmostApplication
+var previousApp: NSRunningApplication? = NSWorkspace.shared.frontmostApplication.flatMap { isOverlay($0) ? nil : $0 }
+
+/// This process, or the other overlay process (the pill and the outline are this same binary, run twice). The other one
+/// is never the user's app: activating it leaves no window that can take keys.
+func isOverlay(_ app: NSRunningApplication) -> Bool {
+    if app.processIdentifier == ProcessInfo.processInfo.processIdentifier { return true }
+    guard let mine = Bundle.main.executableURL, let theirs = app.executableURL else { return false }
+    return mine.resolvingSymlinksInPath() == theirs.resolvingSymlinksInPath()
+}
+
+/// Cooperative activation (macOS 14): yield, then activate, which is honoured while this app is active; deactivating
+/// first gave that up.
+func handBack(to app: NSRunningApplication) {
+    #if compiler(>=5.9)
+    if #available(macOS 14.0, *) {
+        NSApp.yieldActivation(to: app)
+        app.activate()
+        return
+    }
+    #endif
+    NSApp.deactivate()
+    app.activate(options: [])
+}
 
 func giveFocusBack() {
-    guard !typingReply, NSApp.isActive, let prev = previousApp,
-          prev.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
-    NSApp.deactivate()
-    if #available(macOS 14.0, *) { prev.activate() } else { prev.activate(options: []) }
+    guard !typingReply, NSApp.isActive else { return }
+    guard let prev = previousApp, !prev.isTerminated, !isOverlay(prev) else { NSApp.deactivate(); return }
+    handBack(to: prev)
 }
 
 /// Thinking Orbs' default state, "working", at its 20 pt size: particles running on tilted orbits around a slowly
@@ -235,7 +281,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
                                                           object: nil, queue: .main) { note in
             if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-               app.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+               !isOverlay(app) {
                 previousApp = app
             }
         }
@@ -422,9 +468,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 panel.orderOut(nil)
                 panel.orderFrontRegardless()
             }
-            if let prev = previousApp, prev.processIdentifier != ProcessInfo.processInfo.processIdentifier {
-                if #available(macOS 14.0, *) { prev.activate() } else { prev.activate(options: []) }
-            }
+            if let prev = previousApp, !prev.isTerminated, !isOverlay(prev) { handBack(to: prev) }
         }
     }
 
@@ -560,6 +604,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                                    frame: NSRect(x: pad, y: footerY, width: 132, height: 30),
                                    color: gray, textColor: headerBlue)
                 o.action = #selector(somethingElse(_:))
+                o.takesKeyboard = true
                 other = o
             }
             if let other = other { choiceButtons = [resume, other, end] } else { choiceButtons = [resume, end] }
