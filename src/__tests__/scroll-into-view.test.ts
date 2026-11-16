@@ -70,6 +70,25 @@ describe('set_field_value / invoke_element on a ref below the fold', () => {
     expect(platform.typeText).toHaveBeenCalledWith('We build robots');
   });
 
+  // Owner 2026-11-15: a click that landed on the page itself, then select-all, turned the whole page blue.
+  it('no select-all when the click left the focus on the page or a list: nothing typed, and it says so', async () => {
+    for (const focused of [{ controlType: 'Document', name: 'page' }, { controlType: 'ListItem', name: 'row' }]) {
+      const { platform, ctx } = setup({ getFocusedElement: vi.fn(async () => focused) });
+      const res = await tool('set_field_value').execute({ ...ref, value: 'x' }, ctx);
+      expect(res.success).toBe(false);
+      expect(res.text).toMatch(/not in a text field, so nothing was typed/);
+      expect(platform.keyPress).not.toHaveBeenCalled();
+      expect(platform.typeText).not.toHaveBeenCalled();
+    }
+  });
+
+  it('a text area (macOS AXTextArea reads as a multiline Edit) is filled by select-all as before', async () => {
+    const { platform, ctx } = setup({ getFocusedElement: vi.fn(async () => ({ controlType: 'Edit', name: '', multiline: true })) });
+    const res = await tool('set_field_value').execute({ ...ref, value: 'x' }, ctx);
+    expect(res.success).toBe(true);
+    expect(platform.keyPress).toHaveBeenCalledWith('mod+a');
+  });
+
   it('scrolls before a click too (invoke_element)', async () => {
     const { platform, ctx } = setup();
     const res = await tool('invoke_element').execute(ref, ctx);

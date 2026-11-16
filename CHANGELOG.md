@@ -36,6 +36,18 @@ All notable changes to Clawd Cursor will be documented in this file.
     notice is in `scripts/banner.ps1`.
 
 ### Fixed
+- **clawdcursor no longer selects a whole page or document.** Select-all over a web page turned the page blue on
+  screen, and on macOS a typed reply replaced a whole TextEdit document.
+  - `copy_all_text` reads only through accessibility (the document's text, or the tree's names), and never presses
+    select-all + copy. A browser page that reads empty the first time is read once more, and on macOS the first read
+    waits for the accessibility helper's build.
+  - `smart_type` with a target selects the old text only inside a one-line field. A document, web page or text area
+    keeps its text, and the new text goes in at the cursor, unless `mode:"replace"` is passed. The result says which.
+  - `set_field_value` by a ref's bounds types nothing when the click left the focus on the page or a list, and says so.
+  - The key-press examples and the skill's copy pattern no longer show `mod+a` / `mod+c`.
+- **macOS: the first pause after an install or upgrade reaches the user.** `pause_for_user` and confirm mode said "no
+  on-screen prompt is available" while the overlay was still compiling. They now wait for that compile, and fail only
+  if it fails. A compile cut short by an exiting run no longer leaves its temp file behind.
 - **`clawdcursor doctor` returns to the prompt.** After "All systems go!" it never exited: the accessibility bridge it
   started kept the process alive (2.0.0 too).
 - **Windows: `open_app` starts apps directly again, not through the Start menu (10–12 s per launch).** The PowerShell that runs

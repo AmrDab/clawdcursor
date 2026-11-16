@@ -95,6 +95,8 @@ export interface UiElement {
   value?: string;
   /** The focused-element read only: `value` was read from the element itself, so an empty one is an empty field. */
   readable?: boolean;
+  /** The focused-element read only: a text area that holds a document's lines (macOS AXTextArea, shown as "Edit"). */
+  multiline?: boolean;
   /** Whether the element is enabled and interactable. */
   enabled?: boolean;
   /** Whether the element currently has keyboard focus. */

@@ -450,3 +450,14 @@ describe('a11y_get_value — a failure carries a code the agent can act on', () 
     expect(classifyResult((await read({ success: false, data: { reason: 'timeout' } })).text, true, false)?.code).toBe('TIMEOUT');
   });
 });
+
+describe('selectAllScope: what a select-all would take with this focus', () => {
+  it('a one-line field takes it; a document, web page or text area is the whole text; a list or button is other', async () => {
+    const { selectAllScope } = await import('../tools/paste-guard');
+    for (const t of ['Edit', 'ControlType.Edit', 'ComboBox', 'AXTextField', 'AXSearchField', 'Spinner']) expect(selectAllScope({ controlType: t })).toBe('field');
+    for (const t of ['Document', 'ControlType.Document', 'document web', 'AXWebArea', 'AXTextArea']) expect(selectAllScope({ controlType: t })).toBe('document');
+    expect(selectAllScope({ controlType: 'Edit', multiline: true })).toBe('document');
+    for (const t of ['ListItem', 'DataItem', 'Button', 'Hyperlink', 'TreeItem', 'Text']) expect(selectAllScope({ controlType: t })).toBe('other');
+    for (const el of [null, undefined, { controlType: '' }, { controlType: 'Pane' }, { controlType: 'Window' }, { controlType: 'Custom' }]) expect(selectAllScope(el)).toBe('unknown');
+  });
+});
