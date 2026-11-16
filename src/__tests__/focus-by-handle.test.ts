@@ -46,6 +46,21 @@ describe('window focus by handle, and a Store app by its own name', () => {
     expect(workingWindow()).toEqual({ processId: 9000, handle: 0x9c4 });
   });
 
+  it('...and by the process name its frame hosts (CalculatorApp), which only the hosted name matches', async () => {
+    const sent: string[] = [];
+    const d = guardInputMethods({
+      async keyPress(k: string) { sent.push(`key ${k}`); },
+      async focusWindow(q: { processName?: string; handle?: number }): Promise<boolean> {
+        if (q.processName) return this.focusWindow({ handle: CALC.handle });
+        fg = CALC;
+        return true;
+      },
+    });
+    expect(await d.focusWindow({ processName: 'CalculatorApp' })).toBe(true);
+    await d.keyPress('1');
+    expect(sent).toEqual(['key 1']);
+  });
+
   it('a focus by handle is that one window: another window of the same process in front is refused', async () => {
     const sent: string[] = [];
     const other: Win = { ...FORM, title: 'Bench Form - Options', handle: 7002 };
