@@ -1,15 +1,15 @@
 /**
- * The outline follows the window the agent works in after its own `window focus` and `open_app` too, not only after an act
- * (1.6.0). macOS eval 2026-11-10: after `window open_app Calculator` or `window focus "RC1527 Test"` the outline stayed on
- * the previous app (hidden behind the new one) until the next act, so every read that followed the switch (read_tree,
- * screenshot, copy_all_text) ran with the pill showing and no outline.
+ * The working window (what the pill names) follows the agent's own `window focus` and `open_app` too, not only an act
+ * (1.6.0). macOS eval 2026-11-10: after `window open_app Calculator` or `window focus "RC1527 Test"` the pill kept naming
+ * the previous app until the next act, so every read that followed the switch (read_tree, screenshot, copy_all_text)
+ * ran with the pill naming the old app.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import type { ChildProcess } from 'child_process';
 import { controlBanner } from '../core/banner';
-import { __setForegroundReaderForTests, workingWindow, workingIn } from '../core/control';
+import { __setForegroundReaderForTests, workingIn } from '../core/control';
 import { guardInputMethods } from '../platform/pointer-guard';
 
 class FakeChild extends EventEmitter {
@@ -26,7 +26,6 @@ const TEST: Win = { processId: 300, processName: 'firefox', title: 'RC1527 Test 
 const CALC: Win = { processId: 400, processName: 'Calculator', title: 'Calculator', handle: 0x9c4 };
 
 let fg: Win | null;
-let outlines: FakeChild[];
 
 /** `onFocus` / `onOpen`: what the OS does when asked; their answer is the adapter's. */
 function fakeDesktop(o: { onFocus?: () => boolean; onOpen?: () => { pid?: number; title?: string } } = {}) {
@@ -42,15 +41,10 @@ function fakeDesktop(o: { onFocus?: () => boolean; onOpen?: () => { pid?: number
 }
 
 beforeEach(() => {
-  outlines = [];
   controlBanner.__resetForTests();
   controlBanner.__setPlatformEnabledForTests(true);
   controlBanner.__setSpawnerForTests(() => new FakeChild() as unknown as ChildProcess);
-  controlBanner.__setOutlineSpawnerForTests(() => {
-    const c = new FakeChild();
-    outlines.push(c);
-    return c as unknown as ChildProcess;
-  });
+  controlBanner.__setGlowSpawnerForTests(() => new FakeChild() as unknown as ChildProcess);
   fg = EDGE;
   __setForegroundReaderForTests(async () => fg);
   controlBanner.pin();
@@ -59,44 +53,38 @@ afterEach(() => {
   controlBanner.__resetForTests();
 });
 
-describe('the outline follows the agent\'s own focus and launches', () => {
-  it('window focus by title: the outline goes to that window, with no act', async () => {
+describe('the working window follows the agent\'s own focus and launches', () => {
+  it('window focus by title: the working window is that window, with no act', async () => {
     const d = fakeDesktop({ onFocus: () => { fg = TEST; return true; } });
     await d.keyPress('a');
-    expect(outlines[0].written).toEqual(['TARGET 1440 100']);
     await d.focusWindow({ title: 'RC1527 Test' });
-    expect(workingWindow()).toEqual({ processId: 300, handle: 0x7b2 });
+    expect(workingIn()).toMatchObject({ processId: 300, handle: 0x7b2 });
     expect(workingIn()?.processName).toBe('firefox');
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300']);
     expect(d.sent).toEqual(['key a']);
   });
 
-  it('a focus that takes a moment to come up (macOS activation): the outline goes there once it is in front', async () => {
+  it('a focus that takes a moment to come up (macOS activation): the working window is that one once it is in front', async () => {
     const d = fakeDesktop({ onFocus: () => { setTimeout(() => { fg = TEST; }, 150); return true; } });
     await d.keyPress('a');
     await d.focusWindow({ title: 'RC1527 Test' });
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300']);
   });
 
-  it('open_app: the outline goes to the launched window, by its pid or title', async () => {
+  it('open_app: the working window is the launched one, by its pid or title', async () => {
     const d = fakeDesktop({ onOpen: () => { fg = CALC; return { pid: 400, title: 'Calculator' }; } });
     await d.keyPress('a');
     await d.launchApp('Calculator');
-    expect(workingWindow()).toEqual({ processId: 400, handle: 0x9c4 });
+    expect(workingIn()).toMatchObject({ processId: 400, handle: 0x9c4 });
     expect(workingIn()?.processName).toBe('Calculator');
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 2500 400']);
   });
 
-  it('open_app that reports no window: the outline goes to a window of the app it launched, and to no other', async () => {
+  it('open_app that reports no window: the working window is a window of the app it launched, and no other', async () => {
     const d = fakeDesktop({ onOpen: () => { fg = CALC; return {}; } });
     await d.keyPress('a');
     await d.launchApp('Calculator');
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 2500 400']);
-    // Another app in front after the launch is not the one the agent opened: no window, so no outline.
+    // Another app in front after the launch is not the one the agent opened: no window, so none.
     fg = EDGE;
     await fakeDesktop().launchApp('Calculator');
-    expect(workingWindow()).toBeUndefined();
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 2500 400', 'TARGET']);
+    expect(workingIn()).toBeUndefined();
   });
 
   it('a read after a switch does not move it, whatever is in front by then', async () => {
@@ -108,24 +96,21 @@ describe('the outline follows the agent\'s own focus and launches', () => {
     fg = EDGE;  // the user brought another window up: a read does not follow it
     await d.getUiTree();
     await d.invokeElement({ name: 'Total', action: 'get-value' });
-    expect(workingWindow()).toEqual({ processId: 300, handle: 0x7b2 });
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300']);
+    expect(workingIn()).toMatchObject({ processId: 300, handle: 0x7b2 });
   });
 
   it('a failed focus does not move it', async () => {
     const d = fakeDesktop({ onFocus: () => { fg = TEST; return false; } });
     await d.keyPress('a');
     await d.focusWindow({ title: 'RC1527 Test' });
-    expect(workingWindow()).toEqual({ processId: 100, handle: 0x5a0 });
-    expect(outlines[0].written).toEqual(['TARGET 1440 100']);
+    expect(workingIn()).toMatchObject({ processId: 100, handle: 0x5a0 });
   });
 
   it('a focus that reports success but never comes to the front does not move it, and the next input is still refused', async () => {
     const d = fakeDesktop();  // the foreground stays Edge
     await d.keyPress('a');
     await d.focusWindow({ title: 'RC1527 Test' });
-    expect(workingWindow()).toEqual({ processId: 100, handle: 0x5a0 });
-    expect(outlines[0].written).toEqual(['TARGET 1440 100']);
+    expect(workingIn()).toMatchObject({ processId: 100, handle: 0x5a0 });
     await expect(d.keyPress('b')).rejects.toThrow(/foreground changed: you focused "RC1527 Test", but "msedge" \(pid 100\) is in front/);
     expect(d.sent).toEqual(['key a']);
   });
@@ -139,6 +124,5 @@ describe('the outline follows the agent\'s own focus and launches', () => {
     fg = TEST;
     await d.keyPress('c');
     expect(d.sent).toEqual(['key a', 'key c']);
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300']);
   });
 });

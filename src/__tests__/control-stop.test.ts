@@ -14,7 +14,7 @@ vi.mock('../core/banner', () => ({
 
 import {
   stopControl, isStopped, resumeControl, sleepUnlessStopped, STOPPED_TEXT,
-  __setControlDirForTests, __setForegroundReaderForTests, workingWindow,
+  __setControlDirForTests, __setForegroundReaderForTests, workingIn,
 } from '../core/control';
 import { guardInputMethods, unguarded } from '../platform/pointer-guard';
 import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
@@ -81,17 +81,17 @@ describe('the window in front (#294)', () => {
     expect(d.sent).toEqual(['key ctrl+t']);
   });
 
-  it('the working window (the outline goes around it) is the one the last input went to; none before the first', async () => {
+  it('the working window (the pill names its app) is the one the last input went to; none before the first', async () => {
     const d = fakeDesktop();
-    expect(workingWindow()).toBeUndefined();
+    expect(workingIn()).toBeUndefined();
     fg = { ...EDGE, handle: 0x5a0 } as Win;
     await d.keyPress('ctrl+t');
-    expect(workingWindow()).toEqual({ processId: 100, handle: 0x5a0 });
+    expect(workingIn()).toMatchObject({ processId: 100, handle: 0x5a0 });
     d.clickOpens = NOTEPAD;
     await d.mouseClick(1, 1);
     await new Promise(r => setTimeout(r, 40));
     await d.keyPress('a');
-    expect(workingWindow()).toEqual({ processId: 300, handle: undefined });
+    expect(workingIn()).toMatchObject({ processId: 300 });
   });
 
   it('a paste (typeText → keyPress) is one input, checked once', async () => {

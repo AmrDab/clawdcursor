@@ -7,7 +7,7 @@
  *    guard compared that name with the frame's process only.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { __setForegroundReaderForTests, workingWindow } from '../core/control';
+import { __setForegroundReaderForTests, workingIn } from '../core/control';
 import { guardInputMethods } from '../platform/pointer-guard';
 
 type Win = { processId: number; processName: string; title: string; handle: number; appName?: string; hostedProcessId?: number; hostedProcessName?: string };
@@ -26,7 +26,7 @@ describe('window focus by handle, and a Store app by its own name', () => {
     expect(await d.focusWindow({ handle: 7001 })).toBe(true);
     await d.keyPress('a');   // was: 'foreground changed: you focused "pid undefined", but "BenchForm" (pid 200) is in front'
     expect(sent).toEqual(['key a']);
-    expect(workingWindow()).toEqual({ processId: 200, handle: 7001 });
+    expect(workingIn()).toMatchObject({ processId: 200, handle: 7001 });
   });
 
   it('window focus by a Store app name (focused through its frame by handle, windows.ts) then a key: the key goes to it', async () => {
@@ -43,7 +43,7 @@ describe('window focus by handle, and a Store app by its own name', () => {
     expect(await d.focusWindow({ processName: 'Calculator' })).toBe(true);
     await d.keyPress('1');   // was: 'you focused "Calculator", but "Calculator" (pid 38636) is in front'
     expect(sent).toEqual(['key 1']);
-    expect(workingWindow()).toEqual({ processId: 9000, handle: 0x9c4 });
+    expect(workingIn()).toMatchObject({ processId: 9000, handle: 0x9c4 });
   });
 
   it('...and by the process name its frame hosts (CalculatorApp), which only the hosted name matches', async () => {

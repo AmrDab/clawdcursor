@@ -207,14 +207,18 @@ describe('files that must (not) be there', () => {
     expect(links.filter(l => !fs.existsSync(path.join(ROOT, l)))).toEqual([]);
   });
 
-  it('the glow drawer is gone and nothing spawns it', () => {
-    expect(fs.existsSync(path.join(ROOT, 'scripts', 'edge-glow.ps1'))).toBe(false);
+  it('the screen-edge glow is back: one drawer per OS, spawned by banner.ts, and the window outline is gone', () => {
+    expect(fs.existsSync(path.join(ROOT, 'scripts', 'edge-glow.ps1'))).toBe(true);
+    expect(fs.existsSync(path.join(ROOT, 'scripts', 'window-outline.ps1'))).toBe(false);
+    expect(read('src', 'core', 'banner.ts')).toContain('edge-glow.ps1');
+    expect(read('scripts', 'mac', 'overlay.swift')).toContain('func glow()');
+    expect(read('scripts', 'linux', 'overlay.py')).toContain('def run_glow(');
     for (const src of [read('src', 'core', 'banner.ts'), read('scripts', 'mac', 'overlay.swift'), read('scripts', 'linux', 'overlay.py')]) {
-      expect(src).not.toMatch(/edge-glow|['"]glow['"]|CLAWD_NO_GLOW/);
+      expect(src).not.toMatch(/window-outline|windowOutline|run_outline/);
     }
   });
 
-  // The orb is a port of Thinking Orbs (libraries.dev, MIT): its notice goes with it. The outline is 2.0.0's again, so
+  // The orb is a port of Thinking Orbs (libraries.dev, MIT): its notice goes with it. The glow is 1.5.23's again, so
   // nothing of Border Beam is left to credit.
   it('the orb carries the library\'s licence notice (#392)', () => {
     const pill = read('scripts', 'banner.ps1');
@@ -226,7 +230,7 @@ describe('files that must (not) be there', () => {
     // Both ports point at the notice where it is.
     expect(pill).toContain('the notice is in full at the top of this file');
     expect(swift).toContain('The licence notice in full is at the top of scripts/banner.ps1');
-    for (const src of [pill, swift, read('scripts', 'window-outline.ps1'), read('scripts', 'linux', 'overlay.py')]) {
+    for (const src of [pill, swift, read('scripts', 'edge-glow.ps1'), read('scripts', 'linux', 'overlay.py')]) {
       expect(src).not.toMatch(/Border Beam|border-beam/);
     }
   });

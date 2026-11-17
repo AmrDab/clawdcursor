@@ -58,6 +58,14 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **The skill says what to do when a task is beyond the agent:** hand it to a stronger model from the same provider
   (a Sonnet or Opus subagent) or raise the reasoning effort, instead of giving up or asking the user; a sign-in or
   a step only the user can take is still `pause_for_user`. Easy desktop work can run on a cheaper subagent.
+- **The full-screen edge glow is back, and the thin outline around the agent's window is gone.** While an agent is in
+  control, a soft amber glow pulses along every edge of every screen, as it did up to 1.5.23; it turns blue while the
+  agent waits for you. It is back because it shows an agent is in control more plainly than a thin outline did. It
+  sits over every other window but under the pill, never takes a click or the keyboard, does not appear in the
+  agent's screenshots or text reads, scales with each monitor's DPI, and disappears with the pill. `CLAWD_NO_GLOW=1` turns it off and keeps the pill. It also
+  exits by itself if the program that started it is killed. The drawers are `scripts/edge-glow.ps1`, `glow` in
+  `scripts/mac/overlay.swift` and `glow` in `scripts/linux/overlay.py`; `scripts/window-outline.ps1` is removed, and
+  `workingWindow()` in `control.ts` is removed, since only the outline used it.
 - **The HTTP daemon answers only to `Host: 127.0.0.1:<port>` or `localhost:<port>`**; any other Host header gets 403.
   A page whose DNS name was rebound to 127.0.0.1 could load the dashboard and read the pause message. An SSH tunnel to
   the daemon must use the daemon's own port on the local end (`ssh -L 3847:127.0.0.1:3847 ...`).
