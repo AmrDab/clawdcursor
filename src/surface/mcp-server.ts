@@ -9,6 +9,7 @@
  */
 
 import type express from 'express';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ZodTypeAny } from 'zod';
 import { VERSION } from '../version';
 import type { ToolContext, ToolDefinition } from '../tools/registry';
@@ -22,6 +23,8 @@ import { logger } from '../core/observability/logger';
 import { COMPOUND_ROUTE_INDEX, compactCall } from '../tools/compact-routes';
 
 const COMPOUND_TOOLS = new Set(Object.keys(COMPOUND_ROUTE_INDEX));
+/** A compound call's arguments that its schema does not list (keepUndeclaredArgs), for the call being run. */
+const undeclaredArgs = new AsyncLocalStorage<Record<string, unknown>>();
 import { hasConsent, writeConsentFile } from './onboarding';
 import { SessionLog, outcomeOf } from './session-log';
 import { withSteps, watchChildProcesses } from '../core/observability/steps';
@@ -312,6 +315,11 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
             isError: true,
           };
         }
+        // What zod dropped from a compound call goes to its dispatcher, which reports or refuses it (keepUndeclaredArgs).
+        if (COMPOUND_TOOLS.has(tool.name)) {
+          const more = undeclaredArgs.getStore();
+          if (more) params = { ...more, ...params };
+        }
         const action = callAction;
         // A guard that refuses logs its own verdict.
         const refuse = (guard: string, why: string): McpToolResult => {
@@ -407,6 +415,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
   }
 
   stripRootSchemaDialect(server);
+  keepUndeclaredArgs(server, new Map(tools.filter(t => COMPOUND_TOOLS.has(t.name)).map(t => [t.name, new Set(Object.keys(t.parameters))])));
 
   return { server, toolCount: tools.length, tools, sessionLog };
 }
@@ -494,6 +503,32 @@ function stripRootSchemaDialect(server: McpServerLike): void {
       if (t.inputSchema && '$schema' in t.inputSchema) delete t.inputSchema.$schema;
     }
     return res;
+  });
+}
+
+/**
+ * Put back the arguments of a compound call (`system`, `accessibility`, …) that its schema does not list. The SDK
+ * validates a call with zod, which drops unknown keys in silence, so the dispatcher never saw them: neither its "ignored
+ * an argument" warning nor its refusal of a read it cannot limit to one window ran over MCP. `system ocr` with processId
+ * read the whole screen, other apps' windows included, with no word about processId (Mac, 2026-11-17).
+ *
+ * The dropped keys are kept for the call (AsyncLocalStorage, so concurrent calls never mix) and merged under the
+ * validated arguments in the tool's callback; a granular tool never gets them. Like stripRootSchemaDialect, this wraps
+ * the handler in the low-level Server's handler map (an SDK internal), and does nothing if that map is not there.
+ */
+function keepUndeclaredArgs(server: McpServerLike, declared: Map<string, Set<string>>): void {
+  const handlers = (server as unknown as {
+    server?: { _requestHandlers?: Map<string, (req: unknown, extra: unknown) => Promise<unknown>> };
+  }).server?._requestHandlers;
+  const original = handlers?.get('tools/call');
+  if (!handlers || !original) return;
+  handlers.set('tools/call', (req, extra) => {
+    const p = (req as { params?: { name?: unknown; arguments?: unknown } }).params;
+    const known = typeof p?.name === 'string' ? declared.get(p.name) : undefined;
+    const args = p?.arguments;
+    if (!known || !args || typeof args !== 'object' || Array.isArray(args)) return original(req, extra);
+    const more = Object.fromEntries(Object.entries(args).filter(([k]) => !known.has(k)));
+    return Object.keys(more).length ? undeclaredArgs.run(more, () => original(req, extra)) : original(req, extra);
   });
 }
 
