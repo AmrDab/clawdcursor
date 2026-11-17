@@ -21,7 +21,7 @@ final class Recorder {
 
     func write() {
         let root: [String: Any] = ["state": state, "events": events]
-        guard let data = try? JSONSerialization.data(withJSONObject: root, options: []) else { return }
+        guard let data = try? JSONSerialization.data(withJSONObject: root, options: [.sortedKeys]) else { return }
         // Atomic: written beside the file and moved over it, so a reader never sees half a file.
         try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
     }

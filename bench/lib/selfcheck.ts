@@ -22,7 +22,7 @@ import { cdpIsFixture, inFixtureFence, ownsFocus, readFocus } from './ownership'
 import { Watchdog, readSessionCalls } from './watchdog';
 import { freePort, pidsByCommandLine, tryRun, waitFor } from './proc';
 import { startFixtureServer } from './fixture-server';
-import { evaluate, loadTasks } from './tasks';
+import { canonical, evaluate, loadTasks } from './tasks';
 import type { TaskSpec } from './types';
 
 type Script = (p: Page) => Promise<unknown>;
@@ -106,7 +106,7 @@ export async function selfcheckNative(log: (line: string) => void = console.log,
       const fx = ran === null ? null : readStateFile(state);
       const pass = !!fx && (mode === 'editor' ? fx.state.text === 'first line\nsecond line'
         : fx.state.modalResult === 'ok' && fx.state.shippingEdit === 1 && fx.state.billingEdit === 0
-          && JSON.stringify(fx.state.applied) === JSON.stringify({ name: 'Self Test', email: 'self@test.example', priority: 'High', subscribe: true }));
+          && canonical(fx.state.applied) === canonical({ name: 'Self Test', email: 'self@test.example', priority: 'High', subscribe: true }));
       if (!pass) ok = false;
       log(`${pass ? 'ok  ' : 'FAIL'} native fixture ${mode}: ${fx ? `${fx.events.length} events` : 'no state file'}`);
     }
