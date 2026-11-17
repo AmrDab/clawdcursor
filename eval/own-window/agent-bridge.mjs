@@ -16,10 +16,11 @@ const tools = (await c.listTools()).tools;
 // Host (no DNS rebinding). A web page could otherwise POST to this port and drive the desktop.
 const token = crypto.randomBytes(32).toString('hex');
 http.createServer(async (req, res) => {
-  if (req.headers['x-bridge-token'] !== token || req.headers.origin || req.headers.host !== '127.0.0.1:8766'
-    || (req.url !== '/tools' && (req.method !== 'POST' || !String(req.headers['content-type']).startsWith('application/json')))) {
-    res.statusCode = 403; res.end('forbidden'); return;
-  }
+  const ok = req.headers['x-bridge-token'] === token && !req.headers.origin && req.headers.host === '127.0.0.1:8766'
+    && (req.url === '/tools'                                                        // GET, no body
+      || (req.url === '/done' && req.method === 'POST')                             // POST, no body needed
+      || (req.url === '/call' && req.method === 'POST' && String(req.headers['content-type']).startsWith('application/json')));
+  if (!ok) { res.statusCode = 403; res.end('forbidden'); return; }
   let body = ''; for await (const ch of req) body += ch;
   try {
     if (req.url === '/tools') { res.end(JSON.stringify(tools.map(x => ({ name: x.name, description: x.description, inputSchema: x.inputSchema })))); return; }
