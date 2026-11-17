@@ -23,8 +23,8 @@ All notable changes to Clawd Cursor will be documented in this file.
 ### Fixed
 - **`smart_click` never clicks in another app's window.** It kept an OCR match inside the target window's rectangle only,
   so a system dialog on top of the window (macOS "Accessibility Access") was clicked when its text matched the label.
-  The window at the click point is now asked first (macOS `ax-helper window-at`, Windows `window-at-point`): if it
-  belongs to another process than the target, nothing is clicked and the result is a refusal naming that window. Also
+  The window at the click point is now asked first (macOS `ax-helper window-at`, an accessibility hit test that skips
+  click-through overlays such as the Dock's; Windows `window-at-point`): if it belongs to another process than the target, nothing is clicked and the result is a refusal naming that window. Also
   for the accessibility-bounds click, and a call without `processId` now refuses before the click instead of warning
   after it. Where the platform cannot say (Linux), it clicks as before.
 - **No false "FOCUS NOT CONFIRMED" after a click on macOS.** The app in front changing is the click working when that app
