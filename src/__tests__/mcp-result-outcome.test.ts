@@ -495,4 +495,14 @@ describe('coordinate clicks with none by name are nudged to smart_click, once', 
     expect(NUDGE.test(text(await click()))).toBe(false);
     expect(NUDGE.test(text(await click()))).toBe(true);
   });
+
+  it('a scroll at x,y is not a click: it is not counted', async () => {
+    const c = ctx();
+    c.platform.mouseScroll = vi.fn(async () => {});
+    await createMcpServer({ ctx: c, compact: true });
+    const scroll = () => capturedHandlers.get('computer')!({ action: 'scroll', x: 5, y: 5, direction: 'down', amount: 1, space: 'screen' });
+    await click(); await click();
+    for (let i = 0; i < 3; i++) expect(NUDGE.test(text(await scroll()))).toBe(false);
+    expect(NUDGE.test(text(await click()))).toBe(true);
+  });
 });

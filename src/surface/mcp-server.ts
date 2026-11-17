@@ -388,7 +388,8 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
           result = { ...result, text: `${result.text}\n\n${blindFoundNothing ? CANVAS_HINT : VISION_STREAK_HINT(streak)}` };
         }
         if (cls === 'act-name') coordClicks = 0;
-        else if (cls === 'act-coords' && !result.isError && ++coordClicks >= 3 && !coordNudged) {
+        // Clicks only (click, double_click, mouse_click…): a scroll, hover or drag at x,y has no label to press instead.
+        else if (cls === 'act-coords' && /click$/.test(action ?? tool.name) && !result.isError && ++coordClicks >= 3 && !coordNudged) {
           coordNudged = true;
           result = { ...result, text: `${result.text}\n\n${COORD_CLICK_HINT}` };
         }
