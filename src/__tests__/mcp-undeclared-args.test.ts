@@ -70,12 +70,13 @@ async function call(name: string, args: Record<string, unknown>) {
 }
 
 describe('a compound call\'s arguments that its schema does not list, over MCP', () => {
-  it('system ocr with processId is refused, and nothing is read', async () => {
-    const r = await call('system', { action: 'ocr', processId: 60239 });
+  // ocr takes processId itself now; processName is not in the `system` schema.
+  it('system ocr with processName is refused, and nothing is read', async () => {
+    const r = await call('system', { action: 'ocr', processName: 'Terminal' });
     expect(reads.ocr).not.toHaveBeenCalled();
     expect(r.isError).toBe(true);
-    expect(r.text).toMatch(/system ocr NOT EXECUTED: it cannot be limited to one window by processId/);
-    expect(r.text).toContain('window {"action":"focus","processId":60239}');
+    expect(r.text).toMatch(/system ocr NOT EXECUTED: it cannot be limited to one window by processName/);
+    expect(r.text).toContain('window {"action":"focus","processName":"Terminal"}');
   });
 
   it('ocr without it still reads', async () => {

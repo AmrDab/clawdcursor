@@ -19,6 +19,14 @@ All notable changes to Clawd Cursor will be documented in this file.
   screenshot), as `smart_click` does, instead of failing; it says so in the result. The same when every element it
   matched only contains the name ("New to NX?" for "New"). Not with `within`. An ambiguous invoke's next step names the
   element (controlType, within) instead of a coordinate click.
+- **`system ocr` with `processId` reads that app's window by itself, even behind other windows.** It reads the
+  process's largest window, not minimized, from the window's own pixels, so the text of the windows on top of it is not
+  in the read. Nothing is raised or focused. Windows draws it with `PrintWindow` (at the window's own DPI, after
+  checking that the app responds); macOS captures it with the screenshot helper's single-window mode (ScreenCaptureKit),
+  found by its window number, so the signed helper app is unchanged. The rows say where the text is on screen; a click
+  there goes to whatever is on top, so the reply says to focus the window first or act by name. Linux cannot draw a
+  covered window by itself: there the call reads nothing and says how to read the window (focus it, then
+  `scope:"window"`).
 
 ### Fixed
 - **A field or button scrolled out of view at the end of a long page (macOS).** Chrome gives such an element a frame of

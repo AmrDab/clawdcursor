@@ -39,19 +39,20 @@ const system = () => getCompactTools().find(t => t.name === 'system')!;
 beforeEach(() => { reads.ocr.mockClear(); reads.copy.mockClear(); });
 
 describe('a screen read limited to one window by an argument it does not take', () => {
-  it('system ocr with processId: refused, nothing read, and told how to read that one window', async () => {
-    const r = await system().handler({ action: 'ocr', processId: 48593 } as any, ctx() as any);
+  // ocr takes processId itself now (it reads that window by itself: ocr-window-by-pid.test.ts); processName it does not.
+  it('system ocr with processName: refused, nothing read, and told how to read that one window', async () => {
+    const r = await system().handler({ action: 'ocr', processName: 'Terminal' } as any, ctx() as any);
     expect(reads.ocr).not.toHaveBeenCalled();
     expect(r.isError).toBe(true);
-    expect(r.text).toMatch(/system ocr NOT EXECUTED: it cannot be limited to one window by processId/);
+    expect(r.text).toMatch(/system ocr NOT EXECUTED: it cannot be limited to one window by processName/);
     expect(r.text).toContain('Nothing was read');
-    expect(r.text).toContain('window {"action":"focus","processId":48593}');
+    expect(r.text).toContain('window {"action":"focus","processName":"Terminal"}');
     expect(r.text).toContain('system {"action":"ocr","scope":"window"}');
     expect(classifyResult(r.text!, true, false)).toMatchObject({ outcome: 'failed', code: 'INVALID_ARGS' });
   });
 
-  it('the same for processName, title or windowId, and for copy_all_text', async () => {
-    for (const extra of [{ processName: 'Terminal' }, { title: 'notes' }, { windowId: 7 }]) {
+  it('the same for title or windowId, and for copy_all_text with processId', async () => {
+    for (const extra of [{ title: 'notes' }, { windowId: 7 }]) {
       const r = await system().handler({ action: 'ocr', scope: 'screen', ...extra } as any, ctx() as any);
       expect(r.text).toMatch(/NOT EXECUTED/);
     }

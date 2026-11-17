@@ -405,6 +405,19 @@ export async function assertScreenRecordingGranted(): Promise<void> {
  * by running capture in an isolated subprocess that exits immediately.
  */
 export async function captureScreenViaHelper(outputPath?: string): Promise<{ path: string; width: number; height: number }> {
+  return runScreenshotHelper('--fullscreen', outputPath);
+}
+
+/**
+ * One window by itself (`windowId`: its CGWindowID): ScreenCaptureKit's desktop-independent window filter on macOS 14+,
+ * CGWindowListCreateImage with that window only before. Its own pixels, not what covers it. A Retina image on 14+.
+ */
+export async function captureWindowViaHelper(windowId: number, outputPath?: string): Promise<{ path: string; width: number; height: number }> {
+  if (!Number.isInteger(windowId) || windowId <= 0) throw new Error(`screenshot-helper: not a window id: ${windowId}`);
+  return runScreenshotHelper(String(windowId), outputPath);
+}
+
+async function runScreenshotHelper(target: string, outputPath?: string): Promise<{ path: string; width: number; height: number }> {
   if (!IS_MACOS) {
     throw new Error('screenshot-helper is only available on macOS');
   }
@@ -417,7 +430,7 @@ export async function captureScreenViaHelper(outputPath?: string): Promise<{ pat
   return new Promise((resolve, reject) => {
     // A failed helper capture drops the cached grant: the fallback grab after it is checked afresh.
     const fail = (err: Error) => { screenRecordingConfirmed = false; reject(err); };
-    const proc = spawn(helperPath, ['--fullscreen', tmpPath]);
+    const proc = spawn(helperPath, [target, tmpPath]);
     let stdout = '';
     let stderr = '';
 
