@@ -48,6 +48,18 @@ keeps typing in another window, with the same success rate as today.
 
 No method moved the cursor or changed the user's text.
 
+### Canvas / viewport, 2026-11-17 (eval/own-window/probe-canvas-windows.ps1, live, "user" window in front)
+
+Full-method posted mouse (deepest child HWND, client lParam, WM_MOUSEACTIVATE/SETCURSOR/MOVE/LBUTTONDOWN/UP; drag = a stream of MK_LBUTTON moves). **No injection.**
+
+| App | Click | Drag | Stole focus | Moved cursor |
+|---|---|---|---|---|
+| A canvas that reads the message queue (our test WinForms Panel) | ✓ received + drawn | ✓ received + drawn | no | no |
+| MS Paint | ✗ no effect | ✗ no effect | no | no |
+| Siemens NX (ugraf.exe) | not driven (noted only; TODO: own empty part) | — | — | — |
+
+**Verdict:** a canvas that consumes window messages is fully background-drivable (clicks and drags, 0 steals). A real paint/CAD/game viewport that reads the live cursor (GetCursorPos) or raw/pointer input ignores posted mouse — so NX's 3D view, Paint and games need an **R2 burst** or the app's **API** (NX Open), not R1. This is the honest ceiling of messages-only background mouse; closing it further would need in-process hooking, which is deliberately not shipped.
+
 **Design consequences:**
 1. **R0 is not guaranteed to stay in the background.** UIA SetValue and Invoke took the foreground in Notepad, Edge and Calculator. So every act must check the foreground afterwards and give it back. "Give it back" needs the foreground-lock workaround (a key event from our process, then SetForegroundWindow); without it the probe could not restore its own user window.
 2. **On Windows, R1 means window messages:** WM_CHAR for text (works with shifted characters, unlike WM_KEYDOWN), WM_SETTEXT for whole edits, BM_CLICK for native buttons.
