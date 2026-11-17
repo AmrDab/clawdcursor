@@ -108,7 +108,7 @@ of the granular surface's ~19,000 - so small models (Haiku, Kimi, Ollama) stay f
 **I want to click something:**
 - By name? → `accessibility {"action":"invoke","name":"Send"}`. Most reliable.
 - By text via CDP on a web page? → `browser {"action":"click","text":"Submit"}`.
-- Name not found (the label is drawn, not exposed)? → `accessibility {"action":"smart_click","target":"Send"}`: finds the visible text by OCR and clicks it, no screenshot.
+- Name not found (the label is drawn, not exposed)? `invoke` presses the visible label itself (OCR, no screenshot); `accessibility {"action":"smart_click","target":"Send"}` does the same directly.
 - By screen coordinates? → `computer {"action":"click","x":500,"y":300}`, with x,y read off a `computer {"action":"screenshot"}`. Last resort: only for a target with no name and no visible text.
 
 **I want to type:**
@@ -483,7 +483,7 @@ Typing (`computer type`, `accessibility smart_type`) reads the field back: `Type
 | 401 Unauthorized (mid-session, unexpectedly) | The on-disk token at `~/.clawdcursor/token` was rotated by another clawdcursor process. `clawdcursor stop && clawdcursor agent` to start the HTTP MCP surface fresh, then re-read the token. |
 | Empty a11y tree on a *native-looking* app | It's probably **Electron or WebView2** - olk (New Outlook), Teams, Discord, Slack, VS Code, Notion, Obsidian all render inside Chromium. Call `system {"action":"detect_webview"}` to confirm, then `system {"action":"relaunch_with_cdp"}` to restart it on the debugging port clawdcursor expects (don't hand-pick a port — `connect` looks on a fixed port and a manual `--remote-debugging-port` will mismatch). Then attach via `browser {"action":"connect"}` and you get the full DOM. |
 | Empty a11y tree on a *truly* custom-canvas app | Real canvas apps (Paint, Figma, games). Read it with `system {"action":"copy_all_text"}` or `system {"action":"ocr"}` (text with bounds), click a visible label with `accessibility {"action":"smart_click","target":"<label>"}`, and take `computer {"action":"screenshot"}` + a coordinate click only for a target with no text. |
-| "Element not found" on invoke | The element isn't on-screen or has no a11y name. Read the tree first; if sparse, check `system {"action":"detect_webview"}`; if the label is visible, `accessibility {"action":"smart_click","target":"<label>"}` before any coordinate click. |
+| "Element not found" on invoke | No element has that name and no visible label matched it either (invoke already tried the label by OCR). Read the tree first; if sparse, check `system {"action":"detect_webview"}`; the target may be named differently from what you passed, so read the window for its real label before any coordinate click. |
 | Action runs but nothing happens | Wrong window has focus. `window {"action":"active"}` then `window {"action":"focus",...}` before retrying. `focus_window` force-raises through Windows' foreground lock — if it still doesn't work, the target is likely minimized in a different virtual desktop. |
 | Mouse clicks land in wrong place | Don't pre-scale. Positions from `read_tree` / `find` / `ocr` need `space:"screen"`; screenshot positions omit `space`. |
 | CDP not connecting | Browser not launched with remote debugging. Use `window {"action":"navigate","url":...}` (auto-enables it) - or for a running app already, `system {"action":"relaunch_with_cdp","appName":"..."}`. |

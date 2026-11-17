@@ -174,6 +174,10 @@ const RULES: Rule[] = [
     test: /no (?:open )?window (?:matching|named)|no (?:open )?window (?:or running app )?(?:matches|belongs to)|no window has a title containing|no window for that process|window not found|no window found for process|no matching window|failed to focus: no matching/i,
     hint: 'no such window; list the windows to see what is open',
     next: { mcp: 'window {"action":"list"}' } },
+  // The invoke already pressed the visible label itself (project-mcp.ts pressVisibleLabel) and found none: smart_click was just tried.
+  { code: 'NOT_FOUND', outcome: 'failed', whole: true,
+    test: /\binvoke\b[^\n]{0,80}missed — element not found[\s\S]*Its visible label was not found on screen either\./i,
+    hint: 'no element has that name and no visible label matches it; read the window to see what it calls things', next: REREAD },
   // An invoke that found no element of that name: the label may be drawn (canvas, image, custom UI) rather than exposed, and
   // smart_click finds text by OCR. The name is the one the caller gave; without it there is nothing concrete to put in the call.
   { code: 'NOT_FOUND', outcome: 'failed',

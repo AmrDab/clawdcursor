@@ -9,6 +9,10 @@ All notable changes to Clawd Cursor will be documented in this file.
   coordinates · S screenshots` (`smart_click` counts as by name or label). `clawdcursor logs --run` shows it in its header,
   and the run log's `end` line carries the same three counts.
 
+### Changed
+- **An invoke by a name the accessibility tree does not have presses the matching visible label itself** (OCR, no
+  screenshot), as `smart_click` does, instead of failing; it says so in the result. Not with `within`.
+
 ### Fixed
 - **`accessibility read_tree` / `read_screen` on the browser clawdcursor drives over CDP points at the browser tools**
   (#235). The hint after a thin read (and after a full read of that browser) now leads with `browser page_context` /

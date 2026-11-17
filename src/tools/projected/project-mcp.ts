@@ -7,6 +7,8 @@ import type { UnifiedTool, UnifiedToolResult, AgentToolContext } from './types';
 import type { ToolDefinition, ToolContext, ToolResult, ParameterDef } from '../types';
 import { TOOL_META } from './tool-meta';
 import { expectRefusal, checkExpect } from '../../core/sense/reactive-check';
+import { getSmartTools } from '../smart';
+import { quoteScreenText } from '../../core/untrusted-screen-content';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -123,6 +125,31 @@ export async function toolContextToAgent(ctx: ToolContext): Promise<AgentToolCon
 }
 
 /**
+ * Live 2026-11-17 (Siemens Designcenter): its ribbon buttons are not in the UIA tree, `invoke "Circle"` missed, and the agent
+ * clicked x,y off a screenshot instead of following the hint. So the tool takes the cheaper route itself: an invoke BY NAME
+ * that found no element of that name presses the visible label with smart_click (OCR, no image), guards and all. Not for an
+ * ambiguous miss, a `within` (OCR cannot honour it), an element_id, or a verb other than click.
+ */
+async function pressVisibleLabel(params: Record<string, unknown>, miss: UnifiedToolResult, ctx: ToolContext): Promise<UnifiedToolResult> {
+  const name = typeof params.name === 'string' ? params.name : '';
+  const within = typeof params.within === 'string' && params.within.trim();
+  if (miss.success || !name.trim() || within || params.element_id || params.snapshot_id) return miss;
+  if (params.action !== undefined && params.action !== 'click') return miss;
+  if (!/\binvoke\b[^\n]{0,80}missed — element not found/i.test(miss.text)) return miss;
+  const smart = getSmartTools().find(t => t.name === 'smart_click');
+  if (!smart) return miss;
+  const r = await smart.handler({ target: name, ...(typeof params.processId === 'number' ? { processId: params.processId } : {}) }, ctx);
+  if (!r.isError) {
+    return { success: true, targetLabel: miss.targetLabel,
+      text: `No element named ${quoteScreenText(name)} in the accessibility tree; pressed its visible label instead (OCR, no screenshot): ${r.text}` };
+  }
+  // smart_click's failure is a JSON payload; only a plain "no match" says the label is not on screen (not a locked screen or a timeout).
+  let error: unknown;
+  try { error = (JSON.parse(r.text) as { error?: unknown }).error; } catch { /* not JSON: keep the miss as it was */ }
+  return error === 'no_clickable_target' ? { ...miss, text: `${miss.text} Its visible label was not found on screen either.` } : miss;
+}
+
+/**
  * Convert a UnifiedToolResult to the ToolResult shape the MCP surface expects.
  *
  * - success=false maps to isError=true.
@@ -167,6 +194,7 @@ export function projectToToolDefinition(t: UnifiedTool): ToolDefinition {
     if (refusal) return { text: refusal, isError: true };
     const agentCtx = await toolContextToAgent(ctx);
     let result = await t.execute(params, agentCtx);
+    if (t.name === 'invoke_element') result = await pressVisibleLabel(params, result, ctx);
     const executed = result.success;
     const checked = await checkExpect(params.expect, result, agentCtx.platform);
     if (checked) result = { ...result, ...checked };
