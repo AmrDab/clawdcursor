@@ -130,6 +130,7 @@ describe('the pill drawn by a host app', () => {
     expect(calls.length).toBe(1);
     expect(hostCalls().length).toBe(0);
     if (process.platform === 'win32') expect(calls[0].args.join(' ')).toMatch(/banner\.ps1$/);
+    else if (process.platform === 'linux') expect(calls[0].args.slice(1)).toEqual(['pill']);   // python3 <script> pill
     else expect(calls[0].args).toEqual(['pill']);
     expect(calls[0].opts.stdio).toEqual(['pipe', 'pipe', 'ignore']);
     expect(warn).not.toHaveBeenCalled();
