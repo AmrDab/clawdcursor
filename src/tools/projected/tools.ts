@@ -19,6 +19,7 @@ import { ocrEngine } from '../../platform/ocr-engine';
 import { selectOption, selectedResult } from '../../platform/select-option';
 import { SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, SPARSE_NEXT_STEP, isSparseTree, CUT_VALUE_NEXT_STEP, cdpStepFor } from '../blind-hints';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
+import { wakeForNameSearch, onTopOfLine } from '../name-search-help';
 import { isBrowserProcess } from '../../platform/browser-config';
 import { agentBrowserConnectOptions, DEFAULT_CDP_PORT } from '../../platform/browser-config';
 import { parseAssertions, checkAssertions, renderReport, EXPECT_SCHEMA } from '../../core/verify/assertions';
@@ -34,7 +35,7 @@ import { timeWait } from '../../core/observability/steps';
 import { unguarded } from '../../platform/pointer-guard';
 import { preferControl, notSelectableReason, failReason, sameElement, inside, ensureInFront } from '../../platform/prefer-control';
 import { effectLine, windowChange, type WindowRead } from '../../core/effect';
-import { missText, untrusted, targetOf, targetText } from '../../core/miss-text';
+import { missText, structuredMissFields, untrusted, targetOf, targetText } from '../../core/miss-text';
 import { sleep } from '../../sleep';
 
 /** a11y_get_value returns a value whole up to this size (a long document, not a whole book). */
@@ -254,6 +255,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
         // Pure adapter-string retries → works on every OS with zero per-OS code,
         // and only the failing path pays the extra round-trips.
         const ladder: InvokeAction[] = action === 'click' ? ['click', 'select', 'toggle'] : [action];
+        await wakeForNameSearch(ctx.platform, processId);
         const { res, used } = await runActivationLadder(
           (a) => ctx.platform.invokeElement({ name, controlType, processId, action: a, value, within }), ladder);
         // Found but no pattern took: click the surfaced bounds centre (same
@@ -280,7 +282,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
                 ? `Invoked ${acted} (${used}) → value:\n${wrapUntrustedScreenContent(String((res.data as any).value ?? ''))}`
                 : `Invoked${expandReadBack(res.data) ? ' (read back ✓)' : ''} ${acted} via a11y${used !== 'click' ? ` (${used})` : ''}${expandNote(res.data)}.`
                   + (pending ? ' The action is still running — a dialog probably opened; re-read the screen before the next step.' : ''))
-            : `a11y invoke ${quoteScreenText(name)} missed — ${missText(res.data)}.`) + lateNote,
+            : `a11y invoke ${quoteScreenText(name)} missed — ${missText(res.data)}.${await onTopNote(ctx, res.data, processId)}`) + lateNote,
           targetLabel: name,
         };
       },
@@ -1691,6 +1693,14 @@ async function typeIntoField(
   else await ctx.platform.keyPress('Delete');
   await sleep(150);
   return 'typed';
+}
+
+/** The "another app's window is on top" line for a plain miss (not an ambiguous or hidden element), with its newline; else "". */
+async function onTopNote(ctx: AgentToolContext, miss: unknown, processId: number | undefined): Promise<string> {
+  const reason = structuredMissFields(miss).reason;
+  if (reason === 'ambiguous' || reason === 'hidden') return '';
+  const line = await onTopOfLine(ctx.platform, processId);
+  return line ? `\n${line}` : '';
 }
 
 /** macOS: " ⚠ …" when a modal dialog of another app had the keyboard during the keystrokes just sent, else "". */

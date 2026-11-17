@@ -23,6 +23,7 @@ import { locateFieldByLabel } from '../core/sense/ui-map-field';
 import { unguarded } from '../platform/pointer-guard';
 import { isGuardRefusal } from '../core/control';
 import { foreignWindowRefusal } from './click-owner';
+import { wakeForNameSearch } from './name-search-help';
 import { untrusted, missText, structuredMissFields, targetOf, targetText } from '../core/miss-text';
 
 
@@ -535,6 +536,7 @@ export function getSmartTools(): ToolDefinition[] {
         const a11yPromise: Promise<A11yHit | null> = (async (): Promise<A11yHit | null> => {
           if (emptyA11y) return null;
           try {
+            await wakeForNameSearch({ getActiveWindow: async () => activeWin }, processId);
             const aliases = KEY_NAME_ALIASES[target.trim().toLowerCase()] ?? [];
             // The Windows bridge THROWS on "not found" (others return a miss):
             // with key-name aliases to try, treat that as a miss, not the end.

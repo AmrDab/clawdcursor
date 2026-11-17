@@ -7,6 +7,12 @@
 import type { PlatformAdapter } from '../platform/types';
 import { quoteScreenText } from '../core/untrusted-screen-content';
 
+/** `"Title" (process, pid N)` for a window found at a point: the title is screen text, so quoted. */
+export function describeWindowAt(at: { processId: number; title?: string; processName?: string }): string {
+  const name = at.processName ? at.processName.replace(/[^\w .+-]/g, '').slice(0, 60) : 'unknown app';
+  return `${at.title ? quoteScreenText(at.title) : 'a window'} (${name}, pid ${at.processId})`;
+}
+
 /**
  * The refusal text when the window at (x, y) belongs to another process than `targetPid`, else null (go ahead).
  * `label` is what the point was matched by; `targetName` names the window the click was meant for.
@@ -22,7 +28,7 @@ export async function foreignWindowRefusal(
   const at = await platform.windowAtPoint(x, y).catch(() => null);
   if (!at || !at.processId || at.processId === targetPid) return null;
   const target = targetName || `process ${targetPid}`;
-  const what = [at.title ? quoteScreenText(at.title) : 'a window', `(${at.processName ? at.processName.replace(/[^\w .+-]/g, '').slice(0, 60) : 'unknown app'}, pid ${at.processId})`].join(' ');
+  const what = describeWindowAt(at);
   return `refused: the point ${quoteScreenText(label)} matched is in ${what}, which is on top of ${target} — nothing was clicked. `
     + `Bring ${target} to the front or close the dialog, then try again`;
 }
