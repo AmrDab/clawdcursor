@@ -75,6 +75,34 @@ describe('invoke by a name the tree does not have presses the visible label', ()
     expect(r.text).toMatch(/elements on screen match that name/);
   });
 
+  // Live 2026-11-17: `invoke "New"` in Designcenter matched two help-page lines that only CONTAIN "New"; the pixel next
+  // sent the agent to screenshots for the whole run. Nothing is named "New" there: press the visible label.
+  it('an ambiguous miss whose candidates only contain the name falls back like not found', async () => {
+    const partial = { success: false, data: { reason: 'ambiguous', candidates: [
+      { name: 'New to NX? Start with these videos', controlType: 'Text', container: { name: 'Discovery Center', controlType: 'Document' } },
+      { name: 'New to NX and ready to learn?', controlType: 'Text', container: { name: 'Discovery Center', controlType: 'Document' } },
+    ] } };
+    const r = await invoke({ name: 'New' }, partial);
+    expect(smartClick).toHaveBeenCalledTimes(1);
+    expect(smartClick.mock.calls[0][0]).toEqual({ target: 'New' });
+    expect(r.text).toMatch(/^No element named "New" in the accessibility tree; pressed its visible label instead/);
+  });
+
+  it('an ambiguous partial miss whose label is not on screen either keeps the ambiguous text', async () => {
+    smartClick.mockResolvedValue(SMART_MISS);
+    const partial = { success: false, data: { reason: 'ambiguous', inexact: true, candidates: [{ name: 'What\'s New', controlType: 'Button' }, { name: 'New tab', controlType: 'Button' }] } };
+    const r = await invoke({ name: 'New' }, partial);
+    expect(smartClick).toHaveBeenCalledTimes(1);
+    expect(r.text).not.toMatch(/not found on screen either/);
+    expect(r.text).toMatch(/no element is named exactly that|elements on screen match that name/);
+  });
+
+  it('an ambiguous miss is never answered with a pixel click: its next names the element', () => {
+    const line = renderResultLine(classifyResult('a11y invoke "Close" missed — 2 elements on screen match that name, nothing was done', true, true, 'mcp')!);
+    expect(line).toContain('accessibility {"action":"invoke"');
+    expect(line).not.toContain('"x":');
+  });
+
   it('no fallback for a verb other than click', async () => {
     const r = await invoke({ name: 'Circle', action: 'expand' });
     expect(smartClick).not.toHaveBeenCalled();

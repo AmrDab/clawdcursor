@@ -11,7 +11,9 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ### Changed
 - **An invoke by a name the accessibility tree does not have presses the matching visible label itself** (OCR, no
-  screenshot), as `smart_click` does, instead of failing; it says so in the result. Not with `within`.
+  screenshot), as `smart_click` does, instead of failing; it says so in the result. The same when every element it
+  matched only contains the name ("New to NX?" for "New"). Not with `within`. An ambiguous invoke's next step names the
+  element (controlType, within) instead of a coordinate click.
 
 ### Fixed
 - **`accessibility read_tree` / `read_screen` on the browser clawdcursor drives over CDP points at the browser tools**

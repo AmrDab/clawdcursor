@@ -165,8 +165,9 @@ const RULES: Rule[] = [
     hint: 'found, but not visible on screen — scroll it into view or open its container', next: REREAD },
   // Found more than once: which one is the caller's to say. The list is in the result.
   { code: 'AMBIGUOUS', outcome: 'failed', test: /elements on screen match that name, nothing was done|no element is named exactly that: .{0,60}nothing was done/i,
-    hint: 'several elements have that name, or none has it exactly; name the one you mean in full, pass within (its window or dialog) or controlType, or click its position',
-    next: { mcp: 'computer {"action":"click","x":<x>,"y":<y>,"space":"screen"} (a position inside the one you mean)' } },
+    hint: 'several elements have that name, or none has it exactly; name the one you mean in full, or pass within (its window or dialog) or controlType',
+    // By name, not by pixel (live 2026-11-17: a pixel next here sent the agent to screenshots for a whole CAD run).
+    next: { mcp: 'accessibility {"action":"invoke","name":"<its full name as listed>","controlType":"<its type as listed>"}' } },
   { code: 'ACTION_FAILED', outcome: 'failed', test: /missed — the action failed/i,
     hint: 'found, but the action failed', next: REREAD },
   // A window that is not there: list the windows, then focus one.
