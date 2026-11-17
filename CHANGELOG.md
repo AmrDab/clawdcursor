@@ -9,6 +9,11 @@ All notable changes to Clawd Cursor will be documented in this file.
   `tokens: 146 in · 24,343 out · 5,123,771 cached · $1.11`, and the same numbers are in the run log's `end` record and
   at the top of `clawdcursor logs --run`. Claude Code reports tokens and a cost; Codex and the API runners report
   tokens only (the cost is left out, not guessed). A run that reported nothing prints no line.
+- **A host app can draw the pill itself.** With `CLAWD_PILL_CMD` (a JSON array: the command and its arguments),
+  clawdcursor starts that command in place of its own pill, with the same arguments, environment and stdin/stdout lines;
+  if it cannot start, the built-in pill is used. `CLAWD_OWN_UI_PIDS` (comma-separated pids) names the host's processes
+  whose windows are clawdcursor's own controls, never a target. The outline stays built-in. With neither set, nothing
+  changes. The line protocol is in [docs/pill-host.md](docs/pill-host.md).
 
 ### Fixed
 - **`accessibility read_tree` / `read_screen` on the browser clawdcursor drives over CDP points at the browser tools**

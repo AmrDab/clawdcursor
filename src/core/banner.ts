@@ -37,9 +37,13 @@
  *     HTTP /mcp) where there is no task boundary to hook.
  *
  * Disable via `--no-banner` or CLAWD_NO_BANNER=1.
+ *
+ * A host app can draw the pill itself (docs/pill-host.md): CLAWD_PILL_CMD names its command, which gets the same args,
+ * environment and stdin/stdout lines as the built-in pill; CLAWD_OWN_UI_PIDS names the processes whose windows it is in.
  */
 
 import { execFileSync, spawn, type ChildProcess } from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
 import { psOpts, powershellExe } from '../platform/ps-spawn';
 import * as readline from 'readline';
@@ -50,12 +54,15 @@ import type { PauseAnswer, PauseInfo } from './pause-gate';
 import { publishOverlayState, foreignOverlayState } from './overlay-state';
 import { isStopped, workingIn, workingWindow } from './control';
 import { appLabel } from './app-label';
+import { logger } from './observability/logger';
 
 const IDLE_HIDE_MS = 30_000;
 /** How long the pill stays hidden around an agent's click, and how long to wait for it to be gone before clicking. */
 const DODGE_MS = 1_500;
 const DODGE_SETTLE_MS = 90;
 const PAUSED_OUTLINE = '#3b82f6'; // blue — "your turn"
+/** A host's pill that is gone this soon without a line on stdout never started: the built-in pill takes over. */
+const HOST_PILL_START_MS = 2_000;
 
 /**
  * Which form of the overlay to draw: running (default) or paused for the user. `activity` is what the running pill says
@@ -140,6 +147,41 @@ export const overlayEnv = (mode: OverlayMode, extra: NodeJS.ProcessEnv = {}): No
  *  pill apart from the running one (#237). The drawers read the env. */
 export const pillArgs = (mode: OverlayMode): string[] => (mode.paused ? ['--paused'] : []);
 
+/**
+ * CLAWD_PILL_CMD: the command of a host app that draws the pill itself, as a JSON array argv
+ * (`["C:\\node.exe","C:\\app\\pill-host.mjs"]`). Null when it is not a non-empty array of strings.
+ */
+export function parsePillCmd(raw: string | undefined): string[] | null {
+  try {
+    const v: unknown = JSON.parse(raw ?? '');
+    return Array.isArray(v) && v.length > 0 && v.every(a => typeof a === 'string') && v[0].trim() ? v as string[] : null;
+  } catch {
+    return null;
+  }
+}
+
+const pidList = (raw: string | undefined): number[] =>
+  (raw ?? '').split(',').map(p => p.trim()).filter(p => /^[1-9]\d{0,9}$/.test(p)).map(Number);
+/** The pids file as last read: read again at most once a second, and kept when a read fails (the host is rewriting it). */
+let pidsFile: { file: string; at: number; pids: number[] } | null = null;
+
+/**
+ * CLAWD_OWN_UI_PIDS: comma-separated pids of a host app's processes whose windows are clawdcursor's own UI (a hosted
+ * pill is a window of the host, not of the command clawdcursor spawned). Entries that are not a pid are ignored.
+ * CLAWD_OWN_UI_PIDS_FILE: a file with more of them in the same form, which the host may rewrite while clawdcursor
+ * runs (a web view's processes come and go; the environment is read once, at the start).
+ */
+export function hostUiPids(raw: string | undefined = process.env.CLAWD_OWN_UI_PIDS, file: string | undefined = process.env.CLAWD_OWN_UI_PIDS_FILE): number[] {
+  const named = pidList(raw);
+  if (!file) return named;
+  if (pidsFile?.file !== file || Date.now() - pidsFile.at >= 1000) {
+    let pids = pidsFile?.file === file ? pidsFile.pids : [];
+    try { pids = pidList(fs.readFileSync(file, 'utf8')); } catch { /* keep what was read last */ }
+    pidsFile = { file, at: Date.now(), pids };
+  }
+  return [...named, ...pidsFile.pids];
+}
+
 /** What the overlay shows right now (the control banner state). */
 export type OverlayState =
   | { mode: 'hidden' }
@@ -193,9 +235,29 @@ class ControlBanner {
   private paused: PauseInfo | null = null;
   private onAnswer: ((a: PauseAnswer, reply?: string, choice?: number) => void) | undefined;
   private onRefocus: ((pid?: number) => void) | undefined;
+  private hostPillOff = false;
+
+  /** The host's pill command (CLAWD_PILL_CMD), or null: not set, not valid, or it failed once in this process. */
+  private hostPill(): string[] | null {
+    const raw = process.env.CLAWD_PILL_CMD;
+    if (!raw || this.hostPillOff) return null;
+    const argv = parsePillCmd(raw);
+    if (!argv) this.dropHostPill('not a JSON array of strings');
+    return argv;
+  }
+
+  /** The host's pill cannot be used: say so once, and draw the built-in pill from here on. */
+  private dropHostPill(reason: string): void {
+    if (this.hostPillOff) return;
+    this.hostPillOff = true;
+    logger.warn('banner.host_pill_failed', { reason, fallback: 'built-in pill' });
+  }
+
   private spawner: Spawner = (mode) => {
     // stdin carries `HIDE <ms>` (dodge) to the pill; stdout carries its answers.
     const stdio: ['pipe', 'pipe', 'ignore'] = ['pipe', 'pipe', 'ignore'];
+    const host = this.hostPill();
+    if (host) return spawn(host[0], [...host.slice(1), ...pillArgs(mode)], { stdio, windowsHide: true, env: overlayEnv(mode) });
     if (process.platform === 'darwin') {
       return spawn(macOverlayBinary.cached(macScript())!, ['pill', ...pillArgs(mode)], { stdio, env: overlayEnv(mode) });
     }
@@ -280,9 +342,12 @@ class ControlBanner {
     return this.child !== null;
   }
 
-  /** Pids of the live overlay processes (pill, outline) — the user's controls, never a target (own-ui-guard.ts). */
+  /**
+   * Pids of the live overlay processes (pill, outline) — the user's controls, never a target (own-ui-guard.ts) — and of
+   * the host app that draws the pill, when it named itself (CLAWD_OWN_UI_PIDS).
+   */
   overlayPids(): number[] {
-    return [this.child?.pid, this.outlineChild?.pid].filter((p): p is number => typeof p === 'number');
+    return [this.child?.pid, this.outlineChild?.pid, ...hostUiPids()].filter((p): p is number => typeof p === 'number');
   }
 
   /** The overlay's current mode; a pending pause is 'paused' with its message. */
@@ -293,7 +358,8 @@ class ControlBanner {
 
   /** True when the overlay can be drawn here — the pause gate's precondition. */
   canShow(): boolean {
-    return this.enabled && this.ready();
+    // A host's pill needs none of the built-in drawer (the macOS compile, GTK on Linux); the outline still does.
+    return this.enabled && (this.hostPill() !== null || this.ready());
   }
 
   /**
@@ -407,6 +473,7 @@ class ControlBanner {
     if (this.child) return;
     let child: ChildProcess;
     let forPause: number | undefined;
+    const hosted = this.hostPill() !== null;
     try {
       child = this.spawner(this.paused
         ? { paused: this.paused, app: appLabel(workingIn()?.processName, workingIn()?.appName) }
@@ -416,16 +483,20 @@ class ControlBanner {
       // 'exit'); a pill from an earlier pause can never answer a newer one.
       forPause = this.paused?.id;
     } catch {
+      if (hosted) this.builtInPill('the command could not be started');
       return; // cosmetic feature — never let it break control
     }
     this.child = child;
     this.publish();
+    const started = Date.now();
+    let spoke = false;
     // A write to a pill that already exited is EPIPE on this stream — never an uncaught error.
     child.stdin?.on?.('error', () => { /* the pill is gone */ });
     if (child.stdout) {
       const rl = readline.createInterface({ input: child.stdout });
       rl.on('line', line => {
         const msg = line.trim();
+        spoke = true;
         try {
           if (msg === 'BANNER_STOP') { this.onStopRequested?.(); return; }
           if (forPause === undefined || this.paused?.id !== forPause) return;
@@ -440,15 +511,34 @@ class ControlBanner {
         } catch { /* never throw into the rl loop */ }
       });
     }
-    child.on('error', () => { if (this.child === child) { this.child = null; this.publish(); } });
+    child.on('error', () => {
+      if (this.child !== child) return;
+      this.child = null;
+      if (hosted) this.builtInPill('the command could not be started');
+      else this.publish();
+    });
     // If the pill dies, take the outline down with it so the two never desync
     // into a half-on state (outline without the stop affordance).
-    child.on('exit', () => { if (this.child === child) { this.child = null; this.killOutline(); } });
+    child.on('exit', () => {
+      if (this.child !== child) return;
+      this.child = null;
+      if (hosted && !spoke && Date.now() - started < HOST_PILL_START_MS) this.builtInPill('the command exited at once');
+      else this.killOutline();
+    });
+  }
+
+  /** The host's pill did not start, while the overlay is wanted: the built-in pill takes its place. */
+  private builtInPill(reason: string): void {
+    this.dropHostPill(reason);
+    this.show();
+    if (!this.child) this.killOutline(); // not drawable here either (or not yet): no outline without its pill
   }
 
   /** The border around the agent's window — pure visual, click-through, no stdout. It starts with no window. */
   private spawnOutline(): void {
     if (this.outlineChild) return;
+    // Beside a host's pill the outline is still the built-in drawer's: without that drawer, the pill shows alone.
+    if (!this.ready()) return;
     let child: ChildProcess;
     try {
       child = this.outlineSpawner({ paused: this.paused ?? undefined });
@@ -529,6 +619,7 @@ class ControlBanner {
     this.capturable = process.platform === 'linux';
     this.holds = 0;
     this.idleWhileHeld = false;
+    this.hostPillOff = false;
   }
 }
 
