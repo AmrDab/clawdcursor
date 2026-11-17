@@ -94,7 +94,7 @@ const manifest = {
   long_description: [
     'clawdcursor gives Claude hands on your desktop. It reads the screen through the accessibility tree first (fast and exact), falls back to OCR, and uses screenshots only when it must — then clicks, types, manages windows and drives your browser.',
     '',
-    '**Control stays yours:** a pill and a soft glow along the screen edges show while an agent is in control, and Stop on the pill halts every action until you resume. Key combos that lock the computer or end your session are never sent, and the agent never types into an AI assistant window by accident. What the agent does is up to the agent and your approval prompts in Claude: clawdcursor carries out what it is asked, with your user rights.',
+    '**Control stays yours:** a pill and an outline around the window being worked in show while an agent is in control, and Stop on the pill halts every action until you resume. Key combos that lock the computer or end your session are never sent, and the agent never types into an AI assistant window by accident. What the agent does is up to the agent and your approval prompts in Claude: clawdcursor carries out what it is asked, with your user rights.',
     '',
     '**Error reports:** from 2.1, clawdcursor sends anonymous error reports by default, so bugs get found and fixed. Every value is a number or comes from a fixed list; typed text, the clipboard, screen text, screenshots, window titles and app names are never sent. `clawdcursor telemetry` shows exactly what is sent, and `clawdcursor optout` turns them off.',
     '',

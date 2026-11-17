@@ -75,7 +75,7 @@ jobs:
             swiftc -O "$f" -o "$RUNNER_TEMP/$(basename "$f" .swift)" || exit 1
           done
 
-      # The Linux overlay (pill, pause card and glow) runs under python3 on the user's desktop: a syntax error there
+      # The Linux overlay (pill, pause card and outline) runs under python3 on the user's desktop: a syntax error there
       # fails its --probe, and the pill and pauses silently go. GTK needs a display, so it is only syntax-checked here.
       - name: Syntax-check the Linux overlay
         if: runner.os == 'Linux'

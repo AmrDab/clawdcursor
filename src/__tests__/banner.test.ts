@@ -6,17 +6,17 @@
  *   - touch while pinned never schedules a hide
  *   - BANNER_STOP on the child's stdout fires onStopRequested
  *   - disabled state spawns nothing
- *   - the screen-edge glow rides the same lifecycle as the pill and dies with it;
- *     it is told nothing while it runs (HIDE only, for a capture), is blue when paused,
- *     and CLAWD_NO_GLOW leaves the pill alone
+ *   - the window outline rides the same lifecycle as the pill and dies with it;
+ *     it is told which window the agent works in, and draws nothing without one
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
-import { controlBanner, glowFlags } from '../core/banner';
-import { stopControl, __setControlDirForTests } from '../core/control';
+import { controlBanner, outlineFlags } from '../core/banner';
+import { stopControl, __setControlDirForTests, __setForegroundReaderForTests } from '../core/control';
+import { guardInputMethods } from '../platform/pointer-guard';
 import type { ChildProcess } from 'child_process';
-import { existsSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -34,12 +34,12 @@ class FakeChild extends EventEmitter {
 }
 
 let spawned: FakeChild[];      // pill processes
-let glows: FakeChild[];        // edge-glow processes
+let outlines: FakeChild[];     // window-outline processes
 
 beforeEach(() => {
   vi.useFakeTimers();
   spawned = [];
-  glows = [];
+  outlines = [];
   controlBanner.__resetForTests();
   controlBanner.__setPlatformEnabledForTests(true);
   controlBanner.__setSpawnerForTests(() => {
@@ -47,9 +47,9 @@ beforeEach(() => {
     spawned.push(c);
     return c as unknown as ChildProcess;
   });
-  controlBanner.__setGlowSpawnerForTests(() => {
+  controlBanner.__setOutlineSpawnerForTests(() => {
     const c = new FakeChild();
-    glows.push(c);
+    outlines.push(c);
     return c as unknown as ChildProcess;
   });
 });
@@ -60,15 +60,15 @@ afterEach(() => {
 });
 
 describe('controlBanner', () => {
-  it('pin shows exactly one pill + one glow; repeated pins are idempotent; unpin kills both', () => {
+  it('pin shows exactly one pill + one outline; repeated pins are idempotent; unpin kills both', () => {
     controlBanner.pin();
     controlBanner.pin();
     expect(spawned.length).toBe(1);
-    expect(glows.length).toBe(1);
+    expect(outlines.length).toBe(1);
     expect(controlBanner.isVisible()).toBe(true);
     controlBanner.unpin();
     expect(spawned[0].killed).toBe(true);
-    expect(glows[0].killed).toBe(true);
+    expect(outlines[0].killed).toBe(true);
     expect(controlBanner.isVisible()).toBe(false);
   });
 
@@ -151,7 +151,7 @@ describe('controlBanner', () => {
     controlBanner.pin();
     controlBanner.touch();
     expect(spawned.length).toBe(0);
-    expect(glows.length).toBe(0);
+    expect(outlines.length).toBe(0);
     expect(controlBanner.isVisible()).toBe(false);
   });
 
@@ -161,103 +161,119 @@ describe('controlBanner', () => {
     expect(controlBanner.isVisible()).toBe(false);
   });
 
-  it('when the pill exits, the glow is torn down too (never desync)', () => {
+  it('when the pill exits, the outline is torn down too (never desync)', () => {
     controlBanner.pin();
-    expect(glows.length).toBe(1);
+    expect(outlines.length).toBe(1);
     spawned[0].emit('exit', 0);          // pill dies on its own
-    expect(glows[0].killed).toBe(true);
+    expect(outlines[0].killed).toBe(true);
   });
 
-  it('on a non-Windows platform nothing spawns — pill OR glow (OS-safe no-op)', () => {
+  it('on a non-Windows platform nothing spawns — pill OR outline (OS-safe no-op)', () => {
     controlBanner.__setPlatformEnabledForTests(false); // simulate macOS/Linux runtime
     controlBanner.pin();
     controlBanner.touch();
     expect(spawned.length).toBe(0);
-    expect(glows.length).toBe(0);
+    expect(outlines.length).toBe(0);
     expect(controlBanner.isVisible()).toBe(false);
   });
 });
 
-describe('the screen-edge glow', () => {
-  const live = () => glows.filter(o => !o.killed);
+describe('the outline around the window the agent works in', () => {
+  const live = () => outlines.filter(o => !o.killed);
 
-  it('is told nothing while it runs: it is on for as long as the pill is, over the whole screen', () => {
+  it('with no window known the outline is told nothing: it draws nothing, the pill alone shows control', () => {
     controlBanner.pin();
-    expect(glows[0].written).toEqual([]);
+    expect(outlines[0].written).toEqual([]);
   });
 
-  it('the paused glow is spawned paused and blue on every OS; the running one amber (the default), with no colour flag', () => {
+  it('is told the working window, told again when it changes, and never the same window twice', () => {
+    controlBanner.pin();
+    controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
+    controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
+    controlBanner.setWorkingWindow({ processId: 300, handle: 0x7b2 });
+    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300']);
+  });
+
+  it('is told when there is no window any more, so it hides', () => {
+    controlBanner.pin();
+    controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
+    controlBanner.setWorkingWindow(undefined);
+    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET']);
+  });
+
+  it('the paused outline is spawned paused and blue on every OS; the running one with no flags (#392)', () => {
     const modes: unknown[] = [];
-    controlBanner.__setGlowSpawnerForTests(mode => { modes.push(mode); const c = new FakeChild(); glows.push(c); return c as unknown as ChildProcess; });
+    controlBanner.__setOutlineSpawnerForTests(mode => { modes.push(mode); const c = new FakeChild(); outlines.push(c); return c as unknown as ChildProcess; });
     controlBanner.pin();
     controlBanner.showPaused({ id: 1, message: 'Sign in', since: 0 }, () => {});
     expect(modes).toEqual([{ paused: undefined }, { paused: expect.objectContaining({ id: 1 }) }]);
-    expect(glows[0].killed).toBe(true);
-    expect(live()).toHaveLength(1);
-    for (const os of ['win32', 'darwin', 'linux'] as const) expect(glowFlags(false, os)).toEqual([]);
-    expect(glowFlags(true, 'win32')).toEqual(['-Color', '#3b82f6']);
-    expect(glowFlags(true, 'darwin')).toEqual(['--color', '#3b82f6']);
-    expect(glowFlags(true, 'linux')).toEqual(['--color', '#3b82f6']);
+    for (const os of ['win32', 'darwin', 'linux'] as const) expect(outlineFlags(false, os)).toEqual([]);
+    expect(outlineFlags(true, 'win32')).toEqual(['-Color', '#3b82f6', '-Paused']);
+    expect(outlineFlags(true, 'darwin')).toEqual(['--color', '#3b82f6', '--paused']);
+    expect(outlineFlags(true, 'linux')).toEqual(['--color', '#3b82f6', '--paused']);
   });
 
-  it('on Windows it is told the pill\'s pid, so it can stay under it; elsewhere not', () => {
-    expect(glowFlags(false, 'win32', 4321)).toEqual(['-PillPid', '4321']);
-    expect(glowFlags(true, 'win32', 4321)).toEqual(['-Color', '#3b82f6', '-PillPid', '4321']);
-    expect(glowFlags(false, 'win32')).toEqual([]);
-    expect(glowFlags(false, 'darwin', 4321)).toEqual([]);
-    expect(glowFlags(true, 'linux', 4321)).toEqual(['--color', '#3b82f6']);
-  });
-
-  it('CLAWD_NO_GLOW leaves the pill alone: no glow is spawned', () => {
-    controlBanner.__setGlowEnabledForTests(false);
+  it('a window known only by its process (macOS) is sent with handle 0', () => {
     controlBanner.pin();
-    expect(spawned).toHaveLength(1);
-    expect(glows).toHaveLength(0);
+    controlBanner.setWorkingWindow({ processId: 100 });
+    expect(outlines[0].written).toEqual(['TARGET 0 100']);
   });
 
-  it('the idle hide takes it down with the pill; the next touch brings both back', () => {
-    controlBanner.touch();
-    expect(glows).toHaveLength(1);
-    vi.advanceTimersByTime(30_001);
-    expect(live()).toEqual([]);
-    expect(controlBanner.isVisible()).toBe(false);
-    controlBanner.touch();
-    expect(live()).toHaveLength(1);
+  it('a new outline process (the paused form) starts on the window the agent was working in', () => {
+    controlBanner.pin();
+    controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
+    controlBanner.showPaused({ id: 1, message: 'Sign in', since: 0 }, () => {});
+    expect(outlines[0].killed).toBe(true);
+    expect(live()[0].written).toEqual(['TARGET 1440 100']);
   });
 
-  it('a capture step-aside (Linux) hides the glow as well as the pill; a click dodge leaves the click-through glow', async () => {
+  it('a pause after the idle hide goes round the window the card names, not nothing', async () => {
+    // The idle hide forgets the outline's window; the card still names the app the agent last worked in (control.ts).
+    __setForegroundReaderForTests(async () => ({ processId: 100, processName: 'msedge', title: 'Inbox - Edge', handle: 0x5a0 }));
+    try {
+      controlBanner.touch();
+      await guardInputMethods({ async keyPress(_k: string) {} }).keyPress('a');
+      vi.advanceTimersByTime(30_001);   // the idle hide
+      expect(live()).toEqual([]);
+      controlBanner.showPaused({ id: 1, message: 'Sign in', since: 0 }, () => {});
+      expect(live()[0].written).toEqual(['TARGET 1440 100']);
+    } finally {
+      __setForegroundReaderForTests(null);
+    }
+  });
+
+  it('the next session does not open on the last one\'s window', () => {
+    controlBanner.pin();
+    controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
+    controlBanner.unpin();
+    controlBanner.pin();
+    expect(live()[0].written).toEqual([]);
+  });
+
+  it('a capture step-aside (Linux) hides the outline as well as the pill; a click dodge leaves the click-through outline', async () => {
     vi.useRealTimers();
     controlBanner.pin();
     await controlBanner.dodge();
-    expect(glows[0].written).toEqual([]);
+    expect(outlines[0].written).toEqual([]);
     await controlBanner.dodge(1500, true);
     expect(spawned[0].written).toEqual(['HIDE 1500', 'HIDE 1500']);
-    expect(glows[0].written).toEqual(['HIDE 1500']);
-  });
-
-  it('Linux: a glow that says GLOW_READY has the pill hide for a moment, so the pill comes back above it', async () => {
-    vi.useRealTimers();
-    controlBanner.pin();
-    expect(spawned[0].written).toEqual([]);
-    glows[0].stdout.write('GLOW_READY\n');
-    await new Promise(r => setImmediate(r));
-    expect(spawned[0].written).toEqual(['HIDE 50']);
+    expect(outlines[0].written).toEqual(['HIDE 1500']);
   });
 });
 
 describe('captures where the OS cannot keep the overlay out', () => {
-  it('a glow that says GLOW_CAPTURABLE (Windows 10 before 2004) steps aside with the pill before a capture', async () => {
+  it('an outline that says OUTLINE_CAPTURABLE (Windows 10 before 2004) steps aside with the pill before a capture', async () => {
     vi.useRealTimers();
     controlBanner.pin();
     if (process.platform !== 'linux') {
       await controlBanner.beforeCapture();
-      expect(glows[0].written).toEqual([]);   // excluded by the OS: nothing to hide
+      expect(outlines[0].written).toEqual([]);   // excluded by the OS: nothing to hide
     }
-    glows[0].stdout.write('GLOW_CAPTURABLE\n');
+    outlines[0].stdout.write('OUTLINE_CAPTURABLE\n');
     await new Promise(r => setImmediate(r));
     await controlBanner.beforeCapture();
     expect(spawned[0].written).toEqual(['HIDE 1500']);
-    expect(glows[0].written).toEqual(['HIDE 1500']);
+    expect(outlines[0].written).toEqual(['HIDE 1500']);
   });
 });
 
@@ -265,7 +281,7 @@ describe('captures where the OS cannot keep the overlay out', () => {
 describe('no overlay outlives its parent', () => {
   const read = (...p: string[]) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', ...p), 'utf8');
   it('every drawer exits on stdin EOF, the pill included', () => {
-    for (const ps of [read('banner.ps1'), read('edge-glow.ps1')]) {
+    for (const ps of [read('banner.ps1'), read('window-outline.ps1')]) {
       expect(ps).toMatch(/while \(\(line = Console\.In\.ReadLine\(\)\) != null\) \{[\s\S]*?\n {16}\}\n {16}Environment\.Exit\(0\);/);
     }
     expect(read('mac', 'overlay.swift')).toMatch(/if data\.isEmpty \{[^}]*NSApp\.terminate\(nil\)/);
@@ -316,10 +332,19 @@ describe('the macOS pause card takes the keyboard for an answer', () => {
   });
 });
 
-// The drawers put real windows on screen, so these read the source.
-describe('the glow drawers', () => {
+// The drawers put real windows on screen, so these read the source: nothing draws on a whole screen any more.
+describe('no full-screen glow', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
   const read = (...p: string[]) => readFileSync(join(root, ...p), 'utf8');
+
+  it('no outline drawer sizes a window to a screen', () => {
+    expect(read('scripts', 'window-outline.ps1')).not.toMatch(/AllScreens|PrimaryScreen|\.Bounds\b/);
+    const swift = read('scripts', 'mac', 'overlay.swift');
+    expect(swift.slice(swift.indexOf('func windowOutline()'))).not.toMatch(/screen\.frame|NSScreen\.screens/);
+    const py = read('scripts', 'linux', 'overlay.py');
+    const start = py.indexOf('def run_outline(');
+    expect(py.slice(start, py.indexOf('\ndef ', start + 1))).not.toMatch(/get_monitor|get_n_monitors/);
+  });
 
   it('the pill\'s orb is still where the OS is set to reduce motion (#392)', () => {
     expect(read('scripts', 'banner.ps1')).toContain('if (SystemParametersInfo(0x1042, 0, out animate, 0) && !animate) return;');
@@ -327,55 +352,66 @@ describe('the glow drawers', () => {
     expect(swift).toContain('if window == nil || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return }');
   });
 
-  it('the window outline and its TARGET protocol are gone from every drawer', () => {
-    expect(existsSync(join(root, 'scripts', 'window-outline.ps1'))).toBe(false);
-    for (const src of [read('src', 'core', 'banner.ts'), read('scripts', 'mac', 'overlay.swift'), read('scripts', 'linux', 'overlay.py')]) {
-      expect(src).not.toMatch(/window-outline|TARGET|OUTLINE_CAPTURABLE|windowOutline|run_outline/);
-    }
-  });
-
-  it('the macOS glow is 1.5.23\'s: amber (blue when paused), pulsing, every display, click-through, above apps, under the pill, not captured', () => {
+  it('the macOS outline is the 2.0 border: 3 pt inside the agent\'s window, amber (blue when paused), still, click-through, under the pill', () => {
     const swift = read('scripts', 'mac', 'overlay.swift');
-    const glow = swift.slice(swift.indexOf('func glow()'));
-    expect(glow).toContain('option("--color", "#f59e0b")');
-    expect(glow).toContain('option("--thickness", "80")');
-    expect(glow).toContain('for screen in NSScreen.screens');
-    expect(glow).toContain('CABasicAnimation(keyPath: "opacity")');
-    expect(glow).toContain('win.ignoresMouseEvents = true');
-    expect(glow).toContain('win.level = .statusBar');
-    expect(glow).toContain('win.sharingType = .none');
-    expect(glow).toContain('listenForCommands()');   // its stdin: the EOF ends it
-    expect(swift).toContain('panel.level = .screenSaver');   // the pill's level is above .statusBar
+    const outline = swift.slice(swift.indexOf('func windowOutline()'));
+    expect(outline).toContain('view.layer?.borderColor = hexColor(option("--color", "#f59e0b")).cgColor');
+    expect(outline).toContain('view.layer?.borderWidth = 3');
+    expect(outline).toContain('win.ignoresMouseEvents = true');
+    expect(outline).toContain('win.level = .floating');
+    expect(outline).toContain('win.sharingType = .none');
+    expect(swift).toContain('panel.level = .screenSaver');
+    // Drawn once: no beam layers and nothing animated.
+    expect(outline).not.toMatch(/CAShapeLayer|CAGradientLayer|CABasicAnimation|CAKeyframeAnimation|lineDashPhase/);
   });
 
-  it('the Windows glow is click-through, never activates, stays out of captures, and sits under the pill', () => {
-    const ps = read('scripts', 'edge-glow.ps1');
+  it('the macOS outline goes only round a window of the app in front that is on screen and can be seen', () => {
+    const swift = read('scripts', 'mac', 'overlay.swift');
+    const find = swift.slice(swift.indexOf('func targetFrame()'), swift.indexOf('func windowOutline()'));
+    expect(find).toContain('NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(targetPid)');
+    expect(find).toContain('CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)');
+    expect(find).toContain('((w[kCGWindowAlpha as String] as? Double) ?? 1) > 0.01');
+    expect(find).toContain('rect.width >= 40, rect.height >= 40 else { continue }');
+    // No stand-in: with no such window nothing is drawn (the pill alone shows control).
+    expect(find).not.toMatch(/mouseLocation|visibleFrame|pointerScreen/);
+    expect(swift).toMatch(/line == "TARGET" \|\| line\.hasPrefix\("TARGET "\)/);
+  });
+
+  it('the Windows outline is click-through, never activates, and stays out of captures', () => {
+    const ps = read('scripts', 'window-outline.ps1');
     for (const style of ['0x00080000', '0x00000020', '0x08000000', '0x00000080', '0x00000008']) expect(ps).toContain(style);
     expect(ps).toContain('SetWindowDisplayAffinity(Handle, 0x11)');
-    expect(ps).toContain('Console.Out.WriteLine("GLOW_CAPTURABLE")');
-    // Physical pixels on every monitor (per-monitor-v2), the depth scaled by each monitor's DPI.
-    expect(ps).toContain('SetThreadDpiAwarenessContext(new IntPtr(-4))');
-    expect(ps).toContain('EnumDisplayMonitors');
-    expect(ps).toContain('thickness * m[4] / 96.0');
-    // Directly under the pill's lowest window, not over it.
-    expect(ps).toContain('SetWindowPos(f.Handle, pill, 0, 0, 0, 0, 0x13)');
-    // HIDE acts on receipt, not on the next tick (a capture follows HIDE after 90 ms); a byte-order mark does not lose it.
-    expect(ps).toContain('first.BeginInvoke(update)');
+    // Where the frame is, and where the border goes, are physical pixels on every monitor (per-monitor-v2).
+    expect(ps).toContain('SetThreadDpiAwarenessContext([IntPtr](-4))');
+    // Re-placed only when it moved or is no longer above its window (walking up the z-order), never on every poll.
+    expect(ps).toContain('if (placed && !moved) return;');
+    // TARGET and HIDE act on receipt, not on the next poll: a capture follows HIDE after 90 ms.
+    expect(ps).toContain('BeginInvoke((Action)Follow)');
+    // A byte-order mark in front of the first line (a .NET parent) does not lose the command.
+    expect(ps).toContain('p[0].EndsWith("TARGET")');
     expect(ps).toContain('p[0].EndsWith("HIDE")');
-    // Amber by default, 1.5.23's depth, alpha and period.
-    expect(ps).toContain("[string]$Color       = '#f59e0b'");
-    expect(ps).toContain('[int]   $Thickness   = 80,');
-    expect(ps).toContain('[int]   $PeakAlpha   = 200,');
-    expect(ps).toContain('[int]   $PeriodMs    = 1600,');
   });
 
-  it('the Linux glow covers every monitor, is click-through, and steps aside on HIDE', () => {
-    const py = read('scripts', 'linux', 'overlay.py');
-    const glow = py.slice(py.indexOf('def run_glow('), py.indexOf('\ndef main('));
-    expect(glow).toContain('display.get_n_monitors()');
-    expect(glow).toContain('win.input_shape_combine_region(cairo.Region())');
-    expect(glow).toContain("emit('GLOW_READY')");
-    expect(glow).toContain("parts[0] == 'HIDE'");
-    expect(py).toContain("opt('--color', '#f59e0b')");
+  it('the Windows outline is the thin border of 2.0.0: solid, opaque, 3 px at 100%, hollow, rounded like the window', () => {
+    const ps = read('scripts', 'window-outline.ps1');
+    expect(ps).toContain("[string]$Color     = '#f59e0b'");
+    expect(ps).toContain('[int]   $Thickness = 3,');
+    // The paused form's flag is a parameter of its own: the drawer does not depend on it landing in $args.
+    expect(ps).toContain('[switch]$Paused');
+    expect(ps).toContain('SetLayeredWindowAttributes(Handle, 0, 255, 2)');
+    expect(ps).toContain('int b = Math.Max(2, (int)Math.Round(thickness * dpi / 96.0));');
+    expect(ps).toContain('CombineRgn(frame, frame, hole, 4)');
+    // Nothing of the beam: no per-pixel strips, no monitor frame for the desktop, no window title for the pill to find.
+    expect(ps).not.toMatch(/UpdateLayeredWindow|BeamStrip|EnumDisplayMonitors|CLAWD_PILL_PID|IsDesktop|clawdcursor beam/);
+    expect(read('scripts', 'banner.ps1')).not.toMatch(/clawdcursor beam|Raise\(\)/);
+  });
+
+  // A window can be the one in front while Windows shows nothing of it (hidden, or cloaked on another virtual desktop),
+  // and its frame bounds still read as if it were there: the outline then framed empty space.
+  it('the Windows outline goes round no window that Windows does not show, even the one in front', () => {
+    const ps = read('scripts', 'window-outline.ps1');
+    expect(ps).toContain('static extern bool IsWindowVisible(IntPtr hWnd);');
+    expect(ps).toMatch(/GetForegroundWindow\(\) == t && !IsIconic\(t\) && IsWindowVisible\(t\)/);
+    expect(ps).toContain('(DwmGetWindowAttribute(t, 14, out cloaked, 4) != 0 || cloaked == 0)');   // DWMWA_CLOAKED
   });
 });

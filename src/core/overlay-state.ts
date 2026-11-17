@@ -1,5 +1,5 @@
 /**
- * Every clawdcursor process publishes its overlay (pill / glow pids, and whether a pause is up) so the OTHERS honour it: the
+ * Every clawdcursor process publishes its overlay (pill / outline pids, and whether a pause is up) so the OTHERS honour it: the
  * daemon's pause prompt is the user's even to a separate stdio MCP server, which has no pids or pause of its own (review of
  * the own-UI guard, 2026-10-24). One file per process — `<DATA_DIR>/overlay/<pid>.json` — so writers never race; a file
  * whose writer has exited is ignored.

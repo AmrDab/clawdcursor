@@ -110,7 +110,7 @@ let movedAt = 0;
 /** The window the agent last acted in: an input, or an act by name on the window in front. A new read each time. */
 let acted: Foreground | undefined;
 /**
- * The window the pill names: the one the agent's last input, or act by name on the window in
+ * The window the outline goes around and the pill names: the one the agent's last input, or act by name on the window in
  * front, went to, or the one it focused or opened since. Not the lease: an act by name does not take the foreground, so it must not change what input is refused.
  */
 let working: Foreground | undefined;
@@ -325,15 +325,20 @@ export function workingIn(): { processName: string; appName?: string } | undefin
   return working;
 }
 
+/** The window the agent's last input or act by name went to (the outline goes around it), or undefined before the first one. */
+export function workingWindow(): { processId: number; handle?: number | string } | undefined {
+  return working && { processId: working.processId, handle: working.handle };
+}
+
 /** After the input: no read. A focus-moving one opens the window in which a new window in front is the agent's own doing. */
 function done(movesFocus: boolean): void {
   if (movesFocus) movedAt = Date.now();
 }
 
 /**
- * The window the agent just focused or opened is where it works now: the pill goes to it once it is in
- * front, with no act needed (macOS eval 2026-11-10: after open_app or window focus the pill kept naming the previous app
- * through every read that followed). Only `working` moves: the lease, and what the next input is refused for,
+ * The window the agent just focused or opened is where it works now: the outline and the pill go to it once it is in
+ * front, with no act needed (macOS eval 2026-11-10: after open_app or window focus the outline stayed on the previous app,
+ * hidden, through every read that followed). Only `working` moves: the lease, and what the next input is refused for,
  * are still decided by before().
  */
 async function arrived(): Promise<void> {
