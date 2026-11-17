@@ -166,7 +166,10 @@ export function projectToToolDefinition(t: UnifiedTool): ToolDefinition {
     const refusal = expectRefusal(params.expect);
     if (refusal) return { text: refusal, isError: true };
     const agentCtx = await toolContextToAgent(ctx);
+    agentCtx.platform.takeRouteNote?.();   // a note left by an earlier call is not this call's
     let result = await t.execute(params, agentCtx);
+    const route = agentCtx.platform.takeRouteNote?.();
+    if (route) result = { ...result, text: `${result.text} (${route})` };
     const executed = result.success;
     const checked = await checkExpect(params.expect, result, agentCtx.platform);
     if (checked) result = { ...result, ...checked };

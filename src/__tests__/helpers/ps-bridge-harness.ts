@@ -86,6 +86,28 @@ public static class Win32UIA {
   public static IntPtr SendMessageTimeout(IntPtr h, uint msg, IntPtr w, IntPtr l, uint f, uint ms, out IntPtr res) {
     res = IntPtr.Zero; Log("SendMessageTimeout " + h + " " + msg + " " + w + " " + l); return new IntPtr(1); }
 }
+// Stand-in for the bridge's ClawdMsg (window messages, the Alt key event, idle time): records into Win32UIA.Calls.
+public static class ClawdMsg {
+  public static Dictionary<long, long[]> Kids = new Dictionary<long, long[]>();
+  public static Dictionary<long, string> Classes = new Dictionary<long, string>();
+  public static Dictionary<long, long> Styles = new Dictionary<long, long>();
+  public static Dictionary<long, string> Texts = new Dictionary<long, string>();
+  public static int PostError;                 // what Post / SetText answer (0 = delivered)
+  public static bool PostsType = true;         // a delivered WM_CHAR is appended to the control's text
+  public static long LastInputTick, IdleMs;
+  public static void Reset() { Kids.Clear(); Classes.Clear(); Styles.Clear(); Texts.Clear(); PostError = 0; PostsType = true; LastInputTick = 1000; IdleMs = 5000; }
+  public static void AltTap() { Win32UIA.Calls.Add("AltTap"); }
+  public static long[] Idle() { return new long[] { LastInputTick, IdleMs }; }
+  public static long[] Children(long root) { long[] k; return Kids.TryGetValue(root, out k) ? k : new long[0]; }
+  public static string Cls(long h) { string c; return Classes.TryGetValue(h, out c) ? c : ""; }
+  public static long Style(long h) { long v; return Styles.TryGetValue(h, out v) ? v : 0x10000000; }   // WS_VISIBLE
+  public static string Text(long h) { string t; return Texts.TryGetValue(h, out t) ? t : ""; }
+  public static int SetText(long h, string s) { Win32UIA.Calls.Add("SetText " + h + " " + s); if (PostError == 0) Texts[h] = s; return PostError; }
+  public static int Post(long h, uint m, long w, long l) {
+    Win32UIA.Calls.Add("Post " + h + " " + m + " " + w);
+    if (PostError == 0 && PostsType && m == 0x102) Texts[h] = Text(h) + (char)w;
+    return PostError; }
+}
 public static class ScreenPM {
   public static Dictionary<long, long> Owners = new Dictionary<long, long>();
   public static IntPtr GetWindow(IntPtr h, uint c) { long o; return c == 4 && Owners.TryGetValue(h.ToInt64(), out o) ? new IntPtr(o) : IntPtr.Zero; }
@@ -98,7 +120,7 @@ public static class ScreenPM {
 }
 '@
 function Reset-Fakes {
-  [FakeSendKeys]::Sent.Clear(); [Win32UIA]::Calls.Clear(); [Win32UIA]::Foreground = 0; [ScreenPM]::At = 0
+  [ClawdMsg]::Reset(); [FakeSendKeys]::Sent.Clear(); [Win32UIA]::Calls.Clear(); [Win32UIA]::Foreground = 0; [ScreenPM]::At = 0
   foreach ($m in [Win32UIA]::Roots, [Win32UIA]::Parents, [Win32UIA]::Pids, [Win32UIA]::Styles, [Win32UIA]::Zoomed, [ScreenPM]::Owners, [ScreenPM]::ExStyles) { $m.Clear() }
   $script:FakeRoot = $null; $script:FakeFocused = $null
 }

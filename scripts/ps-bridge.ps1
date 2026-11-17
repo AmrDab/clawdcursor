@@ -67,6 +67,57 @@ try {
 "@
 } catch { }
 
+# The own-window rungs (docs/internal/own-window-plan.md): window messages to a control in another process (R1), the
+# foreground-lock workaround and the user's idle time (R2). Win32 return codes are passed on: 5 = access denied (UIPI).
+try {
+    Add-Type @"
+    using System;
+    using System.Collections.Generic;
+    using System.Runtime.InteropServices;
+    using System.Text;
+    public static class ClawdMsg {
+        delegate bool EnumProc(IntPtr h, IntPtr l);
+        [StructLayout(LayoutKind.Sequential)] struct LII { public uint cbSize; public uint dwTime; }
+        [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumProc cb, IntPtr l);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder sb, int n);
+        [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int i);
+        [DllImport("user32.dll", EntryPoint = "PostMessageW", SetLastError = true)] static extern bool PostMessageW(IntPtr h, uint m, IntPtr w, IntPtr l);
+        [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern IntPtr SendStr(IntPtr h, uint m, IntPtr w, string l, uint flags, uint timeout, out IntPtr res);
+        [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern IntPtr SendBuf(IntPtr h, uint m, IntPtr w, StringBuilder l, uint flags, uint timeout, out IntPtr res);
+        [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+        [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LII p);
+        [DllImport("kernel32.dll")] static extern uint GetTickCount();
+
+        // A key event from this process lifts the foreground lock for its next SetForegroundWindow.
+        public static void AltTap() { keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 2, UIntPtr.Zero); }
+        // { tick of the last input, ms since it }: ANY input counts, this process's synthetic input too.
+        public static long[] Idle() {
+            LII p = new LII(); p.cbSize = (uint)Marshal.SizeOf(typeof(LII)); GetLastInputInfo(ref p);
+            return new long[] { p.dwTime, (long)(uint)(GetTickCount() - p.dwTime) };
+        }
+        public static long[] Children(long root) {
+            List<long> l = new List<long>();
+            EnumChildWindows(new IntPtr(root), delegate(IntPtr h, IntPtr x) { l.Add(h.ToInt64()); return true; }, IntPtr.Zero);
+            return l.ToArray();
+        }
+        public static string Cls(long h) { StringBuilder sb = new StringBuilder(256); GetClassName(new IntPtr(h), sb, 256); return sb.ToString(); }
+        public static long Style(long h) { return (uint)GetWindowLong(new IntPtr(h), -16); }
+        // WM_GETTEXT: a control's text in another process (GetWindowText returns only captions across processes).
+        public static string Text(long h) {
+            StringBuilder sb = new StringBuilder(8192); IntPtr r;
+            SendBuf(new IntPtr(h), 0x000D, new IntPtr(8192), sb, 2, 1500, out r);
+            return sb.ToString();
+        }
+        static int Err(bool ok) { if (ok) return 0; int e = Marshal.GetLastWin32Error(); return e == 0 ? 1460 : e; }
+        // 0 = delivered, else the Win32 error (5 = access denied: the target runs at a higher integrity level).
+        public static int SetText(long h, string s) { IntPtr r; return Err(SendStr(new IntPtr(h), 0x000C, IntPtr.Zero, s, 2, 1500, out r) != IntPtr.Zero); }
+        public static int Post(long h, uint m, long w, long l) { return Err(PostMessageW(new IntPtr(h), m, new IntPtr(w), new IntPtr(l))); }
+    }
+"@
+} catch { }
+
 # Register the managed UIA client-side proxies (Win32 Edit/Button/ComboBox/
 # ListView/... providers) from COMPILED code, before any UIA call. UIAutomation-
 # Client loads them lazily, ONCE, via a stack walk for the calling assembly; under
@@ -1080,6 +1131,34 @@ function Cmd-FocusWindow {
         # Rect.Empty (infinite X) for a window UIA deems not displayed: no bounds.
         bounds     = $(if ($c.BoundingRectangle.IsEmpty) { $null } else { @{ x = [int]$c.BoundingRectangle.X; y = [int]$c.BoundingRectangle.Y; width = [int]$c.BoundingRectangle.Width; height = [int]$c.BoundingRectangle.Height } })
     }
+}
+
+# ── Command: restore-foreground ───────────────────────────────────────────────
+# Put window `handle` back in front after an act took the foreground (a UIA SetValue / Invoke can). Same lock workaround
+# as focus-window plus the Alt key event from this process that actually lifts it; verified by reading the foreground back.
+function Cmd-RestoreForeground {
+    param($cmd)
+    $hwnd = [IntPtr][int64]$cmd.handle
+    if ($hwnd -eq [IntPtr]::Zero) { return @{ success = $false; restored = $false; error = 'no handle' } }
+    if ([Win32UIA]::GetForegroundWindow() -eq $hwnd) { return @{ success = $true; restored = $true } }
+    $me = [Win32UIA]::GetCurrentThreadId()
+    $fgThread = 0
+    $fg = [Win32UIA]::GetForegroundWindow()
+    if ($fg -ne [IntPtr]::Zero) { $p = 0; $fgThread = [Win32UIA]::GetWindowThreadProcessId($fg, [ref]$p) }
+    $attached = $false
+    if ($fgThread -ne 0 -and $fgThread -ne $me) {
+        try { [Win32UIA]::AttachThreadInput($me, $fgThread, $true) | Out-Null; $attached = $true } catch {}
+    }
+    try {
+        [ClawdMsg]::AltTap()
+        [Win32UIA]::AllowSetForegroundWindow(-1) | Out-Null
+        [Win32UIA]::SetForegroundWindow($hwnd) | Out-Null
+    } finally {
+        if ($attached) { try { [Win32UIA]::AttachThreadInput($me, $fgThread, $false) | Out-Null } catch {} }
+    }
+    Start-Sleep -Milliseconds 40
+    $ok = ([Win32UIA]::GetForegroundWindow() -eq $hwnd)
+    return @{ success = $ok; restored = $ok }
 }
 
 # ── Command: find-element (fuzzy name match) ──────────────────────────────────
@@ -2102,6 +2181,7 @@ while ($true) {
             "get-process-paths"     { Cmd-GetProcessPaths $cmd }
             "list-windows"          { Cmd-ListWindows }
             "focus-window"          { Cmd-FocusWindow $cmd }
+            "restore-foreground"    { Cmd-RestoreForeground $cmd }
             "find-element"          { Cmd-FindElement $cmd }
             "invoke-element"        { Cmd-InvokeElement $cmd }
             "scroll-into-view"      { Cmd-ScrollIntoView $cmd }

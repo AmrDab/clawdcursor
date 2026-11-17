@@ -300,6 +300,11 @@ export interface PlatformAdapter {
    */
   takeInputWarning?(): string | null;
   /**
+   * Optional (Windows): what the platform did to run the acts since it was last taken, for the tool result: the rung used and
+   * whether focus moved, or that it gave the user's window back. Taking it clears it; null when there is nothing to say.
+   */
+  takeRouteNote?(): string | null;
+  /**
    * Optional: false when typeText would expose the text outside this process — e.g. a typing helper that takes it as a
    * command-line argument, visible in the process list. Callers then paste (verified, clipboard restored) instead of
    * typing anything sensitive. Absent = private.
