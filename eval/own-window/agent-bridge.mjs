@@ -1,6 +1,7 @@
 // A localhost bridge for agent B: one persistent clawdcursor MCP server (the branch build), tools called over plain HTTP.
 // POST /call {"name":"accessibility","arguments":{...}} -> the tool result text.  GET /tools -> names + descriptions.
-import fs from 'fs'; import path from 'path'; import http from 'http';
+// POST /done ends it. Every request sends header X-Bridge-Token: the contents of <dir>/bridge-ready.
+import fs from 'fs'; import path from 'path'; import http from 'http'; import crypto from 'crypto';
 const dir = process.argv[2];
 const root = new URL('../..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const { Client } = await import(`file:///${root}/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js`);
@@ -10,13 +11,21 @@ const t = new StdioClientTransport({ command: process.execPath, args: [s.cli, 'm
 t.stderr?.on('data', () => {});
 const c = new Client({ name: 'agent-b', version: '1' }); await c.connect(t);
 const tools = (await c.listTools()).tools;
+// Only the agent that read <dir>/bridge-ready may call: a per-run secret in X-Bridge-Token, no browser Origin, the exact
+// Host (no DNS rebinding). A web page could otherwise POST to this port and drive the desktop.
+const token = crypto.randomBytes(32).toString('hex');
 http.createServer(async (req, res) => {
+  if (req.headers['x-bridge-token'] !== token || req.headers.origin || req.headers.host !== '127.0.0.1:8766'
+    || (req.url !== '/tools' && (req.method !== 'POST' || !String(req.headers['content-type']).startsWith('application/json')))) {
+    res.statusCode = 403; res.end('forbidden'); return;
+  }
   let body = ''; for await (const ch of req) body += ch;
   try {
     if (req.url === '/tools') { res.end(JSON.stringify(tools.map(x => ({ name: x.name, description: x.description, inputSchema: x.inputSchema })))); return; }
     if (req.url === '/done') { fs.writeFileSync(path.join(dir, 'done'), '0'); res.end('ok'); setTimeout(async () => { await c.close().catch(() => {}); process.exit(0); }, 300); return; }
+    if (req.url !== '/call') { res.statusCode = 404; res.end('not found'); return; }
     const { name, arguments: a } = JSON.parse(body);
     const r = await c.callTool({ name, arguments: a ?? {} }, undefined, { timeout: 60000 });
     res.end((r.content ?? []).filter(x => x.type === 'text').map(x => x.text).join('\n'));
   } catch (e) { res.statusCode = 500; res.end('bridge error: ' + e.message); }
-}).listen(8766, '127.0.0.1', () => fs.writeFileSync(path.join(dir, 'bridge-ready'), '1'));
+}).listen(8766, '127.0.0.1', () => fs.writeFileSync(path.join(dir, 'bridge-ready'), token, { mode: 0o600 }));
