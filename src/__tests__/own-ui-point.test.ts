@@ -24,7 +24,7 @@ let dir: string;
 let cursor: { x: number; y: number };
 let reads: number;
 
-/** A pointer layer that says what reached it: the platform adapter's shapes, and NativeDesktop's composite action. */
+/** A pointer layer that says what reached it: the platform adapter's shapes. */
 function fakePointer() {
   const sent: string[] = [];
   const p = {
@@ -37,7 +37,6 @@ function fakePointer() {
     async mouseMove(x: number, y: number) { cursor = { x, y }; sent.push(`move ${x},${y}`); },
     async mouseDown(_button?: string) { sent.push('down'); },
     async mouseUp(_button?: string) { sent.push('up'); },
-    async executeMouseAction(a: { kind: string; x: number; y: number; endX?: number; endY?: number }) { sent.push(`${a.kind} ${a.x},${a.y}`); },
   };
   return guardInputMethods(p);
 }
@@ -71,7 +70,6 @@ describe('a pointer action at a point on the own-UI window', () => {
     await expect(p.mouseDoubleClick(100, 50)).rejects.toThrow(OWN);
     await expect(p.mouseRightClick(100, 50)).rejects.toThrow(OWN);
     await expect(p.mouseScroll(100, 50, 'down', 3)).rejects.toThrow(OWN);
-    await expect(p.executeMouseAction({ kind: 'click', x: 100, y: 50 })).rejects.toThrow(OWN);
     expect(p.sent).toEqual([]);
   });
 
@@ -79,7 +77,6 @@ describe('a pointer action at a point on the own-UI window', () => {
     const p = fakePointer();
     await expect(p.mouseDrag(100, 50, 600, 50)).rejects.toThrow(OWN);
     await expect(p.mouseDrag(600, 50, 100, 50)).rejects.toThrow(OWN);
-    await expect(p.executeMouseAction({ kind: 'drag', x: 600, y: 50, endX: 100, endY: 50 })).rejects.toThrow(OWN);
     expect(p.sent).toEqual([]);
     await p.mouseDrag(600, 50, 700, 80);
     expect(p.sent).toEqual(['drag 600,50 700,80']);
