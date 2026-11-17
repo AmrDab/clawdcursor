@@ -218,6 +218,24 @@ function stopCheck(): void {
   if (isStopped()) throw new Error(STOPPED_TEXT);
 }
 
+/**
+ * A read or an act by element goes to the process it names or, with none named, to the window in front. Neither may
+ * be clawdcursor's own UI. The built-in pill never takes the front outside a pause (and then every call is refused,
+ * own-ui-guard.ts), so the window in front is only read when a host app named its own UI (CLAWD_OWN_UI_PIDS): its
+ * window is in front right after the user clicked it, and "invoke Yes" with no process would press the user's button.
+ */
+async function notOwnUi(processId?: number): Promise<void> {
+  if (processId !== undefined) {
+    if (isOwnUiPid(processId)) throw new Error(`pid ${processId} is clawdcursor's own on-screen control — it is the user's, never read or acted on. Target the app instead.`);
+    return;
+  }
+  if (!process.env.CLAWD_OWN_UI_PIDS && !process.env.CLAWD_OWN_UI_PIDS_FILE) return;
+  const now = await readForeground().catch(() => null);
+  if (now && (isOwnUiPid(now.processId) || isOwnUiPid(now.hostedProcessId))) {
+    throw new Error('the window in front is clawdcursor\'s own on-screen control — nothing was sent. Focus your target window first: window {"action":"focus","title":"…"}.');
+  }
+}
+
 /** One foreground read per input, before it. */
 async function before(): Promise<void> {
   stopCheck();
@@ -269,6 +287,7 @@ const AI_HOST_REFUSAL = (n: string, kind: 'list' | 'ancestor') =>
 export function isGuardRefusal(err: unknown): boolean {
   const m = err instanceof Error ? err.message : String(err);
   return m.startsWith('stopped by the user') || m.startsWith('foreground changed: ') || isFenceRefusal(err)
+    || / is clawdcursor's own on-screen control — /.test(m)
     || m.startsWith('held: confirm mode') || m.startsWith('not confirmed: confirm mode')
     || /^the window in front is .+ — nothing was sent. Focus your target window first/.test(m);
 }
@@ -411,7 +430,7 @@ function settle(): void {
   movedAt = 0;
 }
 
-setInputGuard({ stopCheck, before, done, focused, launched, byName, byProcess });
+setInputGuard({ stopCheck, before, done, focused, launched, byName, byProcess, notOwnUi });
 
 /**
  * What an act that just ran went to, for the session log: the app's name as on the pill, the VERIFIED process (`actPid`)

@@ -4,6 +4,13 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **A host app can draw the pill itself.** With `CLAWD_PILL_CMD` (a JSON array: the command and its arguments),
+  clawdcursor starts that command in place of its own pill, with the same arguments, environment and stdin/stdout lines;
+  if it cannot start, the built-in pill is used. `CLAWD_OWN_UI_PIDS` (comma-separated pids) names the host's processes
+  whose windows are clawdcursor's own controls, never a target. The outline stays built-in. With neither set, nothing
+  changes. The line protocol is in [docs/pill-host.md](docs/pill-host.md).
+
 ### Fixed
 - **`accessibility read_tree` / `read_screen` on the browser clawdcursor drives over CDP points at the browser tools**
   (#235). The hint after a thin read (and after a full read of that browser) now leads with `browser page_context` /
