@@ -157,3 +157,23 @@ moves count), the agent effects and the text agent A typed, and writes `results/
 ### Send back
 
 The `results/macos-*.jsonl` and `results/live-macos-*.jsonl` files and the printed tables (outcomes, side effects, the live summary), plus any `FAILED:` / `skip` / `note:` lines.
+
+## Canvas probe (Windows): `probe-canvas-windows.ps1`
+
+Plan (h), canvas/viewport apps. Question: does a background canvas accept a properly formed posted mouse click and drag (no focus steal, no cursor move), or does it need a burst?
+Measurement only: posted/sent window messages, no injection, no hooking, no DLL in any process. Windows PowerShell 5.1.
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File eval\own-window\probe-canvas-windows.ps1 -DryRun    # plan only, launches and compiles nothing
+powershell -NoProfile -ExecutionPolicy Bypass -File eval\own-window\probe-canvas-windows.ps1            # the run, about 1 minute; hands off keyboard and mouse
+powershell -NoProfile -ExecutionPolicy Bypass -File eval\own-window\probe-canvas-windows.ps1 -Targets canvas
+```
+
+- Targets: `canvas` (our own WinForms `Panel` in `ClawdCanvas`, compiled from C# by the .NET `csc.exe` into a temp dir; it logs every WM_MOUSEACTIVATE / SETCURSOR / MOUSEMOVE / LBUTTONDOWN / LBUTTONUP it receives and draws on them: the cooperative control), `mspaint` (a new Paint window), `nx` (Siemens NX: only noted if `ugraf.exe` runs, never driven; TODO: drive it with an empty part of our own).
+- The deepest child HWND under the target point is resolved with `RealChildWindowFromPoint` (then `ChildWindowFromPointEx`) in a loop; lParam is in that HWND's client coordinates.
+- Click: `WM_MOUSEACTIVATE`, `WM_SETCURSOR`, `WM_MOUSEMOVE`, `WM_LBUTTONDOWN` (`MK_LBUTTON`), `WM_LBUTTONUP`. Drag: the same prelude, `WM_LBUTTONDOWN`, 12 `WM_MOUSEMOVE` with `MK_LBUTTON` along a zigzag, `WM_LBUTTONUP`. Each is done with `PostMessage` (`post`) and with `SendMessageTimeout` (`send`, SMTO_ABORTIFHUNG, 1500 ms).
+- Effect: `PrintWindow` (PW_RENDERFULLCONTENT) of the target's top-level window before and after; the pixels changed in the canvas region (beyond the noise between two "before" shots) mean `yes`. Paint's region is the largest UIA element named canvas, else a guess (noted in the output; tune if `effect` is `no`). `received` is exact for our canvas (its log) and only inferred from the effect for Paint.
+- Foreground stolen / cursor moved: the foreground HWND and the real cursor are sampled every 50 ms while the row runs; `ClawdUser` is put back in front before each row.
+- Sends only to windows it started; refuses the user form; closes everything in `finally` (a Paint process it did not start alone is closed by WM_CLOSE only).
+- Output: `results\canvas-windows-<time>.jsonl` (do not commit) and a table `app | op | mode | received | effect | foreground stolen | cursor moved`.
+- Never run live by its author: the dry run, the PowerShell parse, and the C# compile of the canvas and the helper class were checked.
