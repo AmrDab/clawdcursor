@@ -77,7 +77,7 @@ async function readWindowOf(
   }
   const rows = ocrRows(result.elements, (x, y) => ({ x: Math.round(b.x + x / k), y: Math.round(b.y + y / k) }));
   return {
-    text: `OCR of ${where}, drawn by itself (windows on top of it are not in the read): ${result.elements.length} words, ${result.durationMs} ms. ` +
+    text: `OCR of ${where}, drawn by itself (windows on top of it are not in the read): ${rows.length} rows (${result.elements.length} words), ${result.durationMs} ms. ` +
       `Each row is @x,y "text": x,y is where the text is on screen. A click there goes to whatever window is on top at that spot: ` +
       `to click it, focus this window first (window {"action":"focus","processId":${pid}}), or act by name (accessibility invoke with processId ${pid}).\n` +
       wrapUntrustedScreenContent([`window: ${cap.title.replace(/\s+/g, ' ')}`, ...rows].join('\n')),
@@ -166,7 +166,7 @@ export function getOcrTools(): ToolDefinition[] {
             ? ` You last worked at (${at.x},${at.y}), outside this window: if you meant another window, focus it first and read again.`
             : '';
           return {
-            text: `OCR of the focused window at (${b.x},${b.y}) ${b.width}x${b.height}: ${result.elements.length} words, ${result.durationMs} ms. ` +
+            text: `OCR of the focused window at (${b.x},${b.y}) ${b.width}x${b.height}: ${rows.length} rows (${result.elements.length} words), ${result.durationMs} ms. ` +
               `Each row is @x,y "text": x,y is the centre of the text in screen coordinates, click it as-is with space:"screen", or smart_click {"target":"<label>"}.${elsewhere}\n` +
               wrapUntrustedScreenContent([`window: ${(windowTitle ?? '').replace(/\s+/g, ' ')}`, ...rows].join('\n')),
           };
