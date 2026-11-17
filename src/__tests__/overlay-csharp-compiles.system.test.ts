@@ -41,7 +41,7 @@ function compile(source: string): { status: number | null; output: string } {
 describe.runIf(process.platform === 'win32')('the Windows drawers\' C# compiles', () => {
   it('scripts/window-outline.ps1: the outline', () => {
     const source = csharp('window-outline.ps1', "$source = @'");
-    expect(source).toContain('public class WindowOutline : Form');
+    expect(source).toContain('public class WindowOutline : OverlayForm');
     const r = compile(source);
     expect(r.status, r.output).toBe(0);
     expect(r.output).not.toMatch(/error|exception/i);

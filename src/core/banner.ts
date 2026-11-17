@@ -5,8 +5,9 @@
  *     it appeared, and a Stop button (a double-click anywhere stops too).
  *   - the outline: a thin, click-through amber border around the window the
  *     agent is working in (control.ts workingWindow), and nothing else: no fill,
- *     nothing on the rest of the screen, nothing at all while no window is known
- *     or that window is not in front. Spawned/killed in lockstep with the pill;
+ *     nothing on the rest of the screen, nothing at all while no window is known.
+ *     On Windows every agent window (control.ts agentWindows) has one while it is
+ *     visible, in front or not. Spawned/killed in lockstep with the pill;
  *     `TARGET <handle> <pid>` on its stdin names the window, a bare `TARGET` none.
  * Both exit by themselves when their stdin closes: a host that hard-kills this
  * process must not leave them on screen.
@@ -48,7 +49,7 @@ import { macOverlayBinary } from '../platform/mac-swift-binary';
 import { setBeforePointerPress, setBeforeCapture, setOwnUiPids, setOnAgentInput, GUARDED_METHODS } from '../platform/pointer-guard';
 import type { PauseAnswer, PauseInfo } from './pause-gate';
 import { publishOverlayState, foreignOverlayState } from './overlay-state';
-import { isStopped, workingIn, workingWindow } from './control';
+import { agentWindows, isStopped, workingIn, workingWindow } from './control';
 import { appLabel } from './app-label';
 
 const IDLE_HIDE_MS = 30_000;
@@ -249,7 +250,11 @@ class ControlBanner {
   /** The window the agent works in now: the outline moves to it, or draws nothing when there is none. */
   setWorkingWindow(w: WorkingWindow | undefined): void {
     this.working = w;
-    const line = w ? `TARGET ${Number(w.handle) || 0} ${w.processId}` : 'TARGET';
+    // Windows draws one border per window: the working one, then the agent's other windows that have a handle.
+    const others = process.platform === 'win32' && w
+      ? agentWindows().filter(a => Number(a.handle) && Number(a.handle) !== Number(w.handle)).map(a => ` ${Number(a.handle)} ${a.processId}`).join('')
+      : '';
+    const line = w ? `TARGET ${Number(w.handle) || 0} ${w.processId}${others}` : 'TARGET';
     if (line === this.target) return;
     if (send(this.outlineChild, line)) this.target = line;
   }

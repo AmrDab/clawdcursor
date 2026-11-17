@@ -74,7 +74,7 @@ describe('the outline follows by-name acts', () => {
       await d.invokeElement({ name: 'Field', action, processId: action === 'toggle' ? fg.processId : undefined });
       expect(workingWindow()).toEqual({ processId: fg.processId, handle: fg.handle });
     }
-    expect(outlines[0].written).toEqual(['TARGET', 'TARGET 1970 300', 'TARGET 1440 100', 'TARGET 1970 300', 'TARGET 1440 100']);
+    expect(outlines[0].written).toEqual(['TARGET', 'TARGET 1970 300', 'TARGET 1440 100', 'TARGET 1970 300 1440 100', 'TARGET 1440 100']);
   });
 
   it('a by-name act on a process that is not in front leaves the outline where it was', async () => {
