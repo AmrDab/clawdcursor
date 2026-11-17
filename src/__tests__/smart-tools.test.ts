@@ -882,6 +882,16 @@ describe('Smart Tools', () => {
       expect(result.text).toContain('accessibility {"action":"set_value","name":"Answer","value":"<text>"}');
     });
 
+    it('macOS: the page reads as "Document" there, and it kept the focus: nothing typed', async () => {
+      mockInvokeElement.mockResolvedValue({ success: true });
+      mockGetFocusedElement.mockResolvedValue({ controlType: 'Document', name: 'Smart Type Check' });
+      const result = await smartType.handler({ text: 'QX-1', target: 'Answer' }, createCtx({ platform: { platform: 'darwin' } as never }));
+      mockGetFocusedElement.mockReset();
+      expect(result.isError).toBe(true);
+      expect(mockTypeText).not.toHaveBeenCalled();
+      expect(result.text).toMatch(/nothing was typed — the focus stayed on the page "Smart Type Check"/);
+    });
+
     it('mode:"replace" replaces a document when asked; a list item still gets no select-all', async () => {
       mockInvokeElement.mockResolvedValue({ success: true });
       mockGetFocusedElement.mockResolvedValue({ controlType: 'Edit', name: '', multiline: true });

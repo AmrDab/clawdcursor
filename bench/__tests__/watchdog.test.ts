@@ -14,7 +14,7 @@ vi.useRealTimers();
 const call = (tool: string, action: string, cls: LogCall['cls'], extra: Partial<LogCall> = {}): LogCall =>
   ({ t: new Date().toISOString(), tool, action, cls, ok: true, ms: 10, outcome: 'ok', ...extra });
 /** By default the runner can prove everything: the tests of the other rules are not about privacy. */
-const dog = (over: Partial<{ maxCalls: number; maxSeconds: number; fixtureApps: string[] }> = {}, proof: Partial<Proof> = {}) =>
+const dog = (over: Partial<{ maxCalls: number; maxSeconds: number; fixtureApps: string[]; focusSettleMs: number }> = {}, proof: Partial<Proof> = {}) =>
   new Watchdog({ maxCalls: 20, maxSeconds: 60, fixtureApps: ['Edge'], ...over }, { ownsFocus: () => true, ownsPid: () => true, cdpIsFixture: () => true, ...proof });
 
 describe('the watchdog rules', () => {
@@ -239,6 +239,13 @@ describe('the watchdog rules', () => {
     it('a window or launch call with no app passes only when the focus ends in a process the benchmark started', async () => {
       expect(await dog().judge(call('window', 'focus', 'act-other'))).toBeNull();
       expect(await dog({}, none).judge(call('window', 'focus', 'act-other'))).toMatchObject({ rule: 'privacy' });
+      // Mac run 2026-11-17: the front app was named a moment after a focus that worked. Asked again: it passes.
+      let probes = 0;
+      const late = { ownsFocus: () => ++probes >= 3 };
+      expect(await dog({ focusSettleMs: 1500 }, late).judge(call('window', 'focus', 'act-other'))).toBeNull();
+      expect(probes).toBe(3);
+      // Never the fixture's within the settle time: it still stops.
+      expect(await dog({ focusSettleMs: 600 }, none).judge(call('window', 'focus', 'act-other'))).toMatchObject({ rule: 'privacy', detail: expect.stringContaining('left the focus') });
       expect(await dog({}, none).judge(call('window', 'open_app', 'act-other'))).toMatchObject({ rule: 'privacy' });
       expect(await dog({}, none).judge(call('system', 'clipboard_write', 'act-other'))).toMatchObject({ rule: 'privacy' });
     });

@@ -44,13 +44,15 @@ const KEY_NAME_ALIASES: Record<string, string[]> = {
 };
 
 /**
- * The page's name when the focus is on a web page itself (macOS AXWebArea), not in the field `target` names; null
- * otherwise. A page named like the target is what was asked for, and one with no name is not judged. A document role is
- * not judged either: Notepad's and Word's documents are where typed text goes.
+ * The page's name when the focus is on a web page itself, not in the field `target` names; null otherwise. A page named
+ * like the target is what was asked for, and one with no name is not judged. macOS reports a web page (AXWebArea) as
+ * "Document" (mac-ax.ts) and a text view as "Edit", so there a Document is a page (Mac, 2026-11-17: Chrome's page read as
+ * "Document", and the text still went to it). Elsewhere a Document is also a text editor's (Notepad, Word), where typed
+ * text goes: only a WebArea is judged. `platform`: the adapter's; none, none judged by that rule.
  */
-export function focusStayedOnPage(el: { name?: string; controlType?: string } | null | undefined, target: string): string | null {
+export function focusStayedOnPage(el: { name?: string; controlType?: string } | null | undefined, target: string, platform?: string): string | null {
   const role = String(el?.controlType ?? '').replace(/^AX/, '').toLowerCase();
-  if (!el || role !== 'webarea') return null;
+  if (!el || !(role === 'webarea' || (platform === 'darwin' && role === 'document'))) return null;
   const lc = (s: string | undefined) => (s ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
   const n = lc(el.name), t = lc(target);
   return n === '' || n.includes(t) || t.includes(n) ? null : el.name!;
@@ -939,7 +941,7 @@ export function getSmartTools(): ToolDefinition[] {
           // Mac bench 2026-11-17: "Answer", scrolled out of view at the end of a long page, took the focus by name, yet the
           // page kept it: the text went to the page, and the reply said it went into "Answer".
           let page: string | null = null;
-          try { page = focusStayedOnPage(await ctx.a11y.getFocusedElement(), target); } catch { /* unread: no evidence */ }
+          try { page = focusStayedOnPage(await ctx.a11y.getFocusedElement(), target, ctx.platform?.platform); } catch { /* unread: no evidence */ }
           if (page !== null) {
             return {
               text: `smart_type "${target}": nothing was typed — the focus stayed on the page${page ? ` ${quoteScreenText(page)}` : ''}, not in that field: ` +
