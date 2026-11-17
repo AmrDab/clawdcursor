@@ -103,11 +103,15 @@ describe.runIf(process.platform === 'win32')('ps-bridge capture-window (run for 
     }
   }, 180_000);
 
-  afterAll(() => {
+  afterAll(async () => {
     try { fs.writeFileSync(path.join(dir, 'done'), ''); } catch { /* gone */ }
-    forms?.kill(); bridge?.kill();
-    if (dir) fs.rmSync(dir, { recursive: true, force: true });
-  });
+    const ended = (p: ChildProcess | undefined) => !p || p.exitCode !== null || p.signalCode !== null ? Promise.resolve()
+      : new Promise<void>(resolve => { p.once('exit', () => resolve()); p.kill(); setTimeout(resolve, 5000); });
+    await Promise.all([ended(forms), ended(bridge)]);
+    // CI, Node 20: EPERM on window.png, still held a moment after the bridge that read it ended. A temp folder left behind
+    // is not a failed test.
+    if (dir) try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch { /* the OS temp cleanup */ }
+  }, 30_000);
 
   it('captures the largest window of the process, where it is, at its own size', () => {
     expect(reply).toMatchObject({ success: true });
