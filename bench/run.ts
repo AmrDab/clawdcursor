@@ -22,7 +22,7 @@ import { freePort, sleep, system32 } from './lib/proc';
 import { buildPrompt } from './lib/prompt';
 import { aggregate, buildReport, compare, renderMarkdown, score, toBaseline, type Baseline, type Score } from './lib/scorer';
 import { currentOs, loadTasks } from './lib/tasks';
-import { Watchdog, readSessionCalls, tailSessionDir, type Verdict } from './lib/watchdog';
+import { Watchdog, readSessionCalls, tailSessionDir, FOCUS_SETTLE_MS, type Verdict } from './lib/watchdog';
 import type { AgentRun, CallSig, TaskSpec } from './lib/types';
 
 export interface Options {
@@ -186,7 +186,7 @@ async function runOne(task: TaskSpec, m: ModelRun, env: Env, n: number, repeat: 
     const proveCdp = async () => cdp !== undefined && await cdpIsFixture({ ...cdp, browserPids: fixture.roots });
     let cdpProven = await proveCdp();
     const cdpClock = setInterval(() => { proveCdp().then(ok => { cdpProven = ok; }, () => { cdpProven = false; }); }, 5000);
-    const dog = new Watchdog({ maxCalls: task.caps.calls, maxSeconds: task.caps.seconds, fixtureApps: fixture.apps }, {
+    const dog = new Watchdog({ maxCalls: task.caps.calls, maxSeconds: task.caps.seconds, fixtureApps: fixture.apps, focusSettleMs: FOCUS_SETTLE_MS }, {
       ownsFocus: async () => ownsFocus(await readFocus(), await fixture.roots(), fixture.frameTitle),
       // The process an act went to is judged by the fence's own rule, over the very pids the daemon was fenced to.
       ownsPid: inFixtureFence(fencePids),

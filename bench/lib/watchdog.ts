@@ -16,6 +16,12 @@ import type { CallSig, LogCall } from './types';
 export interface Verdict { rule: 'privacy' | 'loop' | 'repeat-failure' | 'call-cap' | 'time-cap'; detail: string }
 
 export const FAILURE_REPEATS = 3;
+/**
+ * How long a live run asks again whether the focus is the fixture's, after a window act (a focus, a launch) the log
+ * records no process for. The OS may name the new front app a moment late: on a Mac, System Events still had another app
+ * frontmost right after a `window focus` that worked, and the next read saw the fixture (run 2026-11-17, haiku stopped).
+ */
+export const FOCUS_SETTLE_MS = 1500;
 
 /** What the runner can prove about the fixture right now. Both answers must fail closed. */
 export interface Proof {
@@ -35,7 +41,8 @@ export class Watchdog {
   private codes = new Map<string, number>();
   private readonly allowed: Set<string>;
 
-  constructor(private limits: { maxCalls: number; maxSeconds: number; fixtureApps: string[] }, private proof: Proof) {
+  /** `focusSettleMs`: see FOCUS_SETTLE_MS; none = one probe. */
+  constructor(private limits: { maxCalls: number; maxSeconds: number; fixtureApps: string[]; focusSettleMs?: number }, private proof: Proof) {
     this.allowed = new Set(limits.fixtureApps.map(appKey));
   }
 
@@ -86,11 +93,21 @@ export class Watchdog {
             : u.app ? `acted in ${named} with no verified record of which process that was` : 'acted with no app recorded (a background process, or an unknown target)');
         }
         if (!await ownsFocus()) return stop(`acted in ${named}, but the focus is not in a process the benchmark started`);
-      } else if (!await ownsFocus()) {
+      } else if (!await ownsFocus() && !await this.focusSettles()) {
         return stop('left the focus in a process the benchmark did not start');
       }
     }
     return null;
+  }
+
+  /** The focus probe asked again for up to `focusSettleMs`: true as soon as it is the fixture's. Still fails closed. */
+  private async focusSettles(): Promise<boolean> {
+    const until = Date.now() + (this.limits.focusSettleMs ?? 0);
+    while (Date.now() < until) {
+      await new Promise(r => setTimeout(r, 250));
+      if (await Promise.resolve(this.proof.ownsFocus()).catch(() => false)) return true;
+    }
+    return false;
   }
 
   private repeat(key: string | null, what: string): Verdict | null {
