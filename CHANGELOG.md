@@ -4,6 +4,13 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **A host app can draw the pill itself.** With `CLAWD_PILL_CMD` (a JSON array: the command and its arguments),
+  clawdcursor starts that command in place of its own pill, with the same arguments, environment and stdin/stdout lines;
+  if it cannot start, the built-in pill is used. `CLAWD_OWN_UI_PIDS` (comma-separated pids) names the host's processes
+  whose windows are clawdcursor's own controls, never a target. The outline stays built-in. With neither set, nothing
+  changes. The line protocol is in [docs/pill-host.md](docs/pill-host.md).
+
 ### Fixed
 - **A field or button scrolled out of view at the end of a long page (macOS).** Chrome gives such an element a frame of
   height 0 at the window's bottom edge, and three tools mishandled it (Mac benchmark, `web-long-read`):
