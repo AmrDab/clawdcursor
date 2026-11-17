@@ -1213,6 +1213,31 @@ func perform(_ action: String, _ h: Hit, pid: pid_t, appName: String) -> [String
 
 // MARK: - Commands
 
+/// The largest on-screen window of --pid (layer 0, not minimized, on this Space; "on screen" includes a window that others
+/// cover): its CGWindowID and bounds in points, top-left origin, for capturing it by itself (screenshot-helper <windowId>).
+/// Window numbers, owners and bounds need no permission; the title only comes with Screen Recording.
+func cmdWindowOf() -> Never {
+    guard let pid = Int32(opts["pid"] ?? ""), pid > 0 else { fail("failed", "window-of: needs --pid") }
+    let list = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? []
+    var best: [String: Any]? = nil
+    var bestArea = 0.0
+    for w in list {
+        guard (w[kCGWindowOwnerPID as String] as? Int32) == pid, (w[kCGWindowLayer as String] as? Int) == 0,
+              ((w[kCGWindowAlpha as String] as? Double) ?? 1) > 0,
+              let id = w[kCGWindowNumber as String] as? Int,
+              let b = w[kCGWindowBounds as String] as? [String: Double] else { continue }
+        let width = b["Width"] ?? 0, height = b["Height"] ?? 0
+        guard width > 0, height > 0, width * height > bestArea else { continue }
+        bestArea = width * height
+        var d: [String: Any] = ["id": id, "x": b["X"] ?? 0, "y": b["Y"] ?? 0, "width": width, "height": height]
+        if let t = w[kCGWindowName as String] as? String, !t.isEmpty { d["title"] = t }
+        if let name = NSRunningApplication(processIdentifier: pid)?.localizedName { d["processName"] = name }
+        best = d
+    }
+    if let found = best { emit(["ok": true, "window": found]) }
+    emit(["ok": true, "window": NSNull()])
+}
+
 func cmdFrontmost() -> Never {
     let locked = screenLocked()
     guard let app = NSWorkspace.shared.frontmostApplication else {
@@ -1682,5 +1707,6 @@ case "invoke": cmdInvoke()
 case "type": cmdType()
 case "focus": cmdFocus()
 case "pagetext": cmdPageText()
+case "window-of": cmdWindowOf()
 default: fail("failed", "usage: ax-helper windows|active|frontmost|apps|focused|tree|find|invoke|type|focus|pagetext [options] (got \"\(command)\")")
 }

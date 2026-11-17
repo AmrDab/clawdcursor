@@ -246,6 +246,10 @@
                 "type": "string",
                 "description": "What went wrong, in a sentence or two"
               },
+              "processId": {
+                "type": "number",
+                "description": "ocr: read only this process's window, drawn by itself: even where other windows cover it, and without focusing it (Windows, macOS)."
+              },
               "category": {
                 "type": "string",
                 "enum": [
@@ -1659,6 +1663,10 @@
                   "window"
                 ],
                 "description": "\"screen\" (default): the whole screen (the monitor being worked on). \"window\": only the focused window — focus your target first; falls back to the screen when no usable window is focused."
+              },
+              "processId": {
+                "type": "number",
+                "description": "Read only this process's window, drawn by itself: its largest window, even where other windows cover it, and without focusing it (Windows, macOS). The rows say where its text is on screen. scope is not used."
               }
             }
           },

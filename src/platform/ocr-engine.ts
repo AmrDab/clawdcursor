@@ -322,6 +322,25 @@ export class OcrEngine {
     }
   }
 
+  /**
+   * OCR an image that is not a capture of the screen: one window drawn by itself. Coordinates are the image's own pixels;
+   * the caller places them on screen. No cache, and no fence step: the image holds that one window's pixels only, and the
+   * fence gate checked its process before the call. Throws on a failed read.
+   */
+  async recognizeImage(png: Buffer): Promise<OcrResult> {
+    if (!this.isAvailable()) return { ...EMPTY_RESULT };
+    const start = Date.now();
+    const tmp = path.join(os.tmpdir(), `clawdcursor-ocr-window-${process.pid}-${crypto.randomUUID().slice(0, 8)}.png`);
+    fs.writeFileSync(tmp, png, { mode: 0o600, flag: 'wx' });
+    try {
+      const result = await this.runOcr(tmp);
+      result.durationMs = Date.now() - start;
+      return result;
+    } finally {
+      try { fs.unlinkSync(tmp); } catch { /* non-fatal */ }
+    }
+  }
+
   // ─── Private ──────────────────────────────────────────────────────────────
 
   /**

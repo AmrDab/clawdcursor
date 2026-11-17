@@ -47,6 +47,17 @@ export interface ScreenshotResult {
   origin?: { x: number; y: number };
 }
 
+/** One window drawn by itself (PlatformAdapter.captureWindowOf). */
+export interface WindowCapture {
+  /** The window's own pixels, PNG: what covers it on screen is not in them. */
+  png: Buffer;
+  /** Where the window is, in screen coordinates (what `mouseClick` takes: points on macOS, physical pixels elsewhere). */
+  bounds: { x: number; y: number; width: number; height: number };
+  /** Image pixels per screen unit (the image may be at the window's own DPI, or a Retina backing scale). */
+  pixelsPerUnit: number;
+  title: string;
+}
+
 export interface WindowInfo {
   title: string;
   processName: string;
@@ -237,6 +248,12 @@ export interface PlatformAdapter {
   // ─── WINDOWS ────────────────────────────────────────────────────
   listWindows(): Promise<WindowInfo[]>;
   getActiveWindow(): Promise<WindowInfo | null>;
+  /**
+   * Optional: the largest visible, not minimized window of `pid`, drawn by itself — its own pixels even where other
+   * windows cover it — with nothing raised or focused. Null: the pid has no such window. Throws why it could not be drawn
+   * (not responding, Screen Recording refused). A platform without it cannot draw a covered window by itself.
+   */
+  captureWindowOf?(pid: number): Promise<WindowCapture | null>;
   /** `handle`: the exact window (Windows). When given, nothing else in the query is used. */
   focusWindow(query: { processName?: string; processId?: number; title?: string; handle?: number }): Promise<boolean>;
   /**
