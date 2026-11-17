@@ -48,6 +48,16 @@ All notable changes to Clawd Cursor will be documented in this file.
   canvas hint keep the screenshot for picks inside the drawn area, and after three clicks by coordinates with none by
   name, one note says a visible label is pressed with `smart_click`.
 - **A refused act in the wrong foreground window says to focus yours and send the same call again**, with no screenshot.
+- **Agents are told they can do any task on the screen, and to use clawdcursor without being asked.** The skill, the
+  server instructions, `llms.txt` and the plugin listing now lead with five rules: you can open and operate any app, see
+  the screen, and you should not ask the user to do a step you can do or say you can't reach their desktop. They no
+  longer open with "FALLBACK ONLY": an API, CLI or file edit that does the same job is still preferred as cheaper, but a
+  task is never declined for lack of one. The blanket "ask before email, banking, messaging or password managers" rule
+  is gone (the user's request is the permission); asking first before an irreversible action the user did not ask for
+  stays.
+- **The skill says what to do when a task is beyond the agent:** hand it to a stronger model from the same provider
+  (a Sonnet or Opus subagent) or raise the reasoning effort, instead of giving up or asking the user; a sign-in or
+  a step only the user can take is still `pause_for_user`. Easy desktop work can run on a cheaper subagent.
 - **The HTTP daemon answers only to `Host: 127.0.0.1:<port>` or `localhost:<port>`**; any other Host header gets 403.
   A page whose DNS name was rebound to 127.0.0.1 could load the dashboard and read the pause message. An SSH tunnel to
   the daemon must use the daemon's own port on the local end (`ssh -L 3847:127.0.0.1:3847 ...`).
