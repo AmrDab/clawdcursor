@@ -51,6 +51,7 @@ import type { PauseAnswer, PauseInfo } from './pause-gate';
 import { publishOverlayState, foreignOverlayState } from './overlay-state';
 import { agentWindows, isStopped, workingIn, workingWindow } from './control';
 import { appLabel } from './app-label';
+import { burstCount, resetBurstCount } from '../platform/foreground-burst';
 
 const IDLE_HIDE_MS = 30_000;
 /** How long the pill stays hidden around an agent's click, and how long to wait for it to be gone before clicking. */
@@ -268,8 +269,11 @@ class ControlBanner {
 
   /** What the agent is doing now ("Typing in Edge"): the running pill shows it; a new pill starts with it. */
   setActivity(label: string): void {
-    const line = label.replace(/[\r\n]+/g, ' ').trim().slice(0, 60);
-    if (!line || line === this.activity) return;
+    const base = label.replace(/[\r\n]+/g, ' ').trim().slice(0, 60);
+    if (!base) return;
+    const n = burstCount(); // R2 foreground bursts this session (D1: allowed when the user is idle, counted and shown)
+    const line = n ? `${base} · ${n} quick takeover${n > 1 ? 's' : ''}` : base;
+    if (line === this.activity) return;
     this.activity = line;
     if (!this.paused) send(this.child, `ACTIVITY ${line}`);
   }
@@ -514,6 +518,7 @@ class ControlBanner {
   private forceHide(): void {
     this.clearIdleTimer();
     this.activity = ''; // the next session's pill must not open with this one's last action
+    resetBurstCount(); // ...nor with this one's takeover count
     this.working = undefined; // ...nor its outline on this one's window
     this.paused = null;
     this.onAnswer = undefined;
