@@ -40,6 +40,7 @@ export function locateAgent(name: string, flag: string, o: { fallback?: () => st
     ? `found only an npm .cmd shim at ${shim}; the benchmark needs the native binary (${name}.exe): install it from the vendor, or pass ${flag}`
     : 'not installed' };
 }
+import type { Usage } from '../../../packages/clawdcursor-agent/src/trace';
 import type { CallSig } from '../types';
 
 export interface AgentJob {
@@ -65,6 +66,8 @@ export interface AgentResult {
   finalText: string; exitCode: number | null;
   /** The host could not connect to the isolated clawdcursor (connect, initialize or tools/list failed): why. */
   serverUnreachable?: string;
+  /** What the host reported using, when it does. */
+  usage?: Usage;
 }
 
 export interface Adapter {

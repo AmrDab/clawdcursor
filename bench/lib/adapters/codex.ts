@@ -10,6 +10,7 @@ import { PREFLIGHT_PROMPT, locateAgent, preflightFailure, runCli, runPreflight, 
 import { tryRun } from '../proc';
 import type { CallSig } from '../types';
 import { CODEX_ISOLATION, codexAppBinary, toml } from '../../../packages/clawdcursor-agent/src/hosts';
+import { addUsage, codexEvents, type Usage } from '../../../packages/clawdcursor-agent/src/trace';
 
 export { codexAppBinary };
 
@@ -54,9 +55,14 @@ export function codexPreflightCommand(o: { exe: string; model: string; workDir: 
  * One line of `codex exec --json`. A tool call is an item of type mcp_tool_call: it is reported when it starts and
  * again when it completes, so `id` lets the caller count it once.
  */
-export function parseCodexLine(line: string): { sig?: CallSig; id?: string; finalText?: string } {
-  let ev: { type?: string; item?: { id?: string; type?: string; server?: string; tool?: string; arguments?: unknown; text?: string } };
+export function parseCodexLine(line: string): { sig?: CallSig; id?: string; finalText?: string; usage?: Usage } {
+  let ev: { type?: string; usage?: Record<string, unknown>; item?: { id?: string; type?: string; server?: string; tool?: string; arguments?: unknown; text?: string } };
   try { ev = JSON.parse(line); } catch { return {}; }
+  // One turn.completed per turn (shape read from a recorded run; see codexEvents in the add-on).
+  if (ev?.type === 'turn.completed') {
+    const u = codexEvents(line).find(e => e.kind === 'usage');
+    return u?.kind === 'usage' ? { usage: (({ kind: _kind, ...rest }) => rest)(u) } : {};
+  }
   const item = ev?.item;
   if (!item || typeof item !== 'object') return {};
   if (item.type === 'mcp_tool_call' && typeof item.tool === 'string') {
@@ -129,6 +135,7 @@ export const codex: Adapter = {
     const lastMessagePath = path.join(job.workDir, 'last-message.txt');
     let finalText = '';
     let serverUnreachable: string | undefined;
+    let usage: Usage | undefined;
     const seen = new Set<string>();
     const exitCode = await runCli(codexCommand({ exe, model: job.model, mcpUrl: job.mcpUrl, token: job.token, workDir: job.workDir, lastMessagePath, prompt: job.prompt }), {
       cwd: job.workDir, signal: job.signal, logFile: job.logFile,
@@ -138,9 +145,10 @@ export const codex: Adapter = {
         const p = parseCodexLine(line);
         if (p.sig && !(p.id && seen.has(p.id))) { if (p.id) seen.add(p.id); job.onSig(p.sig); }
         if (p.finalText !== undefined) finalText = p.finalText;
+        if (p.usage) usage = addUsage(usage ?? null, p.usage);
       },
     });
     try { finalText = fs.readFileSync(lastMessagePath, 'utf8') || finalText; } catch { /* no last message: the stream's is used */ }
-    return { finalText, exitCode, ...(serverUnreachable ? { serverUnreachable } : {}) };
+    return { finalText, exitCode, ...(serverUnreachable ? { serverUnreachable } : {}), ...(usage ? { usage } : {}) };
   },
 };

@@ -9,6 +9,7 @@ import { PREFLIGHT_PROMPT, locateAgent, preflightFailure, runCli, runPreflight, 
 import { tryRun } from '../proc';
 import type { CallSig } from '../types';
 import { CLAUDE_ISOLATION, hostSessionEnv } from '../../../packages/clawdcursor-agent/src/hosts';
+import { anthropicUsage, type Usage } from '../../../packages/clawdcursor-agent/src/trace';
 
 export { hostSessionEnv };
 
@@ -56,8 +57,8 @@ export function parseClaudePreflight(out: string): { ok: boolean; said: string }
 }
 
 /** One line of --output-format stream-json: the tool calls the model made in it, and the final reply if it is the result line. */
-export function parseClaudeLine(line: string): { sigs: CallSig[]; finalText?: string; serverUnreachable?: string } {
-  let msg: { type?: string; subtype?: string; result?: unknown; mcp_servers?: Array<{ name?: string; status?: string }>;
+export function parseClaudeLine(line: string): { sigs: CallSig[]; finalText?: string; serverUnreachable?: string; usage?: Usage } {
+  let msg: { type?: string; subtype?: string; result?: unknown; usage?: unknown; total_cost_usd?: unknown; mcp_servers?: Array<{ name?: string; status?: string }>;
     message?: { content?: Array<{ type?: string; name?: string; input?: unknown }> } };
   try { msg = JSON.parse(line); } catch { return { sigs: [] }; }
   // The first line of a session lists the MCP servers and whether each connected. Anything but "connected" for the one
@@ -68,7 +69,11 @@ export function parseClaudeLine(line: string): { sigs: CallSig[]; finalText?: st
     if (server.status !== 'connected') return { sigs: [], serverUnreachable: `Claude Code reports the clawdcursor MCP server as "${server.status ?? 'unknown'}"` };
     return { sigs: [] };
   }
-  if (msg?.type === 'result') return { sigs: [], finalText: typeof msg.result === 'string' ? msg.result : '' };
+  if (msg?.type === 'result') {
+    const u = anthropicUsage(msg.usage, msg.total_cost_usd);   // the result line's usage covers the whole run
+    const usage = u?.kind === 'usage' ? (({ kind: _kind, ...rest }) => rest)(u) : undefined;
+    return { sigs: [], finalText: typeof msg.result === 'string' ? msg.result : '', ...(usage ? { usage } : {}) };
+  }
   if (msg?.type !== 'assistant' || !Array.isArray(msg.message?.content)) return { sigs: [] };
   return { sigs: msg.message.content.filter(b => b?.type === 'tool_use' && typeof b.name === 'string').map(b => sigOf(b.name!, b.input)) };
 }
@@ -102,6 +107,7 @@ export const claudeCode: Adapter = {
     fs.writeFileSync(mcpConfigPath, claudeMcpConfig(job.mcpUrl, job.token), { flag: 'wx', mode: 0o600 });
     let finalText = '';
     let serverUnreachable: string | undefined;
+    let usage: Usage | undefined;
     const exitCode = await runCli(claudeCommand({ exe, model: job.model, mcpConfigPath, prompt: job.prompt }), {
       cwd: job.workDir, signal: job.signal, logFile: job.logFile,
       onLine: line => {
@@ -109,8 +115,9 @@ export const claudeCode: Adapter = {
         p.sigs.forEach(job.onSig);
         if (p.finalText !== undefined) finalText = p.finalText;
         if (p.serverUnreachable) serverUnreachable = p.serverUnreachable;
+        if (p.usage) usage = p.usage;
       },
     });
-    return { finalText, exitCode, ...(serverUnreachable ? { serverUnreachable } : {}) };
+    return { finalText, exitCode, ...(serverUnreachable ? { serverUnreachable } : {}), ...(usage ? { usage } : {}) };
   },
 };
