@@ -7,6 +7,10 @@
 #   TARGET <hwnd> <pid> [<hwnd> <pid> ...]   the windows to outline (the pid is for the macOS drawer; ignored here)
 #   TARGET                no window: draw nothing
 #   HIDE <ms>             step aside for a screen capture (only sent after OUTLINE_CAPTURABLE)
+#   GHOST <x> <y>         draw the agent's pointer at this screen point, if it is inside one of the outlined windows
+#   GHOST                 hide it (it hides by itself 1.5 s after the last GHOST)
+# The ghost pointer is only drawn: it never moves or touches the real cursor. Like a border it is click-through, never
+# takes focus, is kept out of captures, and sits in the z-order directly above the window it is in.
 # Each border is shown while its window is visible and not minimized, in front or not, and follows it as it moves or
 # resizes (polled every 100 ms). A window that Windows does not show (hidden, or cloaked: on another virtual desktop) gets
 # no border. It starts with no window. The parent kills this process to remove it; when stdin closes
@@ -57,6 +61,7 @@ public class OverlayForm : Form {
     [DllImport("dwmapi.dll")] protected static extern int DwmGetWindowAttribute(IntPtr hWnd, int attr, out int value, int size);
 
     public static long hideUntil;  // DateTime ticks (UTC); written by the stdin thread
+    public static IntPtr ghost;    // the ghost pointer's window: a border may sit just below it, still directly above its window
 
     protected override bool ShowWithoutActivation { get { return true; } }
     protected override CreateParams CreateParams {
@@ -141,6 +146,9 @@ public class WindowOutline : OverlayForm {
         BackColor = color;
     }
 
+    public IntPtr Above { get { return GetWindow(target, 3); } } // GW_HWNDPREV
+    public bool Covers(int x, int y) { return shown && x >= last.Left && x < last.Right && y >= last.Top && y < last.Bottom; }
+
     public void Follow() {
         RECT r;
         if (!IsShown(target, out r)) {
@@ -149,7 +157,7 @@ public class WindowOutline : OverlayForm {
         }
         // Directly above its window in the z-order: the window just above the target is this one.
         IntPtr above = GetWindow(target, 3); // GW_HWNDPREV
-        bool placed = above == Handle;
+        bool placed = above == Handle || above == ghost;
         bool moved = !shown || r.Left != last.Left || r.Top != last.Top || r.Right != last.Right || r.Bottom != last.Bottom;
         if (placed && !moved) return;
         int w = r.Right - r.Left, h = r.Bottom - r.Top;
@@ -178,9 +186,54 @@ public class WindowOutline : OverlayForm {
     }
 }
 
+// The agent's pointer: a small drawn arrow where it acts, in a colour the real cursor never is. Shown for 1.5 s after each
+// GHOST, only inside an outlined window, directly above that window in the z-order. It is never the real cursor.
+public class GhostCursor : OverlayForm {
+    int x, y, lx, ly;
+    long until;   // DateTime ticks (UTC) it is shown until
+    bool shown;
+
+    public GhostCursor() {
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
+        StartPosition = FormStartPosition.Manual;
+        BackColor = Color.FromArgb(236, 72, 153);
+        Size = new Size(12, 20);
+        var arrow = new System.Drawing.Drawing2D.GraphicsPath();
+        arrow.AddPolygon(new Point[] { new Point(0, 0), new Point(0, 17), new Point(4, 13), new Point(7, 19), new Point(9, 18), new Point(6, 12), new Point(11, 12) });
+        Region = new Region(arrow);   // the arrow's tip is the window's top-left corner: the point acted on
+    }
+
+    protected override void OnHandleCreated(EventArgs e) {
+        base.OnHandleCreated(e);
+        ghost = Handle;
+    }
+
+    public void MoveTo(int px, int py) { x = px; y = py; until = DateTime.UtcNow.AddMilliseconds(1500).Ticks; }
+    public void Clear() { until = 0; }
+
+    public void Follow(List<WindowOutline> outlines) {
+        WindowOutline on = null;
+        long now = DateTime.UtcNow.Ticks;
+        if (now < until && now >= Interlocked.Read(ref hideUntil)) foreach (WindowOutline o in outlines) if (o.Covers(x, y)) { on = o; break; }
+        if (on == null) {
+            if (shown) { ShowWindow(Handle, 0); shown = false; } // SW_HIDE
+            return;
+        }
+        IntPtr above = on.Above;
+        bool placed = above == Handle;
+        bool moved = !shown || x != lx || y != ly;
+        if (placed && !moved) return;
+        SetWindowPos(Handle, above, x, y, Width, Height, placed ? 0x0054u : moved ? 0x0050u : 0x0053u);
+        lx = x; ly = y;
+        shown = true;
+    }
+}
+
 // One outline per window named on stdin, followed on a 100 ms poll.
 public static class OutlineHost {
     static readonly List<WindowOutline> outlines = new List<WindowOutline>();
+    static GhostCursor pointer;
     static Control sync;   // created on the UI thread: the stdin thread hands work to it
     static Color color;
     static int thickness;
@@ -190,6 +243,8 @@ public static class OutlineHost {
         thickness = thicknessAt96;
         sync = new Control();
         IntPtr created = sync.Handle;
+        pointer = new GhostCursor();
+        IntPtr pointerCreated = pointer.Handle;
         var t = new Thread(() => {
             try {
                 string line;
@@ -203,6 +258,13 @@ public static class OutlineHost {
                         var hs = new List<long>();
                         for (int i = 1; i < p.Length; i += 2) { long h; if (long.TryParse(p[i], out h) && h != 0) hs.Add(h); }
                         try { sync.BeginInvoke((Action)(() => SetTargets(hs))); } catch { }
+                        continue;
+                    }
+                    else if (p[0].EndsWith("GHOST")) {
+                        // GHOST <x> <y>: draw the pointer there; a bare GHOST hides it.
+                        int gx = 0, gy = 0;
+                        bool at = p.Length > 2 && int.TryParse(p[1], out gx) && int.TryParse(p[2], out gy);
+                        try { sync.BeginInvoke((Action)(() => { if (at) pointer.MoveTo(gx, gy); else pointer.Clear(); FollowAll(); })); } catch { }
                         continue;
                     }
                     else if (p[0].EndsWith("HIDE")) Interlocked.Exchange(ref OverlayForm.hideUntil, DateTime.UtcNow.AddMilliseconds(Math.Max(50, Math.Min(n, 10000))).Ticks);
@@ -233,6 +295,7 @@ public static class OutlineHost {
 
     static void FollowAll() {
         foreach (WindowOutline o in outlines) o.Follow();
+        pointer.Follow(outlines);
     }
 }
 '@

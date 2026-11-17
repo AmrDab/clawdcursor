@@ -46,7 +46,7 @@ import { psOpts, powershellExe } from '../platform/ps-spawn';
 import * as readline from 'readline';
 import { getPackageRoot } from '../paths';
 import { macOverlayBinary } from '../platform/mac-swift-binary';
-import { setBeforePointerPress, setBeforeCapture, setOwnUiPids, setOnAgentInput, GUARDED_METHODS } from '../platform/pointer-guard';
+import { setBeforePointerPress, setBeforeCapture, setOwnUiPids, setOnAgentInput, setOnAgentPoint, GUARDED_METHODS } from '../platform/pointer-guard';
 import type { PauseAnswer, PauseInfo } from './pause-gate';
 import { publishOverlayState, foreignOverlayState } from './overlay-state';
 import { agentWindows, isStopped, workingIn, workingWindow } from './control';
@@ -257,6 +257,11 @@ class ControlBanner {
     const line = w ? `TARGET ${Number(w.handle) || 0} ${w.processId}${others}` : 'TARGET';
     if (line === this.target) return;
     if (send(this.outlineChild, line)) this.target = line;
+  }
+
+  /** The ghost cursor: the outline draws a small pointer here (screen pixels, Windows) for about a second and a half. */
+  ghost(x: number, y: number): void {
+    if (process.platform === 'win32') send(this.outlineChild, `GHOST ${x} ${y}`);
   }
 
   private activity = '';
@@ -544,6 +549,7 @@ export const controlBanner = new ControlBanner();
 setBeforePointerPress(() => controlBanner.dodge());
 setOwnUiPids(() => [...controlBanner.overlayPids(), ...foreignOverlayState().pids]);
 // Every guarded input says what it does: the running pill reads "Typing in Edge", not just "in progress".
+setOnAgentPoint((x, y) => controlBanner.ghost(x, y));
 setOnAgentInput(method => {
   const label = activityLabel(method, workingIn()?.processName, workingIn()?.appName);
   if (label) controlBanner.setActivity(label);
