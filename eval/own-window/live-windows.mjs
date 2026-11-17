@@ -191,7 +191,10 @@ async function startEdge() {
   const port = await new Promise(res => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
   const page = path.join(home, 'edge-test-page.html');
   fs.writeFileSync(page, EDGE_PAGE);
-  const child = spawn(exe, ['--inprivate', '--new-window', `--remote-debugging-port=${port}`, `--user-data-dir=${path.join(home, 'edge')}`, '--no-first-run', pathToFileURL(page).href],
+  const child = spawn(exe, ['--inprivate', '--new-window', `--remote-debugging-port=${port}`, `--user-data-dir=${path.join(home, 'edge')}`, '--no-first-run',
+    // A new profile signed in with the Windows account and installed a synced extension, whose sign-up tab the connect
+    // then picked over the test page (live 2026-11-17): no extensions, no sync.
+    '--disable-extensions', '--disable-sync', pathToFileURL(page).href],
     { stdio: 'ignore' });
   child.on('error', e => notes.push('Edge: ' + e.message));
   R.edge = { pid: child.pid, port };   // from here on cleanup can find it; the pid is replaced by the port's owner below
