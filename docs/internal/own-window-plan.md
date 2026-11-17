@@ -54,6 +54,15 @@ No method moved the cursor or changed the user's text.
 3. **Browsers and Electron ignore posted input.** Their background rung is the existing CDP path (Input.insertText / dispatchMouseEvent), not R1.
 4. **To check:** the ps-bridge uses the same managed UIA client, so clawdcursor may not see WinForms controls of other apps at all.
 
+   **Checked by reading, not by a live run (Windows build, 2026-11-16):** the ps-bridge differs from the probe in one way that
+   matters: it registers the managed client-side proxies from compiled code (`UiaProxies.Register`), which the probe's script
+   frame cannot, so a standard-class Win32 control (class `Edit`, `Button`: a Save As dialog) shows up there as Edit / Button
+   with Value / Invoke. Those proxies key on the exact class name, and a WinForms control's class is
+   `WindowsForms10.EDIT.app.0.<suffix>`, so a WinForms TextBox most likely still reads as a Pane with no ValuePattern. Not
+   confirmed on a live WinForms window. Either way the fix is the same and is built: `deliver-to-window` finds the child HWND
+   by class (contains EDIT / BUTTON) and matches it by its WM_GETTEXT text or its UIA name, so a by-name set_value / click on
+   such a control works without UIA patterns (ladder step R1, after R0 misses).
+
 ## The design
 
 ### 1. The agent's windows

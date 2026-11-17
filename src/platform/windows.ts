@@ -46,6 +46,9 @@ import type {
   MouseButton,
   ScrollDirection,
   WaitForElementQuery,
+  DeliverTarget,
+  DeliverInput,
+  DeliverResult,
   WindowState,
   FocusActivation,
 } from './types';
@@ -802,6 +805,21 @@ export class WindowsAdapter implements PlatformAdapter {
     const n = this.routeNotes.join('; ');
     this.routeNotes = [];
     return n || null;
+  }
+
+  async deliverToWindow(target: DeliverTarget, input: DeliverInput): Promise<DeliverResult> {
+    try {
+      const r = await psRunner.run({ cmd: 'deliver-to-window', ...target, ...input }) as Record<string, unknown> | null;
+      return {
+        success: r?.success === true,
+        ...(typeof r?.method === 'string' ? { method: r.method } : {}),
+        ...(typeof r?.verified === 'boolean' ? { verified: r.verified } : {}),
+        ...(typeof r?.reason === 'string' ? { reason: r.reason } : {}),
+        ...(typeof r?.error === 'string' ? { error: r.error } : {}),
+      };
+    } catch (e) {
+      return { success: false, reason: 'post-failed', error: e instanceof Error ? e.message : String(e) };
+    }
   }
 
   /** Put window `handle` back in front, verified (ps-bridge `restore-foreground`: the foreground-lock workaround). */

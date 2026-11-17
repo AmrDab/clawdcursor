@@ -1161,6 +1161,108 @@ function Cmd-RestoreForeground {
     return @{ success = $ok; restored = $ok }
 }
 
+# ── Command: deliver-to-window (rung R1) ──────────────────────────────────────
+# Text, a whole value or a click for a control of a BACKGROUND window, by window messages: no focus, no cursor.
+# Native Win32 / WinForms / WPF-hosted edits and buttons take them; Chromium and Electron ignore them (CDP is their route).
+# Refused: the user's foreground window, a password edit, a Chromium window. An elevated target (UIPI) answers access
+# denied: reported as `uipi`, never retried.
+function Find-DeliverControl {
+    param([long]$root, [string]$kind, [string]$name)
+    $want = if ($kind -eq 'click') { 'BUTTON' } else { 'EDIT' }
+    $cands = @()
+    foreach ($h in [ClawdMsg]::Children($root)) {
+        if (-not ([ClawdMsg]::Cls($h) -match $want)) { continue }
+        $st = [ClawdMsg]::Style($h)
+        if (($st -band 0x10000000) -eq 0 -or ($st -band 0x08000000) -ne 0) { continue }   # WS_VISIBLE, WS_DISABLED
+        $cands += [int64]$h
+    }
+    if (-not $name) {
+        if ($cands.Count -eq 1) { return @{ handle = $cands[0] } }
+        return @{ reason = $(if ($cands.Count -eq 0) { 'no-control' } else { 'ambiguous' }) }
+    }
+    $w = $name.Trim().ToLowerInvariant()
+    $exact = $null; $part = $null
+    foreach ($h in $cands) {
+        $names = @(([ClawdMsg]::Text($h) -replace '&', '').Trim().ToLowerInvariant())
+        try { $names += [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$h).Current.Name.Trim().ToLowerInvariant() } catch {}
+        if ($null -eq $exact -and ($names -contains $w)) { $exact = $h }
+        if ($null -eq $part -and (@($names | Where-Object { $_ -and $_.Contains($w) }).Count -gt 0)) { $part = $h }
+    }
+    $pick = if ($null -ne $exact) { $exact } else { $part }
+    if ($null -eq $pick) { return @{ reason = 'no-control' } }
+    return @{ handle = $pick }
+}
+
+function Cmd-DeliverToWindow {
+    param($cmd)
+    $props = $cmd.PSObject.Properties.Name
+    $kind = @('text', 'setText', 'click' | Where-Object { $props -contains $_ -and $null -ne $cmd.$_ -and -not ($cmd.$_ -is [bool] -and -not $cmd.$_) })
+    if ($kind.Count -ne 1) { return @{ success = $false; reason = 'bad-input'; error = 'give exactly one of text, setText, click' } }
+    $kind = $kind[0]
+    $roots = @()
+    if ($cmd.handle) {
+        $r = [Win32UIA]::GetAncestor([IntPtr][int64]$cmd.handle, 2)
+        $roots = @([int64]$(if ($r -eq [IntPtr]::Zero) { [IntPtr][int64]$cmd.handle } else { $r }))
+    } elseif ($cmd.processId) {
+        $roots = @(Get-PidWindowCandidates ([int]$cmd.processId) | ForEach-Object { [int64]$_.Handle })
+    }
+    $fg = [Win32UIA]::GetForegroundWindow()
+    $fgRoot = [int64]$(if ($fg -eq [IntPtr]::Zero) { [IntPtr]::Zero } else { [Win32UIA]::GetAncestor($fg, 2) })
+    $back = @($roots | Where-Object { $_ -ne $fgRoot -and $_ -ne [int64]$fg })
+    if ($back.Count -eq 0) {
+        if ($roots.Count -gt 0) { return @{ success = $false; reason = 'user-foreground'; error = 'that window is the one in front: nothing is sent to the user''s foreground window' } }
+        return @{ success = $false; reason = 'no-window'; error = 'no window to deliver to' }
+    }
+    $found = $null; $miss = 'no-control'
+    foreach ($root in $back) {
+        if ([ClawdMsg]::Cls($root) -like 'Chrome_WidgetWin*') { $miss = 'use-cdp'; continue }
+        $f = Find-DeliverControl $root $kind ([string]$cmd.name)
+        if ($f.handle) { $found = $f.handle; break }
+        if ($f.reason -eq 'ambiguous' -or $miss -ne 'use-cdp') { $miss = $f.reason }
+    }
+    if ($null -eq $found) {
+        $why = @{ 'use-cdp' = 'a Chromium / Electron window ignores posted input: use its page route (CDP)'; 'ambiguous' = 'several controls could take it: name one'; 'no-control' = 'no matching edit / button control with a window handle' }[$miss]
+        return @{ success = $false; reason = $miss; error = $why }
+    }
+    $cls = [ClawdMsg]::Cls($found)
+    $control = @{ class = $cls; handle = $found }
+    if ($kind -ne 'click' -and (([ClawdMsg]::Style($found) -band 0x20) -ne 0)) {   # ES_PASSWORD
+        return @{ success = $false; reason = 'secure-field'; error = 'a password field takes nothing posted to it'; control = $control }
+    }
+    $fail = {
+        param($code)
+        if ($code -eq 5) { return @{ success = $false; reason = 'uipi'; error = 'the window runs elevated (higher integrity): Windows blocks messages to it'; control = $control } }
+        return @{ success = $false; reason = 'post-failed'; error = "the message was not delivered (Win32 error $code)"; control = $control }
+    }
+    $norm = { param($t) ([string]$t) -replace "`r`n", "`n" -replace "`r", "`n" }
+    if ($kind -eq 'click') {
+        $code = [ClawdMsg]::Post($found, 0x00F5, 0, 0)   # BM_CLICK
+        if ($code -ne 0) { return (& $fail $code) }
+        return @{ success = $true; rung = 'R1'; method = 'BM_CLICK'; verified = $false; control = $control }
+    }
+    if ($kind -eq 'setText') {
+        $code = [ClawdMsg]::SetText($found, [string]$cmd.setText)   # WM_SETTEXT
+        if ($code -ne 0) { return (& $fail $code) }
+        $same = ((& $norm ([ClawdMsg]::Text($found))) -ceq (& $norm $cmd.setText))
+        return @{ success = $true; rung = 'R1'; method = 'WM_SETTEXT'; verified = $same; control = $control }
+    }
+    $typed = & $norm $cmd.text
+    $before = (& $norm ([ClawdMsg]::Text($found))).Length
+    foreach ($ch in ([string]$cmd.text).ToCharArray()) {
+        $code = [int]$ch; if ($code -eq 10) { $code = 13 }
+        $e = [ClawdMsg]::Post($found, 0x0102, $code, 0)   # WM_CHAR
+        if ($e -ne 0) { return (& $fail $e) }
+    }
+    # Posted, so the control takes it a moment later: read back until it grew by what was typed.
+    $ok = $false
+    for ($i = 0; $i -lt 10 -and -not $ok; $i++) {
+        $now = & $norm ([ClawdMsg]::Text($found))
+        $ok = ($now.Length -eq $before + $typed.Length) -and $now.Contains($typed)
+        if (-not $ok) { Start-Sleep -Milliseconds 40 }
+    }
+    return @{ success = $true; rung = 'R1'; method = 'WM_CHAR'; verified = $ok; control = $control }
+}
+
 # ── Command: find-element (fuzzy name match) ──────────────────────────────────
 # Does an element name match the requested name? Contains-match, as on macOS and Linux. The reverse (the element's
 # name inside the request: "File name" for "File name:") counts only for a real part of it: a lone "C" from a PDF
@@ -2182,6 +2284,7 @@ while ($true) {
             "list-windows"          { Cmd-ListWindows }
             "focus-window"          { Cmd-FocusWindow $cmd }
             "restore-foreground"    { Cmd-RestoreForeground $cmd }
+            "deliver-to-window"     { Cmd-DeliverToWindow $cmd }
             "find-element"          { Cmd-FindElement $cmd }
             "invoke-element"        { Cmd-InvokeElement $cmd }
             "scroll-into-view"      { Cmd-ScrollIntoView $cmd }

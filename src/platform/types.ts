@@ -197,6 +197,19 @@ export type InvokeAction =
   | 'toggle'
   | 'select';
 
+/** Rung R1: input addressed to a window's control with no focus change and no cursor move (own-window plan). */
+export interface DeliverTarget { processId?: number; handle?: number; /** the control's name: its text or its accessibility name */ name?: string }
+export type DeliverInput = { text: string } | { setText: string } | { click: true };
+export interface DeliverResult {
+  success: boolean;
+  method?: string;
+  /** Read back from the control (text, setText). A click cannot be read back: false. */
+  verified?: boolean;
+  /** Why it was not delivered: uipi (elevated target), secure-field, user-foreground, use-cdp, no-window, no-control, ambiguous, bad-input, post-failed. */
+  reason?: string;
+  error?: string;
+}
+
 export interface WaitForElementQuery {
   name?: string;
   controlType?: string;
@@ -304,6 +317,15 @@ export interface PlatformAdapter {
    * whether focus moved, or that it gave the user's window back. Taking it clears it; null when there is nothing to say.
    */
   takeRouteNote?(): string | null;
+  /**
+   * Optional (Windows): rung R1. Deliver text (`text`: typed at the caret by window messages), a whole value (`setText`) or a
+   * click to a native control of a window that is NOT in front, without taking the foreground or moving the cursor. Never to
+   * the user's foreground window, never into a password field; a Chromium / Electron window is left to CDP; an elevated
+   * target fails as `uipi`, never retried.
+   */
+  deliverToWindow?(target: DeliverTarget, input: DeliverInput): Promise<DeliverResult>;
+  /** Optional (Windows): put window `handle` back in front, verified (the foreground-lock workaround). */
+  restoreForeground?(handle: number): Promise<boolean>;
   /**
    * Optional: false when typeText would expose the text outside this process — e.g. a typing helper that takes it as a
    * command-line argument, visible in the process list. Callers then paste (verified, clipboard restored) instead of

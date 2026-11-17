@@ -107,7 +107,7 @@ export const GUARDED_METHODS: Readonly<Record<string, { kind: 'input' | 'stop' |
   mouseDrag: { kind: 'input', activity: 'Dragging' }, mouseScroll: { kind: 'input', activity: 'Scrolling' },
   typeText: { kind: 'input', activity: 'Typing' }, keyPress: { kind: 'input', activity: 'Pressing keys' },
   keyDown: { kind: 'input', activity: 'Pressing keys' },
-  invokeElement: { kind: 'stop', activity: 'Clicking' }, scrollIntoView: { kind: 'stop', activity: 'Scrolling' },
+  invokeElement: { kind: 'stop', activity: 'Clicking' }, deliverToWindow: { kind: 'stop', activity: 'Typing' }, scrollIntoView: { kind: 'stop', activity: 'Scrolling' },
   setWindowState: { kind: 'stop', activity: 'Arranging windows' }, setWindowBounds: { kind: 'stop', activity: 'Arranging windows' },
   navigate: { kind: 'stop', activity: 'Opening a page' }, click: { kind: 'stop', activity: 'Clicking' },
   clickByText: { kind: 'stop', activity: 'Clicking' }, typeInField: { kind: 'stop', activity: 'Typing' },
