@@ -285,7 +285,7 @@ describe('7. type tool — keys for short text, verified paste for long text, re
     const ctx = makeCtx();
     const typeTool = findTool(buildUnifiedTools(), 'type');
     const result = await typeTool.execute({ text: LONG }, ctx);
-    expect(result.text).toContain('(paste)');
+    expect(result.text).toContain('(paste, clipboard restored)');
     expect(ctx.platform.writeClipboard).toHaveBeenCalledWith(LONG);
     expect(ctx.platform.keyPress).toHaveBeenCalledWith('mod+v');
     expect(ctx.platform.typeText).not.toHaveBeenCalled();

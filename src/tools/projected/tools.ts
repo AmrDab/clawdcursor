@@ -29,7 +29,7 @@ import { wrapUntrustedScreenContent, screenJson, quoteScreenText } from '../../c
 import { resolveRef } from '../../core/sense/ui-map-resolve';
 import { ensureVisible } from '../../core/sense/ui-map-visible';
 import { findActionButton, findInputField } from '../../core/sense/ui-map-find';
-import { waitForPaste, writeClipboardVerified, readBackTyped, setResult, setVerdict, fieldRead, typesAsKeys, EMPTY_AFTER_TYPING, selectAllScope, type Retyped } from '../paste-guard';
+import { pasteChoice, CLIPBOARD_HELD_REFUSAL, waitForPaste, writeClipboardVerified, readBackTyped, setResult, setVerdict, fieldRead, typesAsKeys, EMPTY_AFTER_TYPING, selectAllScope, type Retyped } from '../paste-guard';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../../core/control';
 import { timeWait } from '../../core/observability/steps';
 import { unguarded } from '../../platform/pointer-guard';
@@ -809,7 +809,13 @@ export function buildUnifiedTools(): UnifiedTool[] {
         ctx.platform.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
         const privateTyping = ctx.platform.typingIsPrivate?.() !== false;
         let how = 'keys';
-        if (typesAsKeys(body) && privateTyping) {
+        const wantKeys = typesAsKeys(body) && privateTyping;
+        // A clipboard of an image or a file cannot be put back after a paste: type the text instead, or refuse.
+        const choice = wantKeys || !body ? 'paste'
+          : pasteChoice(body, { nonTextClipboard: await ctx.platform.clipboardHoldsNonText?.().catch(() => false) ?? false, privateTyping });
+        if (choice === 'refuse') return { success: false, isError: true, text: CLIPBOARD_HELD_REFUSAL };
+        let restored = false;
+        if (wantKeys || choice === 'keys') {
           // Short plain text: real keystrokes, the user's clipboard never touched. A refusal (a system dialog owns the
           // keyboard) throws: nothing was typed, and the caller is told so.
           await ctx.platform.typeText(body);
@@ -829,6 +835,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
             await waitForPaste(async () => (await ctx.platform.getFocusedElement())?.value, body, { minMs: 150 });
             await unguarded(() => ctx.platform.writeClipboard(prior!)).catch(() => {});
             prior = null;
+            restored = true;
           } catch (err) {
             // The paste failed or was refused: what was meant to be typed must not stay on the user's clipboard.
             if (prior !== null) await unguarded(() => ctx.platform.writeClipboard(prior!)).catch(() => {});
@@ -843,7 +850,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
         // The verdict sits inside the leading "(…)", before any quoted text or window title, so content can never pose as
         // it (result-codes reads it from there).
         // Characters as a person counts them (an emoji is one), not UTF-16 units.
-        const head = `Typed ${[...text].length} chars (${how}${rb.result === 'match' ? ', read back ✓' : ''})`;
+        const head = `Typed ${[...text].length} chars (${how}${how === 'paste' && restored ? ', clipboard restored' : ''}${rb.result === 'match' ? ', read back ✓' : ''})`;
         // A password field: never echo what was typed into it.
         const shown = 'secure' in rb && rb.secure ? `${head} into a password field (not echoed)` : `${head}: "${truncate(text, 60)}"`;
         // What the field shows, as data, short: the evidence the caller needs.

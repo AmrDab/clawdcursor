@@ -45,6 +45,7 @@ import {
   type AppState, type FrontmostInfo, type InvokeResult, type MacAx, type SkippedApp,
 } from './mac-ax';
 import { windowTextIncludes } from './window-text';
+import { clipboardInfoHoldsNonText } from './mac-clipboard';
 import { sleep } from '../sleep';
 
 const execFileAsync = promisify(execFile);
@@ -956,6 +957,15 @@ export class MacOSAdapter implements PlatformAdapter {
       return stdout;
     } catch {
       return '';
+    }
+  }
+
+  async clipboardHoldsNonText(): Promise<boolean> {
+    try {
+      const { stdout } = await execFileAsync('osascript', ['-e', 'clipboard info'], { timeout: 3_000 });
+      return clipboardInfoHoldsNonText(stdout);
+    } catch {
+      return false;
     }
   }
 

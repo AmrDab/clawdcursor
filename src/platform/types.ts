@@ -310,6 +310,11 @@ export interface PlatformAdapter {
    * typing anything sensitive. Absent = private.
    */
   typingIsPrivate?(): boolean;
+  /**
+   * Optional (macOS): whether the clipboard holds something other than text (an image, a file) that saving its text and
+   * writing it back would lose. False when it holds text only, or cannot be told.
+   */
+  clipboardHoldsNonText?(): Promise<boolean>;
   getFocusedElement(): Promise<UiElement | null>;
   /**
    * Optional: the whole text of the foreground window's document (a web page, an editor) read through accessibility
