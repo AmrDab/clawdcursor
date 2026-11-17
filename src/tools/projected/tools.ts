@@ -17,7 +17,7 @@ import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength } f
 import type { InvokeAction, UiElement } from '../../platform/types';
 import { ocrEngine } from '../../platform/ocr-engine';
 import { selectOption, selectedResult } from '../../platform/select-option';
-import { SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, SPARSE_NEXT_STEP, isSparseTree, CUT_VALUE_NEXT_STEP, cdpStepFor } from '../blind-hints';
+import { SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, SPARSE_NEXT_STEP, isSparseTree, CUT_VALUE_NEXT_STEP, cdpStepFor, cdpBrowserPid } from '../blind-hints';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
 import { isBrowserProcess } from '../../platform/browser-config';
 import { agentBrowserConnectOptions, DEFAULT_CDP_PORT } from '../../platform/browser-config';
@@ -254,6 +254,11 @@ export function buildUnifiedTools(): UnifiedTool[] {
         // strict — the agent that asked to expand never silently gets a select.
         // Pure adapter-string retries → works on every OS with zero per-OS code,
         // and only the failing path pays the extra round-trips.
+        const page = action === 'click' ? await cdpOf(ctx, processId) : null;   // see set_field_value
+        if (page && (await page.clickByText(name).catch(() => null))?.success) {
+          ctx.platform.noteRoute?.(CDP_ROUTE);
+          return { success: true, text: `Invoked ${quoteScreenText(name)} via the page (browser).`, targetLabel: name };
+        }
         const ladder: InvokeAction[] = action === 'click' ? ['click', 'select', 'toggle'] : [action];
         const { res, used } = await runActivationLadder(
           (a) => ctx.platform.invokeElement({ name, controlType, processId, action: a, value, within }), ladder);
@@ -348,6 +353,15 @@ export function buildUnifiedTools(): UnifiedTool[] {
         // A role alone is fine: the platform acts on the one field with that role, or refuses when several have it.
         if (!name.trim() && !controlType) {
           return { success: false, text: 'Set failed: name the field (its accessibility name), or pass element_id + snapshot_id from compile_ui. To type into the focused field, use type.', isError: true };
+        }
+        // The browser clawdcursor holds a CDP connection to: a DOM fill, where UIA's set would take its window to the front.
+        const page = await cdpOf(ctx, processId);
+        if (page && name.trim()) {
+          const r = await page.typeByLabel(name, value).catch(() => null);
+          if (r?.success) {
+            ctx.platform.noteRoute?.(CDP_ROUTE);
+            return { ...setVerdict(await readBackTyped(async () => r.read?.() ?? null, value, { whole: true }), value, name, ' (browser)'), targetLabel: name };
+          }
         }
         const field = { name, controlType: await preferControl(ctx.platform, 'set-value', { name, controlType, processId }), processId };
         const before = await valueBefore(ctx, field);
@@ -1400,6 +1414,13 @@ export function buildUnifiedTools(): UnifiedTool[] {
     },
   ];
   return tools;
+}
+
+const CDP_ROUTE = 'CDP page act, focus not moved';
+
+/** The CDP driver when `pid` is the browser it is connected to (a by-name step on it is a page act), else null. */
+async function cdpOf(ctx: AgentToolContext, pid: number | undefined) {
+  return pid !== undefined && await cdpBrowserPid(ctx.cdp) === pid ? ctx.cdp! : null;
 }
 
 /**
