@@ -246,7 +246,7 @@ describe('smart_click never clicks in another app', () => {
     const r = await smartClick.handler({ target: 'New', processId: 3648, timeout: 1500 }, ctx);
     expect(mouseClick).not.toHaveBeenCalled();
     expect(r.isError).toBe(true);
-    expect(r.text).toMatch(/^refused: the point "New" matched is in "Accessibility Access" \(UserNotificationCenter, pid 777\), which is on top of .*— nothing was clicked\. Bring .* to the front or close the dialog, then try again/);
+    expect(r.text).toMatch(/^refused: the point "New" matched is in "Accessibility Access" \(UserNotificationCenter, pid 777\), which is on top of .*— nothing was clicked\. Bring .* to the front \(or close the window on top of it\), then try again/);
     expect((platform as { windowAtPoint: ReturnType<typeof vi.fn> }).windowAtPoint).toHaveBeenCalledWith(2848, -1003);
     expect(classifyResult(r.text, true, true, 'mcp')).toMatchObject({ outcome: 'refused', code: 'FOREGROUND_CHANGED' });
   });
