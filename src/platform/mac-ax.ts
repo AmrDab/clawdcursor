@@ -236,6 +236,7 @@ export function toUiElement(raw: any, depth?: number, processId?: number): UiEle
   const label: string = raw.name ?? '';
   const secure = raw.secure === true || raw.subrole === 'AXSecureTextField';
   const value = secure || raw.value === undefined || raw.value === null ? undefined : String(raw.value);
+  const bounds = raw.bounds ?? { ...ZERO_RECT };
   // A checkbox, radio or switch keeps its tick in AXValue (0 / 1 / 2 = mixed): UiElement.checked, as on Windows and Linux.
   // Only for those roles: a slider at 1 is not "checked".
   const role = String(raw.controlType ?? raw.role ?? '');
@@ -246,14 +247,16 @@ export function toUiElement(raw: any, depth?: number, processId?: number): UiEle
     controlType: String(raw.controlType ?? raw.role ?? '').replace(/^AX/, ''),
     subrole: raw.subrole,
     secure,
-    bounds: raw.bounds ?? { ...ZERO_RECT },
+    bounds,
     value,
     enabled: raw.enabled,
     focused: raw.focused,
     selected: raw.selected,
     disabled: raw.enabled === false ? true : undefined,
     busy: raw.busy,
-    offscreen: raw.offscreen,
+    // No area, no place on screen: Chrome gives an element scrolled out of a page a frame of height 0 at the window's edge
+    // (Mac bench 2026-11-17: "Answer" @270,960 198x0). Offscreen, as on Windows and Linux, so nothing clicks that edge.
+    offscreen: raw.offscreen ?? (bounds.width > 0 && bounds.height > 0 ? undefined : true),
     expandable: raw.expandable,
     expanded: raw.expanded,
     ...(checked !== undefined ? { checked } : {}),

@@ -43,6 +43,19 @@ const KEY_NAME_ALIASES: Record<string, string[]> = {
   '%': ['Percent'],
 };
 
+/**
+ * The page's name when the focus is on a web page itself (macOS AXWebArea), not in the field `target` names; null
+ * otherwise. A page named like the target is what was asked for, and one with no name is not judged. A document role is
+ * not judged either: Notepad's and Word's documents are where typed text goes.
+ */
+export function focusStayedOnPage(el: { name?: string; controlType?: string } | null | undefined, target: string): string | null {
+  const role = String(el?.controlType ?? '').replace(/^AX/, '').toLowerCase();
+  if (!el || role !== 'webarea') return null;
+  const lc = (s: string | undefined) => (s ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const n = lc(el.name), t = lc(target);
+  return n === '' || n.includes(t) || t.includes(n) ? null : el.name!;
+}
+
 /** Control types that take typed text, across UIA / AX / AT-SPI names. */
 const EDITABLE_TYPE = /edit|entry|textfield|textarea|text field|text area|combo|password|document/i;
 
@@ -921,6 +934,19 @@ export function getSmartTools(): ToolDefinition[] {
 
           if (!focused) {
             return { text: `Could not find element "${target}" to focus before typing${whyNot ? ` — ${whyNot}` : ''}`, isError: true };
+          }
+
+          // Mac bench 2026-11-17: "Answer", scrolled out of view at the end of a long page, took the focus by name, yet the
+          // page kept it: the text went to the page, and the reply said it went into "Answer".
+          let page: string | null = null;
+          try { page = focusStayedOnPage(await ctx.a11y.getFocusedElement(), target); } catch { /* unread: no evidence */ }
+          if (page !== null) {
+            return {
+              text: `smart_type "${target}": nothing was typed — the focus stayed on the page${page ? ` ${quoteScreenText(page)}` : ''}, not in that field: ` +
+                `the element exists but is not visible on screen, or did not take the focus. ` +
+                `accessibility {"action":"set_value","name":${JSON.stringify(target)},"value":"<text>"} sets it without the focus.`,
+              isError: true,
+            };
           }
         }
 

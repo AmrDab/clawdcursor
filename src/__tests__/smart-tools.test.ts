@@ -869,6 +869,19 @@ describe('Smart Tools', () => {
       expect(result.text).not.toMatch(/replaced its content/);
     });
 
+    // Mac bench 2026-11-17: "Answer", out of view at the end of a long page, took the focus by name and the page kept it.
+    it('with a target, a web page that kept the focus gets nothing typed', async () => {
+      mockInvokeElement.mockResolvedValue({ success: true });
+      mockGetFocusedElement.mockResolvedValue({ controlType: 'WebArea', name: 'Bench Reading' });
+      const result = await smartType.handler({ text: 'QX-4462-MY', target: 'Answer' }, createCtx());
+      mockGetFocusedElement.mockReset();
+      expect(result.isError).toBe(true);
+      expect(mockTypeText).not.toHaveBeenCalled();
+      expect(mockKeyPress).not.toHaveBeenCalled();
+      expect(result.text).toMatch(/nothing was typed — the focus stayed on the page "Bench Reading", not in that field/);
+      expect(result.text).toContain('accessibility {"action":"set_value","name":"Answer","value":"<text>"}');
+    });
+
     it('mode:"replace" replaces a document when asked; a list item still gets no select-all', async () => {
       mockInvokeElement.mockResolvedValue({ success: true });
       mockGetFocusedElement.mockResolvedValue({ controlType: 'Edit', name: '', multiline: true });
