@@ -207,9 +207,11 @@ describe('files that must (not) be there', () => {
     expect(links.filter(l => !fs.existsSync(path.join(ROOT, l)))).toEqual([]);
   });
 
-  it('the glow drawer is gone and nothing spawns it', () => {
-    expect(fs.existsSync(path.join(ROOT, 'scripts', 'edge-glow.ps1'))).toBe(false);
-    for (const src of [read('src', 'core', 'banner.ts'), read('scripts', 'mac', 'overlay.swift'), read('scripts', 'linux', 'overlay.py')]) {
+  // Foreground mode (owner, 2026-11-17) is the full-screen glow, on Windows; macOS and Linux still have the window frame alone.
+  it('the full-screen glow is the Windows foreground-mode drawer: banner.ts spawns it, the macOS and Linux drawers have none', () => {
+    expect(fs.existsSync(path.join(ROOT, 'scripts', 'edge-glow.ps1'))).toBe(true);
+    expect(read('src', 'core', 'banner.ts')).toContain("'edge-glow.ps1'");
+    for (const src of [read('scripts', 'mac', 'overlay.swift'), read('scripts', 'linux', 'overlay.py')]) {
       expect(src).not.toMatch(/edge-glow|['"]glow['"]|CLAWD_NO_GLOW/);
     }
   });

@@ -9,11 +9,14 @@
  *     On Windows every agent window (control.ts agentWindows) has one while it is
  *     visible, in front or not. Spawned/killed in lockstep with the pill;
  *     `TARGET <handle> <pid>` on its stdin names the window, a bare `TARGET` none.
- * Both exit by themselves when their stdin closes: a host that hard-kills this
+ *   - the glow (Windows): a click-through amber glow along every screen edge, the FOREGROUND mode of the indicator: up only
+ *     while the agent's input goes to the foreground (a guarded keyboard/mouse method, an R2 burst: foreground()) and for
+ *     ~1.5 s after; `ON` / `OFF` on its stdin. Background acts (by name, window messages, page acts) get the outline alone.
+ * All exit by themselves when their stdin closes: a host that hard-kills this
  * process must not leave them on screen.
  *
  * One contract, three drawers (same modes, same stdout lines):
- *   - Windows: scripts/banner.ps1 + scripts/window-outline.ps1 (WinForms)
+ *   - Windows: scripts/banner.ps1 + scripts/window-outline.ps1 + scripts/edge-glow.ps1 (WinForms)
  *   - macOS:   scripts/mac/overlay.swift, compiled once into ~/.clawdcursor/bin
  *   - Linux:   scripts/linux/overlay.py (GTK 3; X11, or Wayland via XWayland)
  * Where the drawer can't run (no swiftc, no python3-gi, no display) the overlay
@@ -51,13 +54,15 @@ import type { PauseAnswer, PauseInfo } from './pause-gate';
 import { publishOverlayState, foreignOverlayState } from './overlay-state';
 import { agentWindows, isStopped, workingIn, workingWindow } from './control';
 import { appLabel } from './app-label';
-import { burstCount, resetBurstCount } from '../platform/foreground-burst';
+import { burstCount, resetBurstCount, setOnBurst } from '../platform/foreground-burst';
 
 const IDLE_HIDE_MS = 30_000;
 /** How long the pill stays hidden around an agent's click, and how long to wait for it to be gone before clicking. */
 const DODGE_MS = 1_500;
 const DODGE_SETTLE_MS = 90;
 const PAUSED_OUTLINE = '#3b82f6'; // blue — "your turn"
+/** How long the full-screen glow stays up after the last foreground input, or after a foreground burst ends. */
+const FOREGROUND_TAIL_MS = 1_500;
 
 /**
  * Which form of the overlay to draw: running (default) or paused for the user. `activity` is what the running pill says
@@ -184,8 +189,14 @@ export function outlineFlags(paused: boolean, platform: NodeJS.Platform): string
   return platform === 'win32' ? ['-Color', PAUSED_OUTLINE, '-Paused'] : ['--color', PAUSED_OUTLINE, '--paused'];
 }
 
+/** The glow drawer's flags on Windows: the pill's pid, so the glow stays under it (it never shows while paused). */
+export function glowFlags(pillPid?: number): string[] {
+  return pillPid ? ['-PillPid', String(pillPid)] : [];
+}
+
 class ControlBanner {
   private child: ChildProcess | null = null;        // the pill (carries BANNER_STOP)
+  private glowChild: ChildProcess | null = null;    // the full-screen edge glow: up only while the agent's input goes to the foreground
   private outlineChild: ChildProcess | null = null; // the border around the agent's window
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private pinned = false;
@@ -224,6 +235,14 @@ class ControlBanner {
       psOpts({ stdio, windowsHide: true }));
   };
 
+  private glowSpawner: Spawner = () => {
+    if (process.platform !== 'win32') throw new Error('the full-screen glow is Windows-only');
+    const script = path.join(getPackageRoot(), 'scripts', 'edge-glow.ps1');
+    const stdio: ['pipe', 'pipe', 'ignore'] = ['pipe', 'pipe', 'ignore']; // stdin: ON / OFF / HIDE, and its EOF ends the glow
+    return spawn(powershellExe(), psArgs(script, glowFlags(this.child?.pid)),
+      psOpts({ stdio, windowsHide: true }));
+  };
+
   /**
    * Hide the pill for a moment so an agent's click under it reaches the app instead (it comes back by itself after `ms`).
    * The pill is a real window at the top centre — where browsers keep their tab strip and address bar. Called before every
@@ -233,7 +252,8 @@ class ControlBanner {
   async dodge(ms = DODGE_MS, forCapture = false): Promise<void> {
     const pill = send(this.child, `HIDE ${ms}`);
     const outline = forCapture && send(this.outlineChild, `HIDE ${ms}`);
-    if (pill || outline) await new Promise(r => setTimeout(r, DODGE_SETTLE_MS));
+    const glow = forCapture && send(this.glowChild, `HIDE ${ms}`);
+    if (pill || outline || glow) await new Promise(r => setTimeout(r, DODGE_SETTLE_MS));
   }
 
   // The Windows and macOS overlays keep themselves out of captures (WDA_EXCLUDEFROMCAPTURE, sharingType none + the
@@ -258,6 +278,24 @@ class ControlBanner {
     const line = w ? `TARGET ${Number(w.handle) || 0} ${w.processId}${others}` : 'TARGET';
     if (line === this.target) return;
     if (send(this.outlineChild, line)) this.target = line;
+  }
+
+  private bursts = 0; // R2 foreground bursts in flight
+  private glowTail: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Foreground mode: the agent's input goes to the foreground (a SendInput-backed method, or inside an R2 burst), so the
+   * full-screen glow is up, for the whole burst and a short tail after the last input or the burst's end. Everything else
+   * is background mode: the window frame alone. `burst`: true when a burst starts, false when it ends, none for one input.
+   */
+  foreground(burst?: boolean): void {
+    if (burst !== undefined) this.bursts = Math.max(0, this.bursts + (burst ? 1 : -1));
+    if (this.glowTail) clearTimeout(this.glowTail);
+    this.glowTail = null;
+    send(this.glowChild, 'ON');
+    if (this.bursts > 0) return;
+    this.glowTail = setTimeout(() => { this.glowTail = null; send(this.glowChild, 'OFF'); }, FOREGROUND_TAIL_MS);
+    this.glowTail.unref?.();
   }
 
   /** The ghost cursor: the outline draws a small pointer here (screen pixels, Windows) for about a second and a half. */
@@ -294,9 +332,9 @@ class ControlBanner {
     return this.child !== null;
   }
 
-  /** Pids of the live overlay processes (pill, outline) — the user's controls, never a target (own-ui-guard.ts). */
+  /** Pids of the live overlay processes (pill, outline, glow) — the user's controls, never a target (own-ui-guard.ts). */
   overlayPids(): number[] {
-    return [this.child?.pid, this.outlineChild?.pid].filter((p): p is number => typeof p === 'number');
+    return [this.child?.pid, this.outlineChild?.pid, this.glowChild?.pid].filter((p): p is number => typeof p === 'number');
   }
 
   /** The overlay's current mode; a pending pause is 'paused' with its message. */
@@ -414,6 +452,7 @@ class ControlBanner {
     this.installExitHook();
     this.spawnPill();
     this.spawnOutline();
+    if (!this.paused) this.spawnGlow();
   }
 
   /** The "control in progress" pill — also the BANNER_STOP / kill-switch source. */
@@ -457,7 +496,7 @@ class ControlBanner {
     child.on('error', () => { if (this.child === child) { this.child = null; this.publish(); } });
     // If the pill dies, take the outline down with it so the two never desync
     // into a half-on state (outline without the stop affordance).
-    child.on('exit', () => { if (this.child === child) { this.child = null; this.killOutline(); } });
+    child.on('exit', () => { if (this.child === child) { this.child = null; this.killOutline(); this.killGlow(); } });
   }
 
   /** The border around the agent's window — pure visual, click-through, no stdout. It starts with no window. */
@@ -479,6 +518,24 @@ class ControlBanner {
     if (this.working) this.setWorkingWindow(this.working);
   }
 
+  /** The full-screen glow — pure visual, click-through, starts hidden; `foreground()` raises it. Never in the paused form. */
+  private spawnGlow(): void {
+    if (this.glowChild) return;
+    let child: ChildProcess;
+    try {
+      child = this.glowSpawner({});
+    } catch {
+      return; // cosmetic — never let it break control
+    }
+    this.glowChild = child;
+    this.publish();
+    child.stdin?.on?.('error', () => { /* the glow is gone */ });
+    child.stdout?.on?.('data', d => { if (String(d).includes('GLOW_CAPTURABLE')) this.capturable = true; });
+    child.on('error', () => { if (this.glowChild === child) { this.glowChild = null; this.publish(); } });
+    child.on('exit', () => { if (this.glowChild === child) { this.glowChild = null; this.publish(); } });
+    if (this.bursts > 0 || this.glowTail) send(child, 'ON'); // respawned mid-foreground
+  }
+
   // Neither overlay may outlive its owner — an orphaned "control in progress"
   // pill or outline after the daemon stopped would be a lie on screen. kill() is a
   // sync syscall, safe inside an 'exit' handler.
@@ -488,6 +545,7 @@ class ControlBanner {
     process.on('exit', () => {
       try { this.child?.kill(); } catch { /* gone */ }
       try { this.outlineChild?.kill(); } catch { /* gone */ }
+      try { this.glowChild?.kill(); } catch { /* gone */ }
       publishOverlayState({ pids: [], paused: false });
     });
   }
@@ -497,6 +555,17 @@ class ControlBanner {
     this.outlineChild = null;
     if (o) {
       try { o.kill(); } catch { /* already gone */ }
+    }
+    this.publish();
+  }
+
+  private killGlow(): void {
+    const g = this.glowChild;
+    this.glowChild = null;
+    if (this.glowTail) clearTimeout(this.glowTail);
+    this.glowTail = null;
+    if (g) {
+      try { g.kill(); } catch { /* already gone */ }
     }
     this.publish();
   }
@@ -513,6 +582,7 @@ class ControlBanner {
       try { c.kill(); } catch { /* already gone */ }
     }
     this.killOutline();
+    this.killGlow();
   }
 
   private forceHide(): void {
@@ -536,7 +606,8 @@ class ControlBanner {
   // ── test hooks ──
   __setSpawnerForTests(s: Spawner): void { this.spawner = s; }
   __setOutlineSpawnerForTests(s: Spawner): void { this.outlineSpawner = s; }
-  __setPlatformEnabledForTests(v: boolean): void { this.enabled = v; this.ready = () => v; }
+  __setGlowSpawnerForTests(s: Spawner): void { this.glowSpawner = s; }
+  __setPlatformEnabledForTests(v: boolean): void { this.enabled = v; this.ready = () => v; this.glowSpawner = () => { throw new Error('no glow unless a test gives one'); }; }
   __resetForTests(): void {
     this.forceHide();
     this.pinned = false;
@@ -544,6 +615,7 @@ class ControlBanner {
     this.capturable = process.platform === 'linux';
     this.holds = 0;
     this.idleWhileHeld = false;
+    this.bursts = 0;
   }
 }
 
@@ -559,6 +631,10 @@ setOnAgentInput(method => {
   const label = activityLabel(method, workingIn()?.processName, workingIn()?.appName);
   if (label) controlBanner.setActivity(label);
   controlBanner.setWorkingWindow(workingWindow());
+  // The foreground-mode signal: only synthetic keyboard and mouse input lands in the foreground window.
+  if (GUARDED_METHODS[method]?.kind === 'input') controlBanner.foreground();
 });
+// ...and every R2 burst, for its whole length.
+setOnBurst(start => controlBanner.foreground(start));
 // Captures: the overlay is never in one — it excludes itself where the OS can, and steps aside where it cannot.
 setBeforeCapture(() => controlBanner.beforeCapture());

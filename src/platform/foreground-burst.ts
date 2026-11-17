@@ -25,6 +25,11 @@ let bursts = 0;
 export const burstCount = (): number => bursts;
 export const resetBurstCount = (): void => { bursts = 0; };
 
+/** Told when a burst starts (true) and ends (false): the on-screen indicator goes full-screen for its length (banner.ts). */
+let onBurst: ((start: boolean) => void) | null = null;
+export function setOnBurst(f: ((start: boolean) => void) | null): void { onBurst = f; }
+const announce = (start: boolean) => { try { onBurst?.(start); } catch { /* cosmetic */ } };
+
 export interface Burst {
   /**
    * Run one of the burst's own inputs (every input of the burst goes through here: one that does not reads as the user's). Skipped (`done: false`, and the burst ends as yielded) when the user has typed, moved
@@ -63,6 +68,7 @@ export async function withForegroundBurst<T>(p: BurstPlatform, target: BurstTarg
     return { ran: false, reason: 'no-focus' };
   }
   bursts++;
+  announce(true);
 
   let base = (await p.userIdle().catch(() => null))?.tick;
   let yielded = false;
@@ -87,6 +93,7 @@ export async function withForegroundBurst<T>(p: BurstPlatform, target: BurstTarg
       restored = !before?.handle || await p.restoreForeground(Number(before.handle)).catch(() => false);
       if (cursor) await unguarded(() => p.mouseMove(cursor.x, cursor.y)).catch(() => { restored = false; });
     }
+    announce(false);
   }
   return { ran: true, value, yielded, restored };
 }

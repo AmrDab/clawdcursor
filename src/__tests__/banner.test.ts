@@ -12,9 +12,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
-import { controlBanner, outlineFlags } from '../core/banner';
+import { controlBanner, outlineFlags, glowFlags } from '../core/banner';
 import { stopControl, __setControlDirForTests, __setForegroundReaderForTests } from '../core/control';
 import { guardInputMethods } from '../platform/pointer-guard';
+import { withForegroundBurst } from '../platform/foreground-burst';
 import type { ChildProcess } from 'child_process';
 import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
@@ -35,11 +36,13 @@ class FakeChild extends EventEmitter {
 
 let spawned: FakeChild[];      // pill processes
 let outlines: FakeChild[];     // window-outline processes
+let glows: FakeChild[];        // full-screen glow processes (foreground mode)
 
 beforeEach(() => {
   vi.useFakeTimers();
   spawned = [];
   outlines = [];
+  glows = [];
   controlBanner.__resetForTests();
   controlBanner.__setPlatformEnabledForTests(true);
   controlBanner.__setSpawnerForTests(() => {
@@ -50,6 +53,11 @@ beforeEach(() => {
   controlBanner.__setOutlineSpawnerForTests(() => {
     const c = new FakeChild();
     outlines.push(c);
+    return c as unknown as ChildProcess;
+  });
+  controlBanner.__setGlowSpawnerForTests(() => {
+    const c = new FakeChild();
+    glows.push(c);
     return c as unknown as ChildProcess;
   });
 });
@@ -332,12 +340,93 @@ describe('the macOS pause card takes the keyboard for an answer', () => {
   });
 });
 
-// The drawers put real windows on screen, so these read the source: nothing draws on a whole screen any more.
-describe('no full-screen glow', () => {
+// Two modes (owner, 2026-11-17): background acts get the window frame alone; the full-screen glow is up only while the
+// agent's input goes to the foreground (a guarded SendInput method, or an R2 burst), plus a short tail.
+describe('the indicator has two modes', () => {
+  const TAIL = 1_500;
+  const states = (g: FakeChild) => g.written.filter(l => l === 'ON' || l === 'OFF');
+
+  it('a background act (by name, a window message, a page act) keeps the window frame and never raises the full-screen glow', async () => {
+    controlBanner.pin();
+    const d = guardInputMethods({
+      async invokeElement(_q: unknown) { return { success: true }; }, async deliverToWindow(_q: unknown) { return { ok: true }; },
+      async navigate(_u: string) {}, async typeInField(_q: unknown) {},
+    });
+    await d.invokeElement({ name: 'Save' });
+    await d.deliverToWindow({ processId: 100 });
+    await d.navigate('https://example.com');
+    await d.typeInField({ text: 'x' });
+    controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
+    expect(outlines[0].written).toEqual(['TARGET 1440 100']);
+    expect(glows).toHaveLength(1);
+    expect(glows[0].written).toEqual([]);   // spawned hidden, never told to show
+  });
+
+  it('a foreground input raises the glow, and it goes down ~1.5 s after the last one', async () => {
+    controlBanner.pin();
+    const d = guardInputMethods({ async typeText(_t: string) {}, async mouseClick(_x: number, _y: number) {} });
+    await d.typeText('a');
+    expect(states(glows[0])).toEqual(['ON']);
+    vi.advanceTimersByTime(TAIL - 100);
+    await d.mouseClick(1, 1);   // another input restarts the tail
+    vi.advanceTimersByTime(TAIL - 100);
+    expect(states(glows[0])).toEqual(['ON', 'ON']);
+    vi.advanceTimersByTime(101);
+    expect(states(glows[0])).toEqual(['ON', 'ON', 'OFF']);
+    expect(outlines[0].killed).toBe(false);   // the window frame is untouched throughout
+  });
+
+  it('an R2 burst keeps it up for the whole burst, then the tail', async () => {
+    controlBanner.pin();
+    const w = { processId: 42, handle: 900 };
+    const user = { processId: 10, handle: 500 };
+    let fg = user;
+    let release!: () => void;
+    const hold = new Promise<void>(r => { release = r; });
+    const run = withForegroundBurst({
+      getActiveWindow: async () => fg as never,
+      focusWindow: async () => { fg = w; return true; },
+      restoreForeground: async () => { fg = user; return true; },
+      userIdle: async () => ({ tick: 1, idleMs: 5000 }),
+      cursorPos: async () => null,
+      mouseMove: async () => {},
+    }, { processId: 42 }, async () => { await hold; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(states(glows[0])).toEqual(['ON']);
+    await vi.advanceTimersByTimeAsync(10 * TAIL);   // far longer than the tail: still up, the burst is not over
+    expect(states(glows[0])).toEqual(['ON']);
+    release();
+    await run;
+    expect(states(glows[0])).toEqual(['ON', 'ON']);
+    vi.advanceTimersByTime(TAIL + 1);
+    expect(states(glows[0])).toEqual(['ON', 'ON', 'OFF']);
+  });
+
+  it('the glow rides the pill: killed with it, never spawned in the paused form, spawned again after it', () => {
+    controlBanner.pin();
+    controlBanner.showPaused({ id: 1, message: 'Sign in', since: 0 }, () => {});
+    expect(glows[0].killed).toBe(true);
+    expect(glows).toHaveLength(1);   // no glow while paused
+    controlBanner.showRunning();
+    expect(glows).toHaveLength(2);
+    controlBanner.unpin();
+    expect(glows[1].killed).toBe(true);
+    expect(glowFlags(7)).toEqual(['-PillPid', '7']);
+  });
+});
+
+// The drawers put real windows on screen, so these read the source: the window frame never sizes to a screen; the glow
+// is the full-screen drawer, hidden until told ON.
+describe('the full-screen glow is the foreground-mode drawer only', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
   const read = (...p: string[]) => readFileSync(join(root, ...p), 'utf8');
 
-  it('no outline drawer sizes a window to a screen', () => {
+  it('no outline drawer sizes a window to a screen; only the glow drawer does, and it starts hidden', () => {
+    const glow = read('scripts', 'edge-glow.ps1');
+    expect(glow).toContain('Monitors()');
+    for (const style of ['0x00080000', '0x00000020', '0x08000000', '0x00000080']) expect(glow).toContain(style);
+    expect(glow).toContain('bool shown = false;');
+    expect(glow).toContain('bool want = on && ');
     expect(read('scripts', 'window-outline.ps1')).not.toMatch(/AllScreens|PrimaryScreen|\.Bounds\b/);
     const swift = read('scripts', 'mac', 'overlay.swift');
     expect(swift.slice(swift.indexOf('func windowOutline()'))).not.toMatch(/screen\.frame|NSScreen\.screens/);
