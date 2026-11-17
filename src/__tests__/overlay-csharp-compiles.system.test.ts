@@ -1,6 +1,6 @@
 /**
  * The Windows drawers are C# compiled at run time: Add-Type in scripts/window-outline.ps1 (the outline) and
- * scripts/banner.ps1 (the pill and its orb). Their spawn errors go nowhere, so a compile error means no outline or no
+ * scripts/banner.ps1 (the pill and its mascot). Their spawn errors go nowhere, so a compile error means no outline or no
  * pill, and nothing says so. Here the C# of each is compiled the way the script compiles it (WinForms and System.Drawing
  * referenced), into a DLL in a temp folder. The types are only built, never used: no form, nothing on screen.
  */
@@ -47,10 +47,10 @@ describe.runIf(process.platform === 'win32')('the Windows drawers\' C# compiles'
     expect(r.output).not.toMatch(/error|exception/i);
   }, 60_000);
 
-  it('scripts/banner.ps1: the pill and its orb', () => {
+  it('scripts/banner.ps1: the pill and its mascot', () => {
     const source = csharp('banner.ps1', "-TypeDefinition @'");
     expect(source).toContain('public class NoActivateBannerForm : Form');
-    expect(source).toContain('public class Orb : Control');
+    expect(source).toContain('public class Mascot : Control');
     expect(source).toContain('public void KeepOnTop()');
     const r = compile(source);
     expect(r.status, r.output).toBe(0);

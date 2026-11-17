@@ -90,10 +90,12 @@ describe('the ghost cursor', () => {
     expect(ghosts()).toEqual([]);
   });
 
-  it('the Windows drawer: a small pointer, click-through, no-activate, kept out of captures, just above the agent window', () => {
+  it('the Windows drawer: the mascot as the pointer, click-through, no-activate, kept out of captures, just above the agent window', () => {
     const ps = readFileSync(join(__dirname, '..', '..', 'scripts', 'window-outline.ps1'), 'utf8');
     expect(ps).toContain('public class GhostCursor : OverlayForm');
     expect(ps).toContain('p[0].EndsWith("GHOST")');
+    expect(ps).toContain('GetDpiForMonitor(MonitorFromPoint(');   // sized for the monitor it is on
+    expect(ps).not.toContain('236, 72, 153');   // no longer the pink arrow
     expect(ps).toContain('SetWindowPos(Handle, above, ');
     expect(ps).not.toContain('new IntPtr(-1)');   // never topmost
     // Never the real cursor.

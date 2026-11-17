@@ -454,8 +454,11 @@ describe('the full-screen glow is the foreground-mode drawer only', () => {
     expect(py.slice(start, py.indexOf('\ndef ', start + 1))).not.toMatch(/get_monitor|get_n_monitors/);
   });
 
-  it('the pill\'s orb is still where the OS is set to reduce motion (#392)', () => {
-    expect(read('scripts', 'banner.ps1')).toContain('if (SystemParametersInfo(0x1042, 0, out animate, 0) && !animate) return;');
+  it('the Windows pill draws the mascot (a blink every 4-6 s, nothing else); the macOS orb is still where the OS is set to reduce motion (#392)', () => {
+    const pill = read('scripts', 'banner.ps1');
+    expect(pill).toContain('public class Mascot : Control');
+    expect(pill).toContain('rng.Next(4000, 6001)');
+    expect(pill).not.toContain('class Orb');
     const swift = read('scripts', 'mac', 'overlay.swift');
     expect(swift).toContain('if window == nil || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return }');
   });
