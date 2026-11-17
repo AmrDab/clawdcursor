@@ -125,6 +125,7 @@ public static class ClawdW32 {
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
     [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
     [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
 
     public static void DpiAware() { SetProcessDPIAware(); }
     public static long Fg() { return GetForegroundWindow().ToInt64(); }
@@ -151,6 +152,23 @@ public static class ClawdW32 {
         return lst.ToArray();
     }
 
+    [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", CharSet = CharSet.Unicode)] static extern IntPtr SendMessageTimeoutB(IntPtr h, uint m, IntPtr w, StringBuilder l, uint flags, uint timeout, out IntPtr result);
+    // A control's text in another process: WM_GETTEXT (GetWindowText returns only captions across processes).
+    public static string GetText(long h) {
+        StringBuilder sb = new StringBuilder(4096); IntPtr res;
+        SendMessageTimeoutB(new IntPtr(h), 0x000D, new IntPtr(4096), sb, 2, 1500, out res);
+        return sb.ToString();
+    }
+    // First descendant whose class contains `part` (WinForms classes carry a per-build suffix); 0 when none.
+    public static long DescendantLike(long root, string part) {
+        long found = 0;
+        EnumChildWindows(new IntPtr(root), delegate(IntPtr h, IntPtr l) {
+            if (Cls(h.ToInt64()).Contains(part)) { found = h.ToInt64(); return false; }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+
     // first descendant (any depth) with this window class; 0 when none
     public static long Descendant(long root, string cls) {
         IntPtr direct = FindWindowEx(new IntPtr(root), IntPtr.Zero, cls, null);
@@ -172,6 +190,8 @@ public static class ClawdW32 {
         uint me = GetCurrentThreadId();
         bool attached = fgThread != 0 && fgThread != me && AttachThreadInput(me, fgThread, true);
         if (IsIconic(h)) ShowWindow(h, 9);
+        // Foreground lock: a background process may not take the foreground; a key event from this process lifts it.
+        keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 2, UIntPtr.Zero);   // Alt down/up
         SetForegroundWindow(h);
         if (attached) AttachThreadInput(me, fgThread, false);
         return GetForegroundWindow() == h;
@@ -275,8 +295,8 @@ function Invoke-El($el) {
 function Norm($s) { if ($null -eq $s) { return '' } return ([string]$s).TrimEnd("`r", "`n") }
 
 function Read-UserText {
-    if (-not $script:UserEl) { return $null }
-    return (Read-ElText $script:UserEl)
+    if (-not $script:UserEdit) { return $null }
+    return [ClawdW32]::GetText($script:UserEdit)
 }
 
 # setup only: make the user form the foreground window again
@@ -317,7 +337,9 @@ $f.Controls.Add($t); $f.Controls.Add($b)
 function Start-FormProcess($name, $body) {
     $path = Join-Path $script:TempDir ($name + '.ps1')
     Set-Content -Path $path -Value $body -Encoding ASCII
-    return (Start-Process powershell.exe -PassThru -WindowStyle Hidden -ArgumentList @('-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', $path))
+    # Not Start-Process -WindowStyle Hidden: that sets SW_HIDE in STARTUPINFO, which Windows applies to the process's
+    # first shown window, so the form itself stayed hidden. powershell's own -WindowStyle hides only its console.
+    return (Start-Process powershell.exe -PassThru -ArgumentList @('-NoProfile', '-STA', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', $path))
 }
 
 # ---------------------------------------------------------------- targets
@@ -335,12 +357,16 @@ function Launch-WinForms($t) {
     $p = Start-FormProcess 'target' $TargetFormScript
     $script:OwnedPids[[int]$p.Id] = $true; $t.KillPids += $p.Id
     $script:wPid = [uint32]$p.Id
-    $h = Wait-NewWindow @{} { param($h) [ClawdW32]::Pid($h) -eq $script:wPid } 10000
+    $h = Wait-NewWindow @{} { param($h) [ClawdW32]::Pid($h) -eq $script:wPid -and [ClawdW32]::Txt($h) -eq 'ClawdTarget' } 10000
     if (-not $h) { $t.Skip = 'ClawdTarget form did not appear'; return }
     $t.Top = $h; Add-Owned $h
     $root = $UIA::FromHandle([IntPtr]$h)
-    $t.Edit = Retry-Find { Find-ById $root 't' } 4000
-    $t.Button = Find-ById $root 'b'
+    # The managed UIA client sees WinForms controls in another process as Panes (no Value/Invoke pattern): take them by
+    # their HWND. M0/M5 are still attempted through UIA on those elements and recorded as what they are.
+    $t.EditHwnd = [ClawdW32]::DescendantLike($h, '.EDIT.')
+    $t.ButtonHwnd = [ClawdW32]::DescendantLike($h, '.BUTTON.')
+    if ($t.EditHwnd) { $t.Edit = $UIA::FromHandle([IntPtr]$t.EditHwnd) }
+    if ($t.ButtonHwnd) { $t.Button = $UIA::FromHandle([IntPtr]$t.ButtonHwnd) }
     $t.ClickRead = { param($t) [ClawdW32]::Txt($t.Top) -eq 'CLICKED' }
     $t.ClickReset = { param($t) $null = SendStr-G $t.Top 0xC 'ClawdTarget' }
 }
@@ -473,6 +499,7 @@ function Read-T($t) {
         if ($n -match 'Display is (.+)$') { $v = $matches[1] -replace '[,\s]', ''; if ($v -eq '0') { return '' } return $v }
         return $n
     }
+    if ($t.Kind -eq 'winforms') { return [ClawdW32]::GetText($t.EditHwnd) }
     if (-not $t.Edit) { throw 'no UIA edit element to read back' }
     $v = Read-ElText $t.Edit
     if ($null -eq $v) { throw 'edit element exposes neither ValuePattern nor TextPattern' }
@@ -486,6 +513,7 @@ function Clear-Text($t) {
         if ($el) { Invoke-El $el }
         return
     }
+    if ($t.Kind -eq 'winforms') { $null = SendStr-G $t.EditHwnd 0xC ''; return }
     if ($t.Edit) {
         try { $t.Edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('') } catch { }
     }
@@ -598,6 +626,8 @@ function Run-Methods($t) {
                     param($t)
                     $h = $t.ClickHwnd
                     Mark-Cls $h
+                    # A native button (Win32 / WinForms) takes BM_CLICK; posted mouse messages need capture it never gets.
+                    if ([ClawdW32]::Cls($h) -match 'BUTTON') { Post-G $h 0xF5 0 0; return 'BM_CLICK posted to ' + [ClawdW32]::Cls($h) }
                     $r = $t.Button.Current.BoundingRectangle
                     if ($r.IsEmpty -or [double]::IsInfinity($r.Width)) { throw 'button has no on-screen rectangle' }
                     $c = [ClawdW32]::ToClient($h, [int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2))
@@ -702,10 +732,12 @@ try {
     $up = Start-FormProcess 'user' $UserFormScript
     $script:UserPid = [int]$up.Id
     $script:wPid = [uint32]$up.Id
-    $script:UserHwnd = Wait-NewWindow @{} { param($h) [ClawdW32]::Pid($h) -eq $script:wPid } 10000
+    # Title too: the process's own console window also belongs to this pid for a moment.
+    $script:UserHwnd = Wait-NewWindow @{} { param($h) [ClawdW32]::Pid($h) -eq $script:wPid -and [ClawdW32]::Txt($h) -eq 'ClawdUser' } 10000
     if (-not $script:UserHwnd) { throw 'the ClawdUser form did not appear' }
-    $script:UserEl = Retry-Find { Find-ById ($UIA::FromHandle([IntPtr]$script:UserHwnd)) 'userBox' } 4000
-    if (-not $script:UserEl) { throw 'cannot read the ClawdUser text box through UIA' }
+    # The managed UIA client sees a WinForms TextBox in another process as a Pane with no ValuePattern: read it by message.
+    $script:UserEdit = [ClawdW32]::DescendantLike($script:UserHwnd, '.EDIT.')
+    if (-not $script:UserEdit) { throw 'cannot find the ClawdUser text box' }
     if (-not (Ensure-UserFront)) { throw 'cannot make ClawdUser the foreground window (Windows foreground lock); run from an interactive session' }
     Write-Host ('user window ready, text = "' + (Read-UserText) + '"')
 

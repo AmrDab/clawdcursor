@@ -34,6 +34,26 @@ keeps typing in another window, with the same success rate as today.
 | Stop / pause gate, pointer guard | `control.ts`, `pointer-guard.ts` | every new path goes through it |
 | Eval harness (tasks, state checks, session-log tallies), Linux VM | `eval/perception`, cc-linux | measurement |
 
+## Probe results
+
+### Windows, 2026-11-16 (Windows 11, eval/own-window/probe-windows.ps1, a "user" WinForms window in front)
+
+| App | Text, no focus | Click, no focus | Notes |
+|---|---|---|---|
+| Win32 / WinForms | WM_CHAR ✓, WM_SETTEXT ✓, WM_KEY partial (no Shift) | BM_CLICK ✓, posted mouse ✗ | the managed UIA client sees cross-process WinForms controls as Panes (no Value/Invoke) |
+| Notepad (Win11) | WM_CHAR ✓ (shifted ok), WM_SETTEXT ✓ to RichEditD2DPT | n/a | UIA SetValue works but **takes the foreground** |
+| Calculator (UWP) | WM_CHAR ✓, WM_KEY ✓ to CoreWindow | posted mouse ✗, UIA Invoke ✗ (and took the foreground) | |
+| Edge (Chromium) | WM_CHAR/KEY/SETTEXT ✗ | posted mouse ✓, UIA Invoke ✓ | UIA SetValue works but **takes the foreground**; CDP is the background route |
+| VS Code (Electron) | ✗ all, including UIA SetValue | n/a | CDP (relaunch with a debug port) is the route |
+
+No method moved the cursor or changed the user's text.
+
+**Design consequences:**
+1. **R0 is not guaranteed to stay in the background.** UIA SetValue and Invoke took the foreground in Notepad, Edge and Calculator. So every act must check the foreground afterwards and give it back. "Give it back" needs the foreground-lock workaround (a key event from our process, then SetForegroundWindow); without it the probe could not restore its own user window.
+2. **On Windows, R1 means window messages:** WM_CHAR for text (works with shifted characters, unlike WM_KEYDOWN), WM_SETTEXT for whole edits, BM_CLICK for native buttons.
+3. **Browsers and Electron ignore posted input.** Their background rung is the existing CDP path (Input.insertText / dispatchMouseEvent), not R1.
+4. **To check:** the ps-bridge uses the same managed UIA client, so clawdcursor may not see WinForms controls of other apps at all.
+
 ## The design
 
 ### 1. The agent's windows
