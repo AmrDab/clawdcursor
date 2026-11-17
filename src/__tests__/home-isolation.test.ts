@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { DATA_DIR, TOKEN_PATH } from '../paths';
-import { initServerToken } from '../surface/http-utility';
+import { initServerToken } from '../surface/auth';
 
 const realHome = process.env.CLAWD_TEST_REAL_HOME ?? '';
 const under = (child: string, parent: string) => !path.relative(fs.realpathSync(parent), path.resolve(child)).startsWith('..');

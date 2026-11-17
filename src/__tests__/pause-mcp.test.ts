@@ -14,7 +14,8 @@ import { PassThrough } from 'stream';
 import { controlBanner } from '../core/banner';
 import { pauseGate } from '../core/pause-gate';
 import { getAgentTools } from '../tools/agent';
-import { createUtilityServer, initServerToken } from '../surface/http-utility';
+import { createUtilityServer } from '../surface/http-utility';
+import { initServerToken } from '../surface/auth';
 
 // The daemon token lives in DATA_DIR — never touch the user's real one.
 vi.mock('../paths', async (importOriginal) => ({

@@ -23,8 +23,8 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import type { PlatformAdapter, InvokeAction } from '../platform/types';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
-import type { AgentToolContext, UnifiedTool } from '../core/agent-loop/types';
+import { buildUnifiedTools } from '../tools/projected/tools';
+import type { AgentToolContext, UnifiedTool } from '../tools/projected/types';
 
 function findTool(name: string): UnifiedTool {
   const t = buildUnifiedTools().find(x => x.name === name);

@@ -12,7 +12,7 @@ import type { FrontmostInfo } from '../platform/mac-ax';
 
 vi.mock('os', async (orig) => {
   const real = await orig<typeof import('os')>();
-  return { ...real, default: { ...real.default, platform: () => 'darwin' }, platform: () => 'darwin' };
+  return { ...real, default: { ...real, platform: () => 'darwin' }, platform: () => 'darwin' };
 });
 vi.mock('@nut-tree-fork/nut-js', () => ({
   mouse: { config: {} },

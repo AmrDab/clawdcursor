@@ -8,8 +8,8 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import type { PlatformAdapter, UiElement } from '../platform/types';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
-import type { AgentToolContext } from '../core/agent-loop/types';
+import { buildUnifiedTools } from '../tools/projected/tools';
+import type { AgentToolContext } from '../tools/projected/types';
 
 const NOTE = 'Meeting notes\nOwner: Dana\nStatus: draft\nNext review: Friday\n';
 

@@ -1,21 +1,14 @@
 /**
  * Snapshot builder — assembles a structured Snapshot from the PlatformAdapter.
  *
- * Blind-first scope: accessibility tree only. When a11y can describe the
- * screen, the text-agent reads this and picks an action. When a11y can't
- * (empty tree, canvas app, custom rendering), the text-agent emits
- * `cannot_read` and the vision-agent takes over with real pixels.
- *
- * OCR fusion on top of a11y (merging OCR hits with a11y bounds into a single
- * element list) is a cost-saving enhancement we can layer in later without
- * changing the `Snapshot` contract.
+ * Blind-first scope: accessibility tree only. compileUIMap (ui-map.ts) fuses
+ * OCR on top.
  */
 
 import type { PlatformAdapter } from '../../platform/types';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
 import { isBrowserProcess } from '../../platform/browser-config';
 import type { Snapshot, SnapshotElement, Platform } from './types';
-import { fingerprint } from './fingerprint';
 
 function normPlatform(p: 'darwin' | 'win32' | 'linux'): Platform {
   return p === 'darwin' ? 'macos' : p === 'win32' ? 'windows' : 'linux';
@@ -40,10 +33,6 @@ function looksSecure(controlType?: string, name?: string, subrole?: string): boo
   return false;
 }
 
-/**
- * Capture a structured snapshot. a11y-only for v0.8.1; OCR merge is a
- * future enhancement.
- */
 /** `processId` reads that app's window instead of the focused one. */
 export async function captureSnapshot(adapter: PlatformAdapter, processId?: number): Promise<Snapshot> {
   const capturedAt = Date.now();
@@ -108,13 +97,10 @@ export async function captureSnapshot(adapter: PlatformAdapter, processId?: numb
     }
   } catch { /* a11y unavailable — snapshot stays empty */ }
 
-  const fp = fingerprint(elements, activeWindow?.title);
-
   return {
     platform,
     activeWindow,
     elements,
-    fingerprint: fp,
     ...(offscreen.length ? { offscreen } : {}),
     capturedAt,
     sources,

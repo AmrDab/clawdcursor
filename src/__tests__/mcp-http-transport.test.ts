@@ -14,7 +14,7 @@ import express from 'express';
 import type { AddressInfo } from 'node:net';
 import type { Server as HttpServer } from 'node:http';
 import { z } from 'zod';
-import { startMcpHttp, type McpServerLike } from '../surface/mcp-server';
+import { startMcpHttp, type McpServerLike, type McpHttpHandle } from '../surface/mcp-server';
 
 const TOKEN = 'test-token';
 
@@ -27,6 +27,17 @@ async function makeServer(): Promise<McpServerLike> {
     return { content: [{ type: 'text', text: `slept:${ms}` }] };
   });
   return s as unknown as McpServerLike;
+}
+
+/** A handle as the daemon makes them: a server and its session log (here only the end() the transport calls). */
+async function makeHandle(ended: string[] = []): Promise<McpHttpHandle> {
+  return { server: await makeServer(), sessionLog: { end: (reason: string, kind?: string) => { ended.push(`${kind}:${reason}`); } } };
+}
+
+function mount(app: express.Express, handle: (req: express.Request, res: express.Response) => void): void {
+  app.post('/mcp', handle);
+  app.get('/mcp', handle);
+  app.delete('/mcp', handle);
 }
 
 let http: HttpServer | null = null;
@@ -45,7 +56,8 @@ async function start(): Promise<{ url: URL; created: () => number }> {
     if (req.headers.authorization !== `Bearer ${TOKEN}`) { res.status(401).json({ error: 'unauthorized' }); return; }
     next();
   });
-  const mcp = await startMcpHttp(await makeServer(), app, '/mcp', async () => { created++; return makeServer(); });
+  const mcp = await startMcpHttp(async () => { created++; return makeHandle(); });
+  mount(app, mcp.handle);
   closeMcp = mcp.close;
   http = await new Promise<HttpServer>(r => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
   const port = (http.address() as AddressInfo).port;
@@ -116,7 +128,7 @@ describe('startMcpHttp one-shot JSON-RPC posts (dashboard / curl / CLI)', () => 
       expect(r.status).toBe(200);
       expect(r.body.result.content[0].text).toBe(`echo:${t}`);
     }
-    expect(created()).toBe(0); // sequential one-shots reuse the one server
+    expect(created()).toBe(1); // sequential one-shots reuse the one server
   });
 
   it('run concurrently (a long call does not block the next), alongside an SDK session', async () => {
@@ -140,15 +152,12 @@ describe('startMcpHttp one-shot JSON-RPC posts (dashboard / curl / CLI)', () => 
     expect(r.status).toBe(401);
   });
 
-  it('tells the server of a session when its client session closes', async () => {
+  it('closes the session log of a session when its client session closes (and only then)', async () => {
     const ended: string[] = [];
     const app = express();
     app.use(express.json());
-    const mcp = await startMcpHttp(await makeServer(), app, '/mcp', async () => {
-      const s = await makeServer();
-      s.onSessionEnd = r => ended.push(r);
-      return s;
-    });
+    const mcp = await startMcpHttp(() => makeHandle(ended));
+    mount(app, mcp.handle);
     closeMcp = mcp.close;
     http = await new Promise<HttpServer>(r => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
     const url = new URL(`http://127.0.0.1:${(http.address() as AddressInfo).port}/mcp`);
@@ -161,7 +170,7 @@ describe('startMcpHttp one-shot JSON-RPC posts (dashboard / curl / CLI)', () => 
     await transport.terminateSession();
     await client.close();
     await new Promise(r => setTimeout(r, 50));
-    expect(ended).toEqual(['the client session closed']);
+    expect(ended).toEqual(['session:the client session closed']);
   });
 
   it('an unknown session id is a 404 so the client re-initializes', async () => {

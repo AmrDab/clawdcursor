@@ -6,6 +6,7 @@
  */
 
 import { HOSTS, FAILED, ERROR_CLASSES, HELPERS, PS_BRIDGE_STEP, EXIT_REASONS, ARCHS, APP_KINDS, NAME as NAME_RE } from '../../src/core/observability/telemetry-lists';
+import { RESULT_CODES } from '../../src/core/result-code-list';
 
 interface D1Statement { bind(...values: unknown[]): D1Statement; run(): Promise<unknown> }
 interface D1Database { prepare(sql: string): D1Statement; batch(statements: D1Statement[]): Promise<unknown> }
@@ -25,11 +26,6 @@ const record = (fields: Record<string, Rule>): Rule => v =>
   && Object.keys(v).length === Object.keys(fields).length
   && Object.entries(fields).every(([k, r]) => r((v as Record<string, unknown>)[k]));
 
-/** src/core/result-codes.ts ResultCode (a test fails when the two differ). */
-export const RESULT_CODES = ['CONSENT_REQUIRED', 'KEYBOARD_OWNED', 'SECURE_INPUT', 'SCREEN_LOCKED', 'CAPTURE_DENIED', 'VISION_DISABLED',
-  'OWN_UI', 'PAUSED', 'NOT_CONFIRMED', 'DANGEROUS_KEY', 'STOPPED', 'FOREGROUND_CHANGED', 'FENCED', 'CROSS_ORIGIN_FRAME', 'INVALID_ARGS', 'READBACK_MISMATCH', 'REPEATED',
-  'STALE_SCREENSHOT', 'DEVIATION', 'STALE_REF', 'TIMEOUT', 'NOT_FOUND', 'UNSUPPORTED_ACTION', 'ELEMENT_HIDDEN', 'AMBIGUOUS',
-  'ACTION_FAILED', 'NOT_CONNECTED', 'UNKNOWN'];
 
 const NUM = int(2 ** 31 - 1);   // the client clamps to this
 const NAME = match(NAME_RE);

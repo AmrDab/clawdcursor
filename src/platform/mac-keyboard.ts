@@ -1,7 +1,7 @@
 /**
  * What every macOS keystroke path shares: who owns the keyboard right now, and how a keystroke program reaches osascript.
  *
- * There are two macOS keyboards in clawdcursor — `MacOSAdapter` (the platform adapter the built-in agent and a few tools use)
+ * There are two macOS keyboards in clawdcursor — `MacOSAdapter` (the platform adapter a few tools use)
  * and `NativeDesktop` (`ctx.desktop`, which the MCP tools `type_text` / `key_press` / `smart_type` use). The "does a system
  * dialog own the keyboard?" guard (B11) was written into the first only, so the route Claude Code actually takes never asked.
  * Both now ask this one class.
@@ -9,11 +9,17 @@
 import { execFile } from 'child_process';
 import { logger } from '../core/observability/logger';
 import { classifyKeyboardOwner, describeKeyboardOwner, type MacAx } from './mac-ax';
+import type { Modifier } from './keys';
 
 /** How long a "the keyboard is free" probe is trusted — a burst of keystrokes probes once. */
 const PROBE_TTL_MS = 250;
 /** A modal dialog of another app is logged once per this long, not once per probe. */
 const WARN_EVERY_MS = 10_000;
+
+/** Each modifier as System Events names it (`super` is Cmd), and the key code of its left-hand key, tapped on its own. */
+export const MAC_MODIFIER: Record<Modifier, { name: string; code: number }> = {
+  ctrl: { name: 'control', code: 59 }, shift: { name: 'shift', code: 56 }, alt: { name: 'option', code: 58 }, super: { name: 'command', code: 55 },
+};
 
 /** The Escape key on its own. (`cmd+Escape` and the like are other keys.) */
 export const isBareEscape = (combo: string | undefined): boolean => combo !== undefined && /^(escape|esc)$/i.test(String(combo).trim());

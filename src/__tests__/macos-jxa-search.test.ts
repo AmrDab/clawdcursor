@@ -12,56 +12,8 @@
  *    specifier), so it always wrote 0 and reported "Off".
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import vm from 'node:vm';
-import { getPackageRoot } from '../paths';
-
-type Props = { name?: string | null; desc?: string; role: string; value?: unknown; x?: number; y?: number };
-type FakeEl = Record<string, any>;
-
-function coll(arr: FakeEl[]): any {
-  // Callable like a JXA collection (`win.uiElements()`), and readable in one
-  // batch (`win.uiElements.name()`). A function's own `name` is read-only, so
-  // define it rather than assign.
-  const c: any = () => arr;
-  Object.defineProperty(c, 'name', { value: () => arr.map(e => e.name()) });
-  c.description = () => arr.map(e => e.description());
-  c.role = () => arr.map(e => e.role());
-  for (const t of ['buttons', 'textFields', 'textAreas', 'checkboxes', 'radioButtons', 'popUpButtons', 'staticTexts', 'groups', 'menus']) c[t] = () => [];
-  // `kids.uiElements.role()`: every child's children's roles, nested, in one Apple Event.
-  Object.defineProperty(c, 'uiElements', { get: () => { reads.n++; return { role: () => arr.map(e => e.kidRoles()) }; } });
-  c.whose = (q: { role: string }) => coll(arr.filter(e => e.role() === q.role));
-  arr.forEach((e, i) => { c[i] = e; });
-  Object.defineProperty(c, 'length', { value: arr.length });
-  return c;
-}
-
-const reads = { n: 0 };
-function el(p: Props, kids: FakeEl[] = []): FakeEl {
-  const o: FakeEl = {
-    name: () => p.name ?? null,
-    description: () => p.desc ?? '',
-    role: () => p.role,
-    position: () => [p.x ?? 0, p.y ?? 0],
-    size: () => [100, 20],
-    click: () => { o.clicked = true; },
-    actions: { AXPress: { perform: () => { o.pressed = true; if (p.role === 'AXCheckBox') p.value = p.value ? 0 : 1; } } },
-    attributes: { AXValue: { value: () => p.value } },
-    subrole: () => '',
-    miniaturized: () => false,
-    uiElements: coll(kids),
-    kidRoles: () => kids.map(k => k.role()),
-  };
-  // Count child reads so a test can prove leaf controls are never descended.
-  const kidsColl = o.uiElements;
-  Object.defineProperty(o, 'uiElements', { get: () => { reads.n++; return kidsColl; } });
-  // JXA: `el.value()` reads, `el.value = x` writes.
-  const read = () => p.value;
-  Object.defineProperty(o, 'value', { get: () => read, set: (v) => { p.value = v; o.written = v; } });
-  o.props = p;
-  return o;
-}
+import { el, coll, reads, loadScript, runInvoke, runFind } from './helpers/jxa-harness';
 
 function fixture() {
   const label = el({ name: 'First name', role: 'AXStaticText', value: 'First name' });
@@ -84,37 +36,6 @@ function popoverFixture() {
   const proc = { windows: coll([win]), unixId: () => 4242, name: () => 'Freeform' };
   const app = { processes: { where: () => [proc] }, includeStandardAdditions: false };
   return { pen, Application: () => app };
-}
-
-function loadScript(file: string): string {
-  return readFileSync(join(getPackageRoot(), 'scripts', 'mac', file), 'utf8').replace(/^#!.*\n/, '');
-}
-
-/** Foundation's stdin as the scripts read it (-ArgsStdin): readDataToEndOfFile → NSString → unwrap. */
-const stdinOf = (stdin = '') => ({
-  NSFileHandle: { fileHandleWithStandardInput: { readDataToEndOfFile: stdin } },
-  NSString: { alloc: { initWithDataEncoding: (data: string) => data } },
-  NSUTF8StringEncoding: 4,
-});
-
-function runInvoke(fx: Pick<ReturnType<typeof fixture>, 'Application'>, argv: string[], stdin?: string) {
-  const ctx = vm.createContext({
-    Application: fx.Application, JSON, Date, String, Number, Math, Array, Object,
-    ObjC: { unwrap: (x: unknown) => x }, $: stdinOf(stdin),
-  });
-  return JSON.parse(vm.runInContext(`${loadScript('invoke-element.jxa')}\nrun(${JSON.stringify(argv)})`, ctx));
-}
-
-function runFind(fx: Pick<ReturnType<typeof fixture>, 'Application'>, argv: string[], stdin?: string) {
-  const ctx = vm.createContext({
-    Application: fx.Application, JSON, Date, String, Number, Math, Array, Object,
-    ObjC: { unwrap: (x: unknown) => x, import: () => {} },
-    $: {
-      NSProcessInfo: { processInfo: { arguments: ['osascript', '-l', 'JavaScript', 'find-element.jxa', ...argv] } }, exit: () => {},
-      ...stdinOf(stdin),
-    },
-  });
-  return JSON.parse(vm.runInContext(loadScript('find-element.jxa'), ctx));
 }
 
 describe('macOS invoke-element.jxa', () => {

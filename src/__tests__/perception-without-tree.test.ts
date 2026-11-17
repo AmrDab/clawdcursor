@@ -5,9 +5,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { imageCost, imageScale } from '../core/agent-loop/coord-scale';
+import { imageCost, imageScale } from '../platform/coord-scale';
 import { opaqueArea, opaqueAreaLine, shownHelp } from '../tools/blind-hints';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { buildUnifiedTools } from '../tools/projected/tools';
 import { stopControl, __setControlDirForTests } from '../core/control';
 import type { UiElement } from '../platform/types';
 
@@ -65,15 +65,9 @@ describe('opaque area (#356)', () => {
 });
 
 // opaqueArea sees only what the bridges send: Windows and macOS dropped every unnamed childless node, the drawn surface included.
+// ps-bridge is run for real in perception-without-tree.system.test.ts; ax-helper only runs against a live AX tree.
 describe('the bridges keep a large unnamed leaf (#356)', () => {
   const read = (f: string) => fs.readFileSync(path.join(__dirname, '../../scripts', f), 'utf8');
-  it('ps-bridge: the pass-through branch returns a role-only node for a leaf covering a quarter of the walk root', () => {
-    const ps = read('ps-bridge.ps1');
-    expect(ps).toMatch(/if \(\$RawDepth -eq 0\) \{ \$r0 = \$cur\.BoundingRectangle; \$script:walkRootArea = /);
-    const leaf = ps.slice(ps.indexOf('if ($childNodes.Count -eq 0) {'), ps.indexOf('return $childNodes'));
-    expect(leaf).toMatch(/\$r\.Width \* \$r\.Height -ge 0\.25 \* \$script:walkRootArea/);
-    expect(leaf).toMatch(/return \[ordered\]@\{ name = ""; automationId = ""; controlType = \$typeName/);
-  });
   it('ax-helper: the keep rule keeps a node covering a quarter of the walk root', () => {
     const swift = read('mac/ax-helper.swift');
     expect(swift).toMatch(/if depth == 0 \{ w\.rootArea = sz\.width \* sz\.height \}/);

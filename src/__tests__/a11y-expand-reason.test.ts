@@ -5,9 +5,7 @@
  * (1.5.27 live test on a Mac).
  */
 import { describe, it, expect, vi } from 'vitest';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
-import { getA11yDepthTools } from '../tools/a11y_depth';
-import type { ToolContext } from '../tools/types';
+import { buildUnifiedTools } from '../tools/projected/tools';
 import { untrusted } from '../core/miss-text';
 
 const platform = (res: { success: boolean; data?: Record<string, unknown> }) => ({
@@ -43,16 +41,4 @@ describe.each([
     expect(r).toMatchObject({ success: true, text: `${done} "More options".` });
   });
 
-  it('MCP tool: the platform\'s reason is in the text', async () => {
-    const t = getA11yDepthTools().find(x => x.name === tool)!;
-    const r = await t.handler({ name: 'More options' }, { ensureInitialized: async () => {}, platform: platform({ success: false, data: { error: WHY } }) } as unknown as ToolContext);
-    expect(r.isError).toBe(true);
-    expect(r.text).toBe(`${tool} failed for "More options": ${untrusted(WHY)}.`);
-  });
-
-  it('MCP tool: without a reason, the text is what it always was', async () => {
-    const t = getA11yDepthTools().find(x => x.name === tool)!;
-    const r = await t.handler({ name: 'More options' }, { ensureInitialized: async () => {}, platform: platform({ success: false }) } as unknown as ToolContext);
-    expect(r.text).toBe(`${tool} failed for "More options".`);
-  });
 });

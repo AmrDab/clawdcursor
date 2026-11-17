@@ -7,32 +7,32 @@
  */
 
 import {
-  canonicalize,
   currentSnapshot,
   readStoredSnapshot,
+  toolCounts,
   writeSnapshot,
 } from '../src/schema/snapshot';
 
-function main(): void {
+async function main(): Promise<void> {
   const writeMode = process.argv.includes('--write');
-  const current = currentSnapshot();
-  const stored = readStoredSnapshot();
+  const current = await currentSnapshot();
 
   if (writeMode) {
-    writeSnapshot();
-    process.stdout.write(`Wrote schema.snapshot.json (${canonicalize().length} tools)\n`);
+    writeSnapshot(current);
+    process.stdout.write(`Wrote schema.snapshot.json (${toolCounts(current)} tools)\n`);
     return;
   }
 
+  const stored = readStoredSnapshot();
   if (stored === null) {
-    process.stderr.write('schema.snapshot.json missing. Generate it with: npx tsx scripts/build-mcp-schema.ts --write\n');
+    process.stderr.write('schema.snapshot.json missing. Generate it with: npm run test:mcp-schema-snapshot:update\n');
     process.exit(2);
   }
 
   if (stored !== current) {
-    process.stderr.write('MCP schema has drifted from the committed snapshot.\n');
+    process.stderr.write('What agents receive from initialize / tools/list has drifted from the committed snapshot.\n');
     process.stderr.write('If this change is intentional, update the snapshot with:\n');
-    process.stderr.write('  npx tsx scripts/build-mcp-schema.ts --write\n');
+    process.stderr.write('  npm run test:mcp-schema-snapshot:update\n');
     process.stderr.write('\nDiff (first 2000 chars):\n');
     const a = stored.split('\n');
     const b = current.split('\n');
@@ -48,7 +48,7 @@ function main(): void {
     process.exit(1);
   }
 
-  process.stdout.write(`MCP schema snapshot OK (${canonicalize().length} tools)\n`);
+  process.stdout.write(`MCP schema snapshot OK (${toolCounts(current)} tools)\n`);
 }
 
-main();
+void main().catch(err => { process.stderr.write(`${err instanceof Error ? err.stack : String(err)}\n`); process.exit(1); });

@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { AGENT_ADDON, DOCTOR_ADDON, addonPath, addonVersion, doctorSetupStep, ensureAddons, installArgs, installCommandText, npmCli, type AddonDeps } from '../surface/addons';
-import { VERSION } from '../surface/version';
+import { VERSION } from '../version';
 
 let dataDir: string;
 beforeEach(() => { dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdcursor-addons-')); });

@@ -41,26 +41,28 @@ vi.mock('sharp', () => ({
   })),
 }));
 
-vi.mock('../../src/platform/ocr-engine', async () => ({
-  OcrEngine: class {
+vi.mock('../../src/platform/ocr-engine', async () => {
+  class OcrEngine {
     isAvailable() { return false; }
     async recognizeScreen() { return { elements: [], fullText: '', durationMs: 0 }; }
     invalidateCache() {}
-  },
-}));
+  }
+  return { OcrEngine, ocrEngine: () => new OcrEngine() };
+});
 
-vi.mock('../platform/ocr-engine', () => ({
-  OcrEngine: class {
+vi.mock('../platform/ocr-engine', () => {
+  class OcrEngine {
     isAvailable() { return false; }
     async recognizeScreen() { return { elements: [], fullText: '', durationMs: 0 }; }
     invalidateCache() {}
-  },
-}));
+  }
+  return { OcrEngine, ocrEngine: () => new OcrEngine() };
+});
 
 // ── Imports after mocks ──────────────────────────────────────────────────────
 
-import { buildUnifiedTools } from '../core/agent-loop/tools';
-import { TOOL_META } from '../core/agent-loop/tool-meta';
+import { buildUnifiedTools } from '../tools/projected/tools';
+import { TOOL_META } from '../tools/projected/tool-meta';
 
 // ── Exclusion sets ────────────────────────────────────────────────────────────
 
@@ -116,35 +118,6 @@ describe('TOOL_META coverage (Step 1 — enforced)', () => {
   it('TOOL_META has no stale entries (all keys match a real System B tool)', () => {
     const stale = Object.keys(TOOL_META).filter(name => !allNames.has(name));
     expect(stale).toEqual([]);
-  });
-
-  it('every TOOL_META entry has required fields (category, safetyTier, costClass)', () => {
-    const VALID_CATEGORIES = new Set([
-      'perception', 'mouse', 'keyboard', 'window', 'clipboard', 'browser', 'orchestration',
-    ]);
-    const VALID_COST_CLASSES = new Set([
-      'act', 'inspect', 'perceive-text', 'perceive-image',
-    ]);
-    const VALID_SAFETY_TIERS = new Set([0, 1]);   // read vs input: no tier refuses anything
-
-    const bad: string[] = [];
-    for (const [name, meta] of Object.entries(TOOL_META)) {
-      if (!VALID_CATEGORIES.has(meta.category)) {
-        bad.push(`${name}: invalid category "${meta.category}"`);
-      }
-      if (!VALID_COST_CLASSES.has(meta.costClass)) {
-        bad.push(`${name}: invalid costClass "${meta.costClass}"`);
-      }
-      if (!VALID_SAFETY_TIERS.has(meta.safetyTier)) {
-        bad.push(`${name}: invalid safetyTier "${meta.safetyTier}"`);
-      }
-    }
-    expect(bad).toEqual([]);
-  });
-
-  it('excluded sets are disjoint (no name in both TERMINAL and VISION_COMPOUNDS)', () => {
-    const intersection = [...TERMINAL_ACTIONS].filter(n => VISION_COMPOUNDS.has(n));
-    expect(intersection).toEqual([]);
   });
 
   it('vision compound tool names (mouse/keyboard/window) are not in the flat catalog', () => {

@@ -19,7 +19,7 @@
  *      " - <display name>". Display names are localized, so this misses on a non-English Windows — never a wrong hit.
  */
 import type { WindowInfo } from './types';
-import { normalizeWindowText } from '../tools/window-text';
+import { normalizeWindowText } from './window-text';
 
 export interface AppIdentityHints {
   /** The app's known process names (the alias row's `processNames`). */

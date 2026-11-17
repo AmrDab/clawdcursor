@@ -5,7 +5,7 @@
  * hands out the token; a false negative blocks legitimate local setups.
  */
 import { describe, it, expect } from 'vitest';
-import { isLoopbackHost } from '../surface/http-utility';
+import { isLoopbackHost } from '../surface/auth';
 
 describe('isLoopbackHost', () => {
   it('accepts the loopback family', () => {

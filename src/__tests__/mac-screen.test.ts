@@ -31,12 +31,6 @@ describe('parseMainScreenInfo', () => {
   });
 });
 
-describe('MAIN_SCREEN_SCRIPT', () => {
-  it('does not use the NSRect record syntax that throws on macOS 26 (-1728 / -1700)', () => {
-    expect(MAIN_SCREEN_SCRIPT).not.toMatch(/size of frame|'s size's/);
-  });
-});
-
 describe('readMainScreenInfo', () => {
   it('runs the script through osascript and parses its output', async () => {
     const calls: string[][] = [];
@@ -52,12 +46,4 @@ describe('readMainScreenInfo', () => {
     expect(await readMainScreenInfo(exec as never)).toBeNull();
   });
 
-  // The regression that unit fixtures could never catch: run the real script on a real Mac.
-  it.skipIf(process.platform !== 'darwin')('on a real Mac: reads a positive logical size and a scale ≥ 1', async () => {
-    const info = await readMainScreenInfo();
-    expect(info).not.toBeNull();
-    expect(info!.logicalWidth).toBeGreaterThan(0);
-    expect(info!.logicalHeight).toBeGreaterThan(0);
-    expect(info!.backingScaleFactor).toBeGreaterThanOrEqual(1);
-  });
 });

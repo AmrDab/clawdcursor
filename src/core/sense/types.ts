@@ -1,8 +1,7 @@
 /**
  * Sense-layer shared types — Snapshot, SnapshotElement, Platform.
  *
- * These types are used by the snapshot builder, fingerprint, rank, and the
- * agent-loop prompt renderer. Extracted here so they survive pipeline deletion.
+ * Used by the snapshot builder (snapshot.ts) and the UI-map compiler (ui-map*.ts).
  */
 
 export type Platform = 'windows' | 'macos' | 'linux';
@@ -36,12 +35,10 @@ export interface SnapshotElement {
 }
 
 /**
- * A merged perception snapshot — one call, parallel OCR + a11y + optional CDP.
- * Modeled on the per-turn perception snapshot; extended with fingerprint for
- * stagnation detection.
+ * A perception snapshot. captureSnapshot fills it from the a11y tree only;
+ * OCR is fused on top later, by compileUIMap.
  */
 export interface Snapshot {
-  /** Source platform. */
   platform: Platform;
   /** Active window when the snapshot was taken. */
   activeWindow?: {
@@ -50,13 +47,8 @@ export interface Snapshot {
     title: string;
     bounds: { x: number; y: number; width: number; height: number };
   };
-  /** All elements merged from a11y + OCR + CDP, de-duped by spatial overlap. */
+  /** Elements with on-screen bounds. */
   elements: SnapshotElement[];
-  /**
-   * Stable fingerprint of the snapshot — same UI produces same string, used by
-   * the agent loop to detect "nothing changed, stop retrying the same action".
-   */
-  fingerprint: string;
   /** Timestamp for staleness checks. */
   capturedAt: number;
   /** Which sources successfully contributed; empty sources fell back silently. */

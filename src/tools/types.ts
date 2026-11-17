@@ -1,17 +1,14 @@
 /**
  * Transport-agnostic tool definitions.
  *
- * Tools are defined once here and adapted to:
- * - HTTP REST API (GET /tools, POST /execute/:name)
- * - MCP protocol (stdio or SSE)
- * - OpenAI function-calling format (GET /tools?format=openai)
+ * Tools are defined once here and served over MCP (stdio, or the HTTP daemon's /mcp).
  *
  * No MCP, no Zod, no framework dependency — just plain TypeScript.
  */
 
-/** Parameter definition for a tool (maps to JSON Schema) */
-import { mapImagePoint, mapImageLength, getLastFrame } from '../core/agent-loop/coord-scale';
+import { mapImagePoint, mapImageLength, getLastFrame } from '../platform/coord-scale';
 
+/** Parameter definition for a tool (maps to JSON Schema) */
 export interface ParameterDef {
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
   description: string;
@@ -28,11 +25,9 @@ export interface ParameterDef {
 
 /** Result returned by a tool handler */
 export interface ToolResult {
-  /** Text output */
   text: string;
   /** Optional image (base64 encoded) */
   image?: { data: string; mimeType: string };
-  /** Whether this result represents an error */
   isError?: boolean;
   /** batch only: each step that ran (or was stopped), for the session log — never shown to the model. */
   steps?: Array<{ tool: string; action?: string; status: string; text: string; pressedKeys?: boolean;
@@ -51,20 +46,14 @@ export interface ToolContext {
   /** CDPDriver — browser DOM interaction via Chrome DevTools Protocol */
   cdp: any;
   /**
-   * PlatformAdapter — OS-agnostic primitives added in Tranche 1A
-   * (mouseDown/Up, keyDown/Up, setWindowState, setWindowBounds,
-   * listDisplays, waitForElement, widened invokeElement).
+   * PlatformAdapter — OS-agnostic primitives.
    * Lazy-loaded via `ensureInitialized` so tool handlers don't need
    * async dance on every call.
    */
   platform?: import('../platform/types').PlatformAdapter;
-  /**
-   * Optional log buffer accessor — populated by the daemon's createServer.
-   * MCP `logs_recent` reads through this; null/missing means logs are not
-   * captured (e.g. stdio MCP).
-   */
+  /** The server's captured console lines (surface/log-buffer.ts), read by `logs_recent`; missing means none are captured. */
   getLogBuffer?: () => Array<{ timestamp: number; level: string; message: string }>;
-  /** Session-scoped UIMap cache for safe el_NN element refs (Part 2). */
+  /** Session-scoped UIMap cache for safe el_NN element refs. */
   uiMaps?: import('../core/sense/ui-map-holder').UIMapHolder;
   /** High-security mode (--no-vision / CLAWD_DISABLE_VISION / config disableVision): no image goes to the model. */
   disableVision?: boolean;
@@ -75,9 +64,6 @@ export interface ToolContext {
   /** Ensure subsystems are initialized (lazy init gate) */
   ensureInitialized: () => Promise<void>;
 }
-
-/** The 6 compact compound tool names */
-export type CompactGroup = 'computer' | 'accessibility' | 'window' | 'system' | 'browser';
 
 /**
  * What kind of evidence a tool produces and how token-expensive its
@@ -104,7 +90,7 @@ export type CompactGroup = 'computer' | 'accessibility' | 'window' | 'system' | 
  *                      Examples: desktop_screenshot, desktop_screenshot_region.
  *
  * Compound dispatcher tools (`computer`, `accessibility`, `window`, `system`,
- * `browser`, `task`) leave this `undefined` — their cost depends on which
+ * `browser`) leave this `undefined` — their cost depends on which
  * delegate the `action` parameter routes to.
  */
 export type ToolCostClass = 'act' | 'inspect' | 'perceive-text' | 'perceive-image';
@@ -119,13 +105,6 @@ export interface ToolDefinition {
   parameters: Record<string, ParameterDef>;
   /** Tool category for organization */
   category: 'perception' | 'mouse' | 'keyboard' | 'window' | 'clipboard' | 'browser' | 'orchestration';
-  /**
-   * The compact compound this granular tool belongs to.
-   * Derived by reverse-engineering the ACTION_MAP in compact.ts.
-   * Undefined for granular tools that are not exposed via any compound
-   * (e.g. smart_read, smart_click, smart_type, minimize_window).
-   */
-  compactGroup?: CompactGroup;
   /**
    * Does the tool only read (0), or does it send input / change something (1)? Not a permission: clawdcursor refuses
    * nothing by tier. It drives the pill's "touching your screen" state and the MCP readOnlyHint.
@@ -155,28 +134,18 @@ export interface ToolDefinition {
    * alternatives first (e.g. `find_element` before `read_screen` before
    * `desktop_screenshot`).
    *
-   * Optional during the rollout. The coverage test in
-   * `src/__tests__/cost-class-coverage.test.ts` warns on missing values
-   * and will flip to required in a future minor.
+   * Optional: compound tools leave it undefined. Every granular tool gets one
+   * from cost-class.ts (`src/__tests__/cost-class-coverage.test.ts` enforces it).
    */
   costClass?: ToolCostClass;
-  /**
-   * Other tools the caller should try BEFORE this one when they apply
-   * to the same job at a lower cost class. Names must reference real
-   * tools — validated at module load.
-   *
-   * Example: `read_screen.cheaperAlternatives = ['find_element']`.
-   */
-  cheaperAlternatives?: string[];
-  /** The handler checks an `expect` argument (projected agent-loop tools do). Others would silently ignore one. */
+  /** The handler checks an `expect` argument (the projected tools do). Others would silently ignore one. */
   honorsExpect?: boolean;
-  /** The handler function */
   handler: (params: Record<string, any>, ctx: ToolContext) => Promise<ToolResult>;
 }
 
 // ── Schema Conversion Helpers ──
 
-/** Convert tool parameters to JSON Schema (for REST API /tools endpoint) */
+/** Convert tool parameters to JSON Schema */
 export function toJsonSchema(params: Record<string, ParameterDef>): object {
   const properties: Record<string, any> = {};
   const required: string[] = [];
@@ -198,32 +167,6 @@ export function toJsonSchema(params: Record<string, ParameterDef>): object {
     properties,
     required: required.length > 0 ? required : undefined,
   };
-}
-
-/** Convert tools to OpenAI function-calling format */
-export function toOpenAiFunctions(tools: ToolDefinition[]): object[] {
-  return tools.map(t => ({
-    type: 'function',
-    function: {
-      name: t.name,
-      description: t.description,
-      parameters: toJsonSchema(t.parameters),
-    },
-  }));
-}
-
-/**
- * Convert a11y coordinate to mouseClick coordinate.
- *
- * NOTE: Empirical testing shows a11y bounds and nut-js mouseClick share the
- * same coordinate system on most Windows configs (both use screen coords from
- * the same DPI-awareness level). This function may divide unnecessarily on
- * some setups. The smart tools (smart_click, invoke_element) pass coords
- * directly for this reason. Only focus_window uses this helper as a fallback.
- */
-export function a11yToMouse(physicalCoord: number, ctx: ToolContext): number {
-  const dpiRatio = ctx.getScreenshotScaleFactor() / ctx.getMouseScaleFactor();
-  return Math.round(physicalCoord / dpiRatio);
 }
 
 /** Image-space (the latest screenshot) → mouse-space; `space:"screen"` passes

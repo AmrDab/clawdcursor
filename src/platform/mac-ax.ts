@@ -31,7 +31,7 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { getPackageRoot } from '../paths';
-import { macAxBinary } from './mac-ocr-binary';
+import { macAxBinary } from './mac-swift-binary';
 import type { InvokeAction, UiElement, WindowInfo } from './types';
 import { isOwnUiPid } from './pointer-guard';
 import { structuredMissFields, targetOf } from '../core/miss-text';
@@ -521,8 +521,8 @@ export interface MacAx {
    * a role and/or an exact AXIdentifier, best match first. A timeout throws.
    */
   find(query: ElementQuery): Promise<UiElement[]>;
-  /** Act on the best match. A miss is `{success:false, error}`; a timeout / locked screen throws. */
   /**
+   * Act on the best match. A miss is `{success:false, error}`; a timeout / locked screen throws.
    * `allowKey`: the key an expand / collapse may finish with. The helper never presses a key on its own: it answers
    * `data.needsKey`, the caller runs the input guard, then calls again with the key allowed (macos.ts invokeElement).
    */

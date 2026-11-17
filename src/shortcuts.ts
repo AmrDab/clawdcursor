@@ -92,9 +92,7 @@ export const SHORTCUTS: ShortcutDefinition[] = [
   // Window management
   shortcut('switch-app', 'window', 'Switch to next application', 'switch app', ['switch app', 'next app', 'alt tab'], { default: 'Alt+Tab', darwin: `${CMD}+Tab` }),
   shortcut('switch-app-reverse', 'window', 'Switch to previous application', 'switch previous app', ['previous app', 'reverse app switch'], { default: 'Alt+Shift+Tab', darwin: `${CMD}+Shift+Tab` }),
-  // NOTE: 'close-window' is defined once, below, with the correct macOS mapping
-  // (Cmd+W). A duplicate here used to map it to Cmd+Q on darwin — which QUITS
-  // the app, not closes the window — a macOS-specific footgun. Removed.
+  // 'close-window' is defined once, below: Cmd+W on macOS. Cmd+Q would QUIT the app, not close the window.
   shortcut('minimize-window', 'window', 'Minimize current window', 'minimize window', ['minimize window'], { default: 'Super+Down', darwin: `${CMD}+m`, linux: 'Super+h' }),
   shortcut('maximize-window', 'window', 'Maximize current window', 'maximize window', ['maximize window'], { default: 'Super+Up', darwin: `Control+${CMD}+f` }),
   shortcut('show-desktop', 'window', 'Show desktop', 'show desktop', ['show desktop', 'go to desktop', 'minimize all'], { default: 'Super+d', darwin: 'F11' }),

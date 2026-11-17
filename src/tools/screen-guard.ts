@@ -5,12 +5,11 @@
  */
 import type { ToolContext } from './types';
 import { checkImagePointer, recordShot, latestShotGuardsWindows, type ShotWindow } from '../core/screen-binding';
+import { compactCall } from './compact-routes';
 
+/** `computer` actions that point at coordinates; a granular tool is one when its route is (compactCall). */
 const POINTER_ACTIONS = new Set(['click', 'double_click', 'right_click', 'middle_click', 'triple_click', 'hover', 'move', 'mouse_move',
   'scroll', 'scroll_horizontal', 'drag', 'drag_path']);
-const POINTER_TOOLS = new Set(['mouse_click', 'mouse_double_click', 'mouse_right_click', 'mouse_middle_click',
-  'mouse_triple_click', 'mouse_hover', 'mouse_scroll', 'mouse_scroll_horizontal', 'mouse_drag', 'mouse_drag_stepped']);
-const SCREENSHOT_TOOLS = new Set(['desktop_screenshot', 'screenshot_full']);
 
 /** A platform read is bounded: a hung bridge must not hold up a click — on timeout the window check is skipped. */
 const READ_MS = 1500;
@@ -21,7 +20,8 @@ function bounded<T>(p: Promise<T> | undefined): Promise<T | null> {
 
 /** An image-space pointer action with coordinates (not `space:"screen"`, not one at the cursor). */
 export function isImagePointerCall(tool: string, action: string | undefined, args: Record<string, unknown>): boolean {
-  const pointer = tool === 'computer' ? POINTER_ACTIONS.has(action ?? '') : POINTER_TOOLS.has(tool);
+  const c = compactCall(tool, action);
+  const pointer = c.tool === 'computer' && POINTER_ACTIONS.has(c.action ?? '');
   if (!pointer || args.space === 'screen') return false;
   // drag_path's `path` is a JSON string on the wire; mouse_drag also takes x1/y1/x2/y2.
   return typeof args.x === 'number' || typeof args.startX === 'number' || typeof args.x1 === 'number'
@@ -32,9 +32,13 @@ export function isImagePointerCall(tool: string, action: string | undefined, arg
 export const VISION_DISABLED_REFUSAL = 'vision is disabled on this server (--no-vision / CLAWD_DISABLE_VISION), so no ' +
   'screenshot is sent to the model. Read the screen without one: the accessibility tree, or OCR text.';
 
-/** A full screenshot — the frame image coordinates refer to. Zoom / region crops keep the frame they came from. */
+/**
+ * A full screenshot — the frame image coordinates refer to: `computer screenshot` (desktop_screenshot), or screenshot_full,
+ * which no compound routes to. Zoom / region crops keep the frame they came from.
+ */
 export function isFullScreenshotCall(tool: string, action: string | undefined): boolean {
-  return (tool === 'computer' && action === 'screenshot') || SCREENSHOT_TOOLS.has(tool);
+  const c = compactCall(tool, action);
+  return (c.tool === 'computer' && c.action === 'screenshot') || tool === 'screenshot_full';
 }
 
 const toShot = (w: { processId?: number; title?: string; handle?: number | string }): ShotWindow =>

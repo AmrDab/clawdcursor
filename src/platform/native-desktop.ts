@@ -13,30 +13,23 @@ import { setFenceCursorReader } from '../core/fence';
 import { unguarded } from './pointer-guard';
 import { beforePointerPress, guardInputMethods } from './pointer-guard';
 import os from 'os';
-import { EventEmitter } from 'events';
 import sharp from 'sharp';
 import { mouse, keyboard, screen, Button, Key, Point } from '@nut-tree-fork/nut-js';
-import { normalizeKey, modifierOf, type Modifier } from './keys';
+import { normalizeKey, modifierOf } from './keys';
 import { getNativeHelper, captureScreenViaHelper, ScreenRecordingDeniedError } from './native-helper';
 import { rawScreenGrab } from './screen-grab';
 import { sharpFromGrab, type GrabImage } from './grab-image';
 import { isWaylandSession, waylandScreenSize } from './wayland-screen';
-import { llmScale, llmSize, LLM_TARGET_WIDTH } from '../core/agent-loop/coord-scale';
+import { llmScale, llmSize, LLM_TARGET_WIDTH } from './coord-scale';
 import { setWorkingPoint } from './display-target';
 import { wheelUnitsPerNotch } from './wheel';
 import { readMainScreenInfo } from './mac-screen';
 import * as fs from 'fs';
-import type { ClawdConfig, ScreenFrame, MouseAction, KeyboardAction } from '../types';
+import type { ClawdConfig, ScreenFrame } from '../types';
 
-// On macOS, Command key = Key.LeftCmd. On other platforms, Super = Key.LeftSuper.
 const SUPER_KEY = os.platform() === 'darwin' ? Key.LeftCmd : Key.LeftSuper;
 const IS_MAC = os.platform() === 'darwin';
-/** System Events' name for each modifier (macOS: `super` is Cmd). */
-const MAC_USING: Record<Modifier, string> = { ctrl: 'control down', shift: 'shift down', alt: 'option down', super: 'command down' };
-/** A modifier pressed on its own ("shift"): tapped by its key code, as MacOSAdapter does (MAC_MODIFIER_KEY_CODES). */
-const MAC_MODIFIER_KEY_CODE: Record<Modifier, number> = { ctrl: 59, shift: 56, alt: 58, super: 55 };
 
-/** Safely resolve a nut-js Key enum value from multiple candidate names */
 function resolveNutKey(...candidates: string[]): Key {
   for (const name of candidates) {
     const value = Key[name as keyof typeof Key];
@@ -77,7 +70,7 @@ const KEY_MAP: Record<string, Key> = {
 };
 
 
-export class NativeDesktop extends EventEmitter {
+export class NativeDesktop {
   private config: ClawdConfig;
   private screenWidth = 0;
   private screenHeight = 0;
@@ -92,12 +85,12 @@ export class NativeDesktop extends EventEmitter {
   /**
    * DPI ratio: physical pixels / logical (mouse) pixels.
    * OCR coordinates (physical) / dpiRatio = mouse coordinates (logical).
-   * Detected at connect() time via System.Windows.Forms.
+   * Detected at connect() time — on Windows from nut-js's own screen width, not
+   * System.Windows.Forms in a separate PowerShell (see connect()).
    */
   private dpiRatio = 1;
 
   constructor(config: ClawdConfig) {
-    super();
     this.config = config;
     guardInputMethods(this);  // the MCP tools type and click through this class (pointer-guard.ts)
     setFenceCursorReader(() => unguarded(() => this.getCursorPosition()));   // the test fence checks bare presses at the live pointer
@@ -134,7 +127,6 @@ export class NativeDesktop extends EventEmitter {
           this.screenWidth = result.width;
           this.screenHeight = result.height;
           this.scaleFactor = llmScale(this.screenWidth, this.screenHeight);
-          // Clean up the temp file from connect probe
           try { fs.unlinkSync(result.path); } catch { /* ignore */ }
           // The helper reports physical pixels; OCR → screen coordinates divide by
           // this. Returning before the probe left it at 1 on every Mac (#154).
@@ -152,10 +144,9 @@ export class NativeDesktop extends EventEmitter {
         }
       }
 
-      // Configure nut-js for speed
-      mouse.config.mouseSpeed = 2000;    // Fast mouse movement
-      mouse.config.autoDelayMs = 0;      // No auto-delay between actions
-      keyboard.config.autoDelayMs = 0;   // No auto-delay between keystrokes
+      mouse.config.mouseSpeed = 2000;
+      mouse.config.autoDelayMs = 0;
+      keyboard.config.autoDelayMs = 0;
 
       if (isWaylandSession()) {
         // nut-js screen calls are fatal on Wayland (see wayland-screen.ts) —
@@ -168,7 +159,6 @@ export class NativeDesktop extends EventEmitter {
           console.warn('⚠️  Screen size unknown on Wayland (need swaymsg, wlr-randr or xrandr) — using the first capture');
         }
       } else {
-        // Grab a screenshot to determine screen dimensions
         try {
           const img = await screen.grab();
           this.screenWidth = img.width;
@@ -186,7 +176,6 @@ export class NativeDesktop extends EventEmitter {
         }
       }
 
-      // Calculate scale factor
       this.scaleFactor = llmScale(this.screenWidth, this.screenHeight);
 
       // Detect DPI ratio (physical / mouse-driver px). screen.grab() returns
@@ -286,7 +275,6 @@ export class NativeDesktop extends EventEmitter {
     this.screenHeight = img.height;
 
     const processed = await this.processFrame(img, this.screenWidth, this.screenHeight);
-    // Release the raw RGBA buffer immediately after processing
     (img as any).data = null;
 
     return {
@@ -338,7 +326,6 @@ export class NativeDesktop extends EventEmitter {
 
     const img = await this.grab();
 
-    // Update screen dimensions
     this.screenWidth = img.width;
     this.screenHeight = img.height;
 
@@ -347,7 +334,6 @@ export class NativeDesktop extends EventEmitter {
     this.scaleFactor = scale;
 
     const processed = await this.processFrame(img, llmWidth, llmHeight);
-    // Release the raw RGBA buffer immediately after processing
     (img as any).data = null;
 
     return {
@@ -366,7 +352,6 @@ export class NativeDesktop extends EventEmitter {
    * Capture a CROPPED region of the screen, resized for LLM.
    * Coordinates are in REAL screen pixels.
    * Returns the cropped image at higher effective resolution (more detail per pixel).
-   * @future — not yet used; intended for focused region analysis
    */
   async captureRegionForLLM(
     x: number, y: number, w: number, h: number, maxEdge = LLM_TARGET_WIDTH,
@@ -391,13 +376,11 @@ export class NativeDesktop extends EventEmitter {
 
     const img = await this.grab();
 
-    // Clamp to screen bounds
     const rx = Math.max(0, Math.min(x, img.width - 1));
     const ry = Math.max(0, Math.min(y, img.height - 1));
     const rw = Math.min(w, img.width - rx);
     const rh = Math.min(h, img.height - ry);
 
-    // Scale crop to LLM-sized output (long edge and area capped)
     const { scale: cropScale, width: llmWidth, height: llmHeight } = llmSize(rw, rh, maxEdge);
 
     const { format, quality } = this.config.capture;
@@ -411,7 +394,6 @@ export class NativeDesktop extends EventEmitter {
     const buffer = format === 'jpeg'
       ? await pipeline.jpeg({ quality }).toBuffer()
       : await pipeline.png().toBuffer();
-    // Release the raw RGBA buffer immediately after processing
     (img as any).data = null;
 
     return {
@@ -442,17 +424,12 @@ export class NativeDesktop extends EventEmitter {
 
   /**
    * Get the DPI ratio (physical pixels / logical mouse pixels).
-   * Returns 1 on non-HiDPI screens or non-Windows platforms.
+   * Returns 1 on non-HiDPI screens.
    */
   getDpiRatio(): number {
     return this.dpiRatio;
   }
 
-  /**
-   * Convert physical pixel coordinates (from OCR/screenshot) to mouse coordinates.
-   * On Windows with DPI scaling, nut-js mouse API uses logical (DPI-scaled) coords,
-   * while screen.grab() returns physical pixels. This method bridges the gap.
-   */
   /**
    * Put the pointer at a SCREEN-space point. On Windows this goes through the
    * bridge (per-monitor-v2, physical px) so it reaches every monitor — nut-js
@@ -473,8 +450,8 @@ export class NativeDesktop extends EventEmitter {
   }
 
   physicalToMouse(x: number, y: number): { x: number; y: number } {
-    // macOS: callers already pass LOGICAL coords. The compact tools map image→logical
-    // via mouseScaleFactor (cli.ts, the #154 fix) and nut-js on macOS consumes logical
+    // macOS: callers already pass LOGICAL coords. The tools map image→logical
+    // via the mouse scale factor (surface/tool-context.ts mouseScaleFor, the #154 fix) and nut-js on macOS consumes logical
     // points. Dividing by dpiRatio here would double-convert and re-introduce #154
     // (every click lands ~2× off on a Retina panel). nut-js drives PHYSICAL only on
     // Windows/Linux-X11 (DPI-unaware process), so the division belongs there alone.
@@ -673,7 +650,6 @@ export class NativeDesktop extends EventEmitter {
       await this.delay(30);
       await keyboard.releaseKey(keys[0] as Key);
     } else {
-      // Press all modifier keys down, then the final key, then release in reverse
       for (const key of keys) {
         if (key === 'TYPE_CHAR') {
           await keyboard.type(parts[keys.indexOf(key)]);
@@ -700,7 +676,7 @@ export class NativeDesktop extends EventEmitter {
   private async macKeyPress(keyCombo: string): Promise<void> {
     // A system dialog or the lock screen owning the keyboard refuses here (a bare Escape is never checked).
     await this.guardMacKeys(keyCombo);
-    const { runAppleScript, hasNonAscii, refuseNonAsciiChord, typeTextMac } = await import('./mac-keyboard');
+    const { MAC_MODIFIER, runAppleScript, hasNonAscii, refuseNonAsciiChord, typeTextMac } = await import('./mac-keyboard');
 
     if (keyCombo === '+') {
       await runAppleScript('tell application "System Events" to keystroke "+"', 5000);
@@ -717,10 +693,9 @@ export class NativeDesktop extends EventEmitter {
     const modUsing = parts.slice(0, -1).map(m => {
       const mod = modifierOf(m, 'darwin');
       if (!mod) throw new Error(`Unknown modifier: "${m}"`);
-      return MAC_USING[mod];
+      return `${MAC_MODIFIER[mod].name} down`;
     });
 
-    // Map special key names to System Events key code actions
     const specialKeys: Record<string, string> = {
       'return': 'key code 36', 'enter': 'key code 36',
       'tab': 'key code 48',
@@ -740,7 +715,7 @@ export class NativeDesktop extends EventEmitter {
 
     let script: string;
     const bareModifier = parts.length === 1 ? modifierOf(key, 'darwin') : null;
-    const special = bareModifier ? `key code ${MAC_MODIFIER_KEY_CODE[bareModifier]}` : specialKeys[key.toLowerCase()];
+    const special = bareModifier ? `key code ${MAC_MODIFIER[bareModifier].code}` : specialKeys[key.toLowerCase()];
     // A key outside ASCII ("é", "日"): typed as itself — `keystroke` would press "a", and with modifiers ⌘A (#242).
     if (!special && hasNonAscii(key)) {
       refuseNonAsciiChord(key, modUsing.length > 0);
@@ -749,14 +724,12 @@ export class NativeDesktop extends EventEmitter {
       return;
     }
     if (special) {
-      // Special key — use key code
       if (modUsing.length > 0) {
         script = `tell application "System Events" to ${special} using {${modUsing.join(', ')}}`;
       } else {
         script = `tell application "System Events" to ${special}`;
       }
     } else if (key.length === 1) {
-      // Single character — use keystroke
       const escaped = key.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
       if (modUsing.length > 0) {
         script = `tell application "System Events" to keystroke "${escaped}" using {${modUsing.join(', ')}}`;
@@ -795,95 +768,6 @@ export class NativeDesktop extends EventEmitter {
     return w;
   }
 
-  async executeMouseAction(action: MouseAction): Promise<void> {
-    switch (action.kind) {
-      case 'click':
-        await this.mouseClick(action.x, action.y);
-        break;
-      case 'double_click':
-        await this.mouseDoubleClick(action.x, action.y);
-        break;
-      case 'right_click':
-        await this.mouseRightClick(action.x, action.y);
-        break;
-      case 'move':
-        await this.mouseMove(action.x, action.y);
-        break;
-      case 'scroll':
-        await this.mouseScroll(action.x, action.y, action.scrollDelta || 3);
-        break;
-      case 'drag':
-        await this.mouseDrag(action.x, action.y, action.endX || action.x, action.endY || action.y);
-        break;
-    }
-  }
-
-  async executeKeyboardAction(action: KeyboardAction): Promise<void> {
-    switch (action.kind) {
-      case 'type':
-        if (action.text) await this.typeText(action.text);
-        break;
-      case 'key_press':
-        if (action.key) await this.keyPress(action.key);
-        break;
-    }
-  }
-
-  isConnected(): boolean {
-    return this.connected;
-  }
-
-  // ─── Low-level key control (for Computer Use API hold_key) ────────
-
-  async keyDown(keyCombo: string): Promise<void> {
-    if (!this.connected) throw new Error('Not connected');
-    console.log(`   ⌨️  Key down: ${keyCombo}`);
-    if (keyCombo === '+') { await keyboard.type('+'); return; }
-    const parts = keyCombo.split('+').map(k => k.trim()).filter(k => k.length > 0);
-    for (const k of parts) {
-      const key = this.mapKey(k);
-      if (key === 'TYPE_CHAR') {
-        await keyboard.type(k);
-      } else {
-        await keyboard.pressKey(key);
-      }
-      await this.delay(20);
-    }
-  }
-
-  async keyUp(keyCombo: string): Promise<void> {
-    if (!this.connected) throw new Error('Not connected');
-    console.log(`   ⌨️  Key up: ${keyCombo}`);
-    if (keyCombo === '+') return; // type() already released
-    const parts = keyCombo.split('+').map(k => k.trim()).filter(k => k.length > 0);
-    for (const k of [...parts].reverse()) {
-      const key = this.mapKey(k);
-      if (key !== 'TYPE_CHAR') {
-        await keyboard.releaseKey(key);
-      }
-      await this.delay(20);
-    }
-  }
-
-  // ─── Low-level pointer control (for Computer Use API) ────────────
-
-  async mouseDown(x: number, y: number, button: number = 1): Promise<void> {
-    await beforePointerPress(); // clawdcursor's own pill must not be under the click
-    if (!this.connected) throw new Error('Not connected');
-    console.log(`   🖱️  Mouse down at (${x}, ${y})`);
-    await this.placePointer(x, y);
-    const btn = this.mapButton(button);
-    await mouse.pressButton(btn);
-  }
-
-  async mouseUp(x: number, y: number, button: number = 1): Promise<void> {
-    if (!this.connected) throw new Error('Not connected');
-    console.log(`   🖱️  Mouse up at (${x}, ${y})`);
-    await this.placePointer(x, y);
-    const btn = this.mapButton(button);
-    await mouse.releaseButton(btn);
-  }
-
   async mouseDrag(sx: number, sy: number, ex: number, ey: number): Promise<void> {
     await beforePointerPress(); // clawdcursor's own pill must not be under the click
     if (!this.connected) throw new Error('Not connected');
@@ -896,7 +780,6 @@ export class NativeDesktop extends EventEmitter {
     await mouse.pressButton(Button.LEFT);
     await this.delay(100);
 
-    // Interpolate intermediate points for smoother drag
     const steps = Math.max(5, Math.floor(Math.hypot(ex - sx, ey - sy) / 20));
     for (let i = 1; i <= steps; i++) {
       const t = i / steps;
@@ -915,10 +798,6 @@ export class NativeDesktop extends EventEmitter {
     this.connected = false;
     this.screenWidth = 0;
     this.screenHeight = 0;
-    this.emit('disconnected');
-    // Remove all listeners so this instance can be GCd after disconnect.
-    // Must come after emit so 'disconnected' handlers still fire.
-    this.removeAllListeners();
     console.log('🐾 Native desktop disconnected');
   }
 
@@ -942,22 +821,17 @@ export class NativeDesktop extends EventEmitter {
    * Falls back to character-based lookup for single characters.
    */
   private mapKey(keyName: string): Key | 'TYPE_CHAR' {
-    // Normalize via canonical key names first
     const normalized = normalizeKey(keyName);
 
-    // Direct lookup in our map
     const mapped = KEY_MAP[normalized];
     if (mapped !== undefined) return mapped;
 
-    // Single character — try to find matching Key enum entry
     if (keyName.length === 1) {
       const upper = keyName.toUpperCase();
-      // Letters A-Z
       if (upper >= 'A' && upper <= 'Z') {
         const keyEntry = Key[upper as keyof typeof Key];
         if (keyEntry !== undefined) return keyEntry;
       }
-      // Digits 0-9
       if (upper >= '0' && upper <= '9') {
         const numKey = `Num${upper}` as keyof typeof Key;
         const keyEntry = Key[numKey];
@@ -970,7 +844,6 @@ export class NativeDesktop extends EventEmitter {
       }
     }
 
-    // Last resort: try exact enum name match
     const enumKey = keyName as keyof typeof Key;
     if (Key[enumKey] !== undefined) return Key[enumKey];
 

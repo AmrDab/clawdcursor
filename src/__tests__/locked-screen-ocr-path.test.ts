@@ -20,13 +20,14 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
 vi.mock('sharp', () => ({ default: vi.fn() }));
 
 const state = vi.hoisted(() => ({ lockedMessage: null as string | null, ocrReads: 0 }));
-vi.mock('../platform/ocr-engine', () => ({
-  OcrEngine: class {
+vi.mock('../platform/ocr-engine', () => {
+  class OcrEngine {
     isAvailable() { return true; }
     async recognizeScreen() { state.ocrReads++; return { elements: [], fullText: '', durationMs: 1 }; }
     async recognizeRegion() { state.ocrReads++; return { elements: [], fullText: '', durationMs: 1 }; }
-  },
-}));
+  }
+  return { OcrEngine, ocrEngine: () => new OcrEngine() };
+});
 vi.mock('../platform/mac-ax', async orig => ({
   ...(await orig<typeof import('../platform/mac-ax')>()),
   screenLockedMessage: vi.fn(async () => state.lockedMessage),

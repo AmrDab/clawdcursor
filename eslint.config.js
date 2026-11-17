@@ -2,6 +2,13 @@ const js = require('@eslint/js');
 const tsParser = require('@typescript-eslint/parser');
 const tsPlugin = require('@typescript-eslint/eslint-plugin');
 
+// GHSA-9ppf-38v8-h97v: PowerShell also ends a single-quoted string at ‘ ’ ‚ ‛, so doubling ' never made a value safe.
+const NO_QUOTED_PS_VALUE = {
+  selector: "CallExpression[callee.property.name='replace'][arguments.0.regex.pattern=\"'\"][arguments.1.value=\"''\"]",
+  message: 'Do not quote a value into PowerShell source by doubling apostrophes: pass it as data (stdin or an environment variable). GHSA-9ppf-38v8-h97v.',
+};
+const NO_PAUSE_GATE = 'The input layer and the batch executor never read the pause gate: a pause reply is not a go-ahead.';
+
 module.exports = [
   { ignores: ['dist/**', 'node_modules/**', 'scripts/**'] },
   js.configs.recommended,
@@ -77,6 +84,22 @@ module.exports = [
         navigator: 'readonly',
         getComputedStyle: 'readonly',
       },
+    },
+  },
+  // Source rules (the ones a scan cannot say this simply are in src/__tests__/repo-invariants.test.ts).
+  {
+    files: ['src/**/*.ts'],
+    ignores: ['src/__tests__/**'],
+    rules: { 'no-restricted-syntax': ['error', NO_QUOTED_PS_VALUE] },
+  },
+  // A pause reply is never approval: the input layer and the batch executor do not read the pause gate.
+  {
+    files: ['src/platform/hard-keys.ts', 'src/platform/pointer-guard.ts', 'src/tools/batch.ts', 'src/tools/projected/tools.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: [{ group: ['**/pause-gate'], message: NO_PAUSE_GATE }] }],
+      'no-restricted-syntax': ['error', NO_QUOTED_PS_VALUE,
+        { selector: 'ImportExpression[source.value=/pause-gate/]', message: NO_PAUSE_GATE },
+        { selector: "CallExpression[callee.name='require'][arguments.0.value=/pause-gate/]", message: NO_PAUSE_GATE }],
     },
   },
   // Test file overrides — vitest globals + non-project parsing.

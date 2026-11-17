@@ -5,7 +5,7 @@
  *
  * BOUNDARY: ranks only elements the UIMap marks clickable/editable (a11y-exposed
  * interactive elements, where the Part-2 ref-act chain is valid). OCR text is a
- * label SOURCE only (Task 3), not an independent actionable candidate.
+ * label SOURCE only, not an independent actionable candidate.
  */
 import type { UIElement, Role } from './ui-map-types';
 import { normText } from './ui-map-normalize';
@@ -77,16 +77,14 @@ export function scoreLabel(label: string, { literals, synonyms }: ExpandedTerms,
     const overlap = intentTokens.filter(t => lSet.has(t)).length;
     return overlap > 0 ? 0.5 + 0.4 * (overlap / intentTokens.length) : 0;
   }
-  // Exact literal match (highest tier)
   if (literals.has(L)) return 1.0;
-  // Synonym exact match or literal term as whole word / substring in label
   for (const t of synonyms) {
     if (lSet.has(t)) return 0.9;
     if (t.length > 2 && L.includes(t)) return 0.9;
   }
   for (const t of literals) {
-    if (lSet.has(t)) return 0.9;                          // intent token is a whole word in the label
-    if (t.length > 2 && L.includes(t)) return 0.9;        // intent token is a substring of the label
+    if (lSet.has(t)) return 0.9;
+    if (t.length > 2 && L.includes(t)) return 0.9;
   }
   const overlap = intentTokens.filter(t => lSet.has(t)).length;
   return intentTokens.length > 0 ? 0.5 * (overlap / intentTokens.length) : 0;

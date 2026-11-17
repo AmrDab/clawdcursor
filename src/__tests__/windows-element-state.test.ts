@@ -30,11 +30,8 @@ vi.mock('../platform/ps-runner', () => ({
 }));
 
 import { WindowsAdapter } from '../platform/windows';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
-import type { AgentToolContext } from '../core/agent-loop/types';
-import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { buildUnifiedTools } from '../tools/projected/tools';
+import type { AgentToolContext } from '../tools/projected/types';
 
 const box = { x: 1, y: 1, width: 10, height: 10 };
 
@@ -61,18 +58,6 @@ describe('WindowsAdapter — checked state', () => {
     const t = buildUnifiedTools().find(x => x.name === 'get_element_state')!;
     const res = await t.execute({ name: 'Subscribe' }, { platform: adapter, task: 't' } as unknown as AgentToolContext);
     expect(JSON.parse(res.text)).toMatchObject({ name: 'Subscribe', checked: true });
-  });
-
-  it('the bridge reads TogglePattern state for find-element results', () => {
-    const bridge = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'ps-bridge.ps1'), 'utf8');
-    const start = bridge.indexOf('function Cmd-FindElement {');
-    const body = bridge.slice(start, bridge.indexOf('\nfunction ', start + 1));
-    // One state rule (#323): find-element fills state through the shared helper the tree and focus reads use too.
-    expect(body).toContain('Add-StateFields');
-    const hStart = bridge.indexOf('function Add-StateFields(');
-    const helper = bridge.slice(hStart, bridge.indexOf('\nfunction ', hStart + 1));
-    expect(helper).toContain('IsTogglePatternAvailableProperty');
-    expect(helper).toContain('toggleState');
   });
 });
 

@@ -59,7 +59,7 @@ export interface TaskSpec {
   success?: Predicate;
   /** A task whose result cannot be read from state: metrics only, never in the gate. */
   manualVerify?: boolean;
-  /** A scripted trajectory: one read, then one call per action, no batch. */
+  /** The cost of the task's scripted trajectory (oracles.ts): focus, one look, one call per action, one verifying look; no batch. */
   oracle: { screenshots: number; calls: number };
   /** The watchdog stops the agent past these. */
   caps: { calls: number; seconds: number };

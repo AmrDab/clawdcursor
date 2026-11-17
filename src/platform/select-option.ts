@@ -18,7 +18,8 @@
  */
 import type { PlatformAdapter } from './types';
 import { findControls, typeAheadSelects, isListItem, isTextBox, sameElement, inside, ensureInFront } from './prefer-control';
-import { quoteScreenText } from '../core/result-codes';
+import { quoteScreenText } from '../core/untrusted-screen-content';
+import { sleep } from '../sleep';
 
 export interface SelectOptionResult {
   success: boolean;
@@ -28,7 +29,6 @@ export interface SelectOptionResult {
 }
 
 const norm = (s: unknown) => String(s ?? '').trim().toLowerCase();
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 /**
  * Does the control show the option? EXACTLY it: case and outer whitespace aside, nothing is forgiven. Not the rule a typed
  * value is read back with (holdsValue): "10 GB", "10%", "10.0" and "$10" are other options than "10".
@@ -177,12 +177,10 @@ export async function selectOption(
     }
     if (!option.controlType) break;
   }
-  // Still the old value after the last attempt: give the control time to show the new one before calling this a failure.
   if (picked && after !== null && !showsValue(after, value) && settleMs > 0) after = (await readUntil(readValue, value, settleMs)) ?? after;
   if (after !== null) {
     let ok = showsValue(after, value);
     if (!ok && opened) await platform.invokeElement({ name, controlType, processId, action: 'collapse' }).catch(() => null);
-    // The pattern route left another value: the keyboard, once, and the same read-back.
     const keyed = ok ? 'skipped' : await pickByKeys(platform, { name, controlType, processId }, value);
     if (keyed === 'typed') {
       after = (await readUntil(readValue, value, Math.max(settleMs, 450))) ?? after;

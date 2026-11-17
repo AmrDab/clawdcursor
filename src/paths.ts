@@ -1,11 +1,7 @@
 /**
  * Paths — central data directory for Clawd Cursor.
  *
- * All persistent data lives under ~/.clawdcursor/:
- *   task-logs/    — JSONL per-task execution logs
- *   reports/      — locally saved error reports
- *   consent       — first-run consent flag
- *   ui-knowledge/ — local app workflow instruction sets
+ * All persistent data lives under ~/.clawdcursor/. task-logs/ is only read (report.ts): old installs wrote it.
  *
  * Migrates from legacy paths if found:
  *   ~/.openclaw/clawd-cursor/ (v0.5.x)
@@ -19,25 +15,14 @@ import * as os from 'os';
 /** Root data directory: ~/.clawdcursor */
 export const DATA_DIR = path.join(os.homedir(), '.clawdcursor');
 
-/** Sub-directories */
 export const TASK_LOGS_DIR = path.join(DATA_DIR, 'task-logs');
 export const REPORTS_DIR = path.join(DATA_DIR, 'reports');
-export const UI_KNOWLEDGE_DIR = path.join(DATA_DIR, 'ui-knowledge');
 
-/** Persistent files */
 export const TOKEN_PATH = path.join(DATA_DIR, 'token');
 
 /**
  * Find the package root (directory containing package.json) by walking up
- * from the caller's `__dirname`. Cached after first call.
- *
- * Why: pre-v0.9 every source file lived directly under `src/` so compiled
- * output landed at `dist/<file>.js` and `__dirname/..` always pointed at the
- * package root. After v0.9 PR10's directory restructure, files now live at
- * `dist/<core|tools|platform|surface>/<file>.js`, so `__dirname/..` is
- * one level too shallow. This helper walks up until it finds package.json
- * regardless of how deeply nested the calling file is — so any future moves
- * don't break path resolution again.
+ * from this module's directory. Cached after first call.
  */
 let cachedPackageRoot: string | null = null;
 export function getPackageRoot(): string {
@@ -53,7 +38,6 @@ export function getPackageRoot(): string {
     if (parent === dir) break; // hit filesystem root
     dir = parent;
   }
-  // Fallback: assume we're in dist/<subdir>/ and go up two levels.
   cachedPackageRoot = path.resolve(__dirname, '..', '..');
   return cachedPackageRoot;
 }
@@ -73,15 +57,12 @@ export function migrateFromLegacyDir(): void {
   const legacyDir = legacyCandidates.find(d => fs.existsSync(d));
   if (!legacyDir) return;
 
-  // If new dir already has task-logs, skip migration (already migrated)
   if (fs.existsSync(TASK_LOGS_DIR) && fs.readdirSync(TASK_LOGS_DIR).length > 0) return;
 
   try {
-    // Ensure new dirs exist
     fs.mkdirSync(TASK_LOGS_DIR, { recursive: true });
     fs.mkdirSync(REPORTS_DIR, { recursive: true });
 
-    // Copy task-logs
     const legacyLogs = path.join(legacyDir, 'task-logs');
     if (fs.existsSync(legacyLogs)) {
       for (const file of fs.readdirSync(legacyLogs)) {
@@ -93,7 +74,6 @@ export function migrateFromLegacyDir(): void {
       }
     }
 
-    // Copy reports
     const legacyReports = path.join(legacyDir, 'reports');
     if (fs.existsSync(legacyReports)) {
       for (const file of fs.readdirSync(legacyReports)) {

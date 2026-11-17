@@ -6,7 +6,7 @@
  *   - Windows Save-As via element_id: typed after the old text ("oldnew").
  */
 import { describe, it, expect, vi } from 'vitest';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { buildUnifiedTools } from '../tools/projected/tools';
 
 const tool = buildUnifiedTools().find(t => t.name === 'set_field_value')!;
 

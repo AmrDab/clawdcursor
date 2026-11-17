@@ -24,9 +24,11 @@ Useful scripts:
 | `npm run dev` | `tsx watch src/surface/cli.ts` — rebuild on save |
 | `npm run typecheck` | `tsc --noEmit` — must be clean |
 | `npm run lint` | ESLint over `src/` |
-| `npm run test` | `vitest` watch mode |
-| `npm run test:ci` | `vitest run` — 759/760 baseline, one intentional skip |
-| `npm run test:mcp-schema-snapshot` | Diffs the granular tool catalog against `schema.snapshot.json`. Fails if the schema changed. Commit the new snapshot (`:update`) when the change is intentional. |
+| `npm run typecheck:tests` | Typechecks the tests too (`tsconfig.tests.json`) |
+| `npm run test` | `vitest` watch mode over the `unit` project: no real process, desktop or clipboard (`npx vitest run` is the same, once) |
+| `npm run test:system` | The `system` project: tests that start a real PowerShell, osascript, swiftc, python or the built CLI, one file at a time. Run `npm run build` first. Tests that write the clipboard or depend on this machine's apps also need `CLAWD_LIVE_TESTS=1` |
+| `npm run test:ci` | Both projects, as CI runs them (CI sets `CLAWD_LIVE_TESTS=1`) |
+| `npm run test:mcp-schema-snapshot` | Diffs what agents receive against `schema.snapshot.json`: the real server's `initialize` (instructions, per OS) and `tools/list` (names, descriptions with the cost prefix, input schemas, annotations), for the compact and the granular surface. Fails on any change. Commit the new snapshot (`:update`) when the change is intentional. |
 
 CI runs typecheck + lint + tests + schema snapshot on every PR across Windows, macOS, and Linux on Node 20 and 22. Match that locally before pushing where possible.
 
@@ -36,7 +38,7 @@ CI runs typecheck + lint + tests + schema snapshot on every PR across Windows, m
 - Business logic does not see `process.platform`. Cross-OS branches live in `src/platform/{windows,macos,linux,wayland-backend}.ts` behind the `PlatformAdapter` interface. If you find yourself writing `if (IS_MAC)` outside `src/platform/`, move it.
 - clawdcursor does not judge what the agent does; it keeps the guarantees in [SECURITY.md](SECURITY.md). Every synthetic key and click must go through an input layer wrapped by `guardInputMethods` (`src/platform/pointer-guard.ts`): do not add a path to the OS around it. Give a new tool an accurate `safetyTier` (0 = reads only) and say `destructive: true` if it is destructive by itself (closes, overwrites, executes), because MCP hosts build their permission prompts on those annotations.
 - New compact tool actions: define them in `src/tools/compact.ts`, then run `npm run test:mcp-schema-snapshot:update` and commit the snapshot diff. The `argRemap` field is how you alias agent-friendly arg names onto granular tools — see the `key`/`combo` example.
-- Tests live alongside the modules they cover under `src/__tests__/` (Vitest). Prefer integration tests that hit the real adapter over mocks.
+- Tests live alongside the modules they cover under `src/__tests__/` (Vitest). Prefer integration tests that hit the real adapter over mocks. A test that starts a real process goes in a `*.system.test.ts` file (the `system` project); one that writes the clipboard or depends on the machine's apps is also gated on `LIVE` (`src/__tests__/helpers/live.ts`).
 
 ## Contributing a guide (separate repo)
 

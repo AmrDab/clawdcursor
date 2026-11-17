@@ -8,18 +8,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const recognizeScreen = vi.fn();
 const recognizeRegion = vi.fn();
-vi.mock('../platform/ocr-engine', () => ({
-  OcrEngine: class {
+vi.mock('../platform/ocr-engine', () => {
+  class OcrEngine {
     isAvailable() { return true; }
     recognizeScreen() { return recognizeScreen(); }
     recognizeRegion(x: number, y: number, w: number, h: number) { return recognizeRegion(x, y, w, h); }
     invalidateCache() {}
-  },
-}));
+  }
+  return { OcrEngine, ocrEngine: () => new OcrEngine() };
+});
 
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { buildUnifiedTools } from '../tools/projected/tools';
 import { UIMapHolder } from '../core/sense/ui-map-holder';
-import type { AgentToolContext } from '../core/agent-loop/types';
+import type { AgentToolContext } from '../tools/projected/types';
 import type { PlatformAdapter } from '../platform/types';
 
 const tool = () => buildUnifiedTools().find(t => t.name === 'compile_ui')!;

@@ -5,7 +5,7 @@
  *   - runs the key through the same input guard as every other key (stop, clawdcursor's own control, the window the agent works in)
  *     and the keyboard guard (a system dialog owning the keyboard refuses),
  *   - and only then calls the helper again with the key allowed.
- * The helper is a fake here; what it does with the key is covered live (mac-ax-live.test.ts).
+ * The helper is a fake here; what it does with the key is covered live (mac-ax-live.system.test.ts).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
@@ -59,8 +59,9 @@ function installGuard(order: string[], refuse?: Error) {
     stopCheck: () => { order.push('stop'); },
     before: async () => { order.push('before'); if (refuse) throw refuse; },
     done: (movesFocus: boolean) => { order.push(`done:${movesFocus}`); },
-    focused: () => {},
-    launched: () => {},
+    focused: async () => {},
+    launched: async () => {},
+    byName: async () => {},
   });
 }
 // (the test setup turns the helper off; the keyboard guard only looks at the app in front when it is on)

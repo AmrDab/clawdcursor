@@ -29,10 +29,10 @@ import { pauseGate, type PauseResult } from './pause-gate';
 import { timeWait } from './observability/steps';
 import { foregroundNow } from './control';
 import { keysOf } from '../platform/hard-keys';
-import { normalizeKey } from '../platform/keys';
+import { modifierOf, normalizeKey } from '../platform/keys';
 import type { UiElement } from '../platform/types';
 import type { Page } from 'playwright';
-import { quoteScreenText } from './result-codes';
+import { quoteScreenText } from './untrusted-screen-content';
 
 const LABEL = /\b(send|delete|remove|pay|buy|submit|close|discard)\b/i;
 const COMBOS = ['alt+f4', 'mod+w', 'mod+q', 'mod+enter', 'shift+delete'];
@@ -44,10 +44,10 @@ const APPROVAL_MS = 2 * 60_000;
 /** A Resume given inside the call also covers the act's next tries (an invoke's ladder, its bounds click) this long. */
 const LADDER_MS = 10_000;
 
-// On Windows both executors press `meta` as Ctrl (keys.ts, windows.ts); hard-keys reads it as the Windows key. A press is
-// read here as it is sent: meta+w closes the tab. The Windows key is in no combo on Windows, so nothing is lost.
+// hard-keys reads `meta` as the Windows key; a press is read here as the executors send it (modifierOf: Ctrl on
+// Windows), so meta+w closes the tab. The Windows key is in no combo on Windows, so nothing is lost.
 const keySet = (combo: string, os: NodeJS.Platform) =>
-  keysOf(os === 'win32' ? combo.split('+').map(k => (k.trim().toLowerCase() === 'meta' ? 'ctrl' : k)).join('+') : combo, os)
+  keysOf(combo.split('+').map(k => (k.trim().toLowerCase() === 'meta' ? modifierOf(k, os)! : k)).join('+'), os)
     .map(k => normalizeKey(k).toLowerCase());
 
 /** Does this key input (a chord, or a sequence of chords) press one of the held combos, with the keys held down (as named)? */
@@ -135,12 +135,8 @@ async function consequential(method: string, args: unknown[], held: string[], ta
   const typed = (text: unknown) => typedCombo(text, held) ? { what: `type ${quote(String(text))} with ${quote(held.join('+'))} held` } : null;
   switch (method) {
     case 'mouseClick': case 'mouseDoubleClick': return clickAt(args[0], args[1]);
-    case 'executeMouseAction': return o.kind === 'click' || o.kind === 'double_click' ? clickAt(o.x, o.y) : null;
     case 'keyPress': case 'keyDown': case 'pressKey': return consequentialCombo(a, held) ? { what: `press ${quote(String(a))}` } : null;
     case 'typeText': return typed(a);
-    case 'executeKeyboardAction':
-      if (o.kind === 'type') return typed(o.text);
-      return o.kind === 'key_press' && consequentialCombo(o.key, held) ? { what: `press ${quote(String(o.key))}` } : null;
     // Reading, filling or opening an element is not the act; pressing, toggling or picking it is.
     case 'invokeElement': {
       if (!['click', 'toggle', 'select', undefined].includes(o.action as string)) return null;

@@ -1,12 +1,12 @@
 /**
- * Layer C — reactive step discipline. After a consequential action, verify the
- * agent-stated expected effect (hard) or a tolerant "did anything change" net
- * (soft), so the agent never blindly proceeds on an action that didn't take.
+ * Layer C — reactive step discipline. After an action, verify the agent-stated
+ * expected effect (`expect`), so the agent never blindly proceeds on an action that didn't take.
  * Pure over its inputs + PlatformAdapter reads (OS-agnostic, unit-testable).
  * See docs/superpowers/specs/2026-06-07-ui-state-compiler-layer-c-design.md.
  */
 import type { PlatformAdapter } from '../../platform/types';
-import { parseAssertions, checkAssertions, renderReport } from '../verify/assertions';
+import { ocrEngine } from '../../platform/ocr-engine';
+import { parseAssertions, checkAssertions, renderReport, validateExpect } from '../verify/assertions';
 
 export interface ReactiveInput {
   /** Raw `expect` arg from the tool call (assertions array), or undefined. */
@@ -14,10 +14,6 @@ export interface ReactiveInput {
   /** The tool's own result text + success, to fold the note into. */
   toolText: string;
   toolSuccess: boolean;
-  /** Whether the tool is screen-changing (consequential). */
-  changesScreen: boolean;
-  /** Whether the loop observed a change after the action (fingerprint/pixel). */
-  observedChange: boolean;
   adapter: PlatformAdapter;
   /** Lazy OCR reader for ocr_contains assertions; omit when unavailable. */
   ocrText?: () => Promise<string>;
@@ -39,6 +35,27 @@ export const SETTLE_INTERVAL_MS = 250;
 /** A modified result (success/text) to replace the tool's, or null = leave as-is. */
 export interface ReactiveOutcome { success: boolean; text: string; }
 
+/**
+ * `expect` before the action: why it is refused, or null. A malformed one is refused before anything runs: told after
+ * the action, the caller would read "rejected" as "nothing ran", retry, and act twice.
+ */
+export function expectRefusal(expect: unknown): string | null {
+  const error = validateExpect(expect);
+  return error ? `expect rejected (nothing executed): ${error}` : null;
+}
+
+/** `expect` after the action: the result with its verdict at the end of the text, or null when there is nothing to check. */
+export async function checkExpect(expect: unknown, result: ReactiveOutcome, adapter: PlatformAdapter): Promise<ReactiveOutcome | null> {
+  if (expect === undefined || expect === null) return null;
+  return reactiveCheck({
+    expect,
+    toolText: result.text,
+    toolSuccess: result.success,
+    adapter,
+    ocrText: async () => (await ocrEngine().recognizeScreen()).fullText ?? '',
+  }).catch(() => null);
+}
+
 export async function reactiveCheck(input: ReactiveInput): Promise<ReactiveOutcome | null> {
   const hasExpect = input.expect !== undefined && input.expect !== null;
 
@@ -49,9 +66,6 @@ export async function reactiveCheck(input: ReactiveInput): Promise<ReactiveOutco
     if ('error' in parsed) {
       return { success: false, text: `${input.toolText}\nexpect rejected: ${parsed.error}` };
     }
-    // Poll until the assertions pass or the settle budget runs out — the UI
-    // is allowed to take a moment to manifest the effect before we call it
-    // a DEVIATION (which tells the model to retry a possibly-taken action).
     const budget = input.settleMs ?? SETTLE_BUDGET_MS;
     const deadline = Date.now() + budget;
     let report = await checkAssertions(parsed.assertions, { adapter: input.adapter, ocrText: input.ocrText });
@@ -66,12 +80,6 @@ export async function reactiveCheck(input: ReactiveInput): Promise<ReactiveOutco
       success: false,
       text: `${input.toolText}\nDEVIATION: ${report.failed}/${report.outcomes.length} expected check(s) failed (still failing after a ${Math.round(budget / 1000)}s settle window) — the action did not achieve its effect; adapt (re-find, retry, or a different approach) before continuing:\n${renderReport(report)}`,
     };
-  }
-
-  // No expect: tolerant soft net — only for a SUCCESSFUL consequential action
-  // that produced no observable change. Never fails the action.
-  if (input.changesScreen && input.toolSuccess && !input.observedChange) {
-    return { success: true, text: `${input.toolText}\n⚠ no observable change — verify it took (pass \`expect\`) or try another approach.` };
   }
 
   return null;

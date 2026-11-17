@@ -63,12 +63,6 @@ describe('createMcpServer', () => {
     expect(handle.toolCount).toBe(6); // computer/accessibility/window/system/browser + batch
   });
 
-  it('returns an McpServer instance ready for transport.connect', async () => {
-    const ctx = fakeCtx();
-    const { server } = await createMcpServer({ ctx });
-    expect(typeof server.connect).toBe('function');
-  });
-
   it('serves the tools-only instructions and no `task` tool', async () => {
     const { server, tools } = await createMcpServer({ compact: true, ctx: fakeCtx() });
     expect(tools.find(t => t.name === 'task')).toBeUndefined();

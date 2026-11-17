@@ -11,7 +11,7 @@
  * (pointer-guard.ts), which every synthetic key press goes through in both input layers — so a tool name, a batch step,
  * a named shortcut or a sequence cannot route around it (GHSA-35pc-g74h-p476, GHSA-3v3f-5rwv-whc9).
  */
-import { normalizeKey } from './keys';
+import { modifierOf, normalizeKey } from './keys';
 
 type Os = NodeJS.Platform;
 
@@ -62,8 +62,8 @@ const NORMALIZED: ReadonlyMap<unknown, string> = new Map([['Super', 'super'], ['
  */
 function canon(token: string, os: Os): string {
   const t = token.trim().toLowerCase();
-  if (t === 'mod') return os === 'darwin' ? 'super' : 'ctrl';
-  if (os === 'win32' && (t === 'cmd' || t === 'command')) return 'ctrl';
+  const mod = t === 'meta' ? null : modifierOf(t, os);
+  if (mod) return mod;
   if (SUPER.test(t)) return 'super';
   const family = FAMILIES.find(([re]) => re.test(t))?.[1];
   if (family) return family;

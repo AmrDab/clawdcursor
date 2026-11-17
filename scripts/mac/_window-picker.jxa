@@ -5,13 +5,14 @@
  *
  * Shared reference implementation for "which window of a process is the
  * user's real interaction window?". osascript cannot `require()` other
- * scripts, so the helpers below are also INLINED into the consumer scripts.
- * Treat this file as the source of truth — if you change scoring here, mirror
- * the change in:
- *   - scripts/mac/focus-window.jxa
- *   - scripts/mac/get-foreground-window.jxa
+ * scripts, so the helpers below are also INLINED into the consumer scripts,
+ * and nothing loads this file. The inlined copies have drifted from it:
+ * focus-window.jxa's scoreWindow also penalises a minimized window, and
+ * get-foreground-window.jxa's pickInteractionWindow takes the AXFocused /
+ * AXMain window before scoring. titleKey must stay identical to
+ * focus-window.jxa's (window-scope-invoke.test.ts checks it).
  *
- * Intended consumers:
+ * Inlined into:
  *   - focus-window.jxa            (uses findTitleMatchWindow + pickInteractionWindow fallback)
  *   - get-foreground-window.jxa   (uses pickInteractionWindow)
  *
@@ -127,14 +128,14 @@ function pickInteractionWindow(windows) {
     return { window: best, index: bestIndex };
 }
 
-// Finds first window whose name contains `needle` (case-insensitive)
-// AND has non-zero visible area. Used by focus-window.jxa.
 // Titles compared without format characters (the Unicode Cf category: zero-width space, joiners, BOM, the Arabic letter mark
 // U+061C...), whitespace collapsed, lower case. Keep in sync with focus-window.jxa, which inlines this.
 function titleKey(s) {
     return String(s).replace(/\p{Cf}/gu, '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
+// Finds first window whose name contains `needle` (case-insensitive)
+// AND has non-zero visible area. Used by focus-window.jxa.
 function findTitleMatchWindow(windows, needle) {
     if (!needle) return null;
     var n = titleKey(needle);

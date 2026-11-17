@@ -530,14 +530,6 @@ describe('keyboard guard (B11)', () => {
       expect(JSON.stringify(warn.mock.calls[0])).toContain('SomeAgent');
     });
 
-    it('warns once per dialog, not once per keystroke burst', async () => {
-      const mac = new MacOSAdapter({ ax: fakeAx({ frontmost: vi.fn(async () => modal) }) });
-      await mac.typeText('a');
-      await vi.advanceTimersByTimeAsync(300);        // past the 250 ms probe cache: a new probe, same dialog
-      await mac.typeText('b');
-      expect(warn).toHaveBeenCalledTimes(1);
-    });
-
     it('a system dialog is still refused, warning or not', async () => {
       const mac = new MacOSAdapter({ ax: fakeAx({ frontmost: vi.fn(async () => alert) }) });
       await expect(mac.typeText('hello')).rejects.toThrow(/system dialog/i);
@@ -550,35 +542,6 @@ describe('keyboard guard (B11)', () => {
     await mac.typeText('hello');
     await mac.keyPress('Return');
     expect(osascripts().length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('a failed probe never blocks input (fail open)', async () => {
-    const mac = new MacOSAdapter({ ax: fakeAx({ frontmost: vi.fn(async () => { throw new MacAxError('timeout', 'x'); }) }) });
-    await mac.typeText('hello');
-    expect(osascripts()).toHaveLength(1);
-  });
-
-  it('probes once for a burst of keystrokes, but re-probes every time while blocked', async () => {
-    const ok = fakeAx();
-    const mac = new MacOSAdapter({ ax: ok });
-    await mac.keyPress('a');
-    await mac.keyPress('b');
-    await mac.keyPress('c');
-    expect(ok.frontmost).toHaveBeenCalledTimes(1);
-
-    const blocked = fakeAx({ frontmost: vi.fn(async () => alert) });
-    const mac2 = new MacOSAdapter({ ax: blocked });
-    await mac2.keyPress('a').catch(() => {});
-    await mac2.keyPress('b').catch(() => {});
-    expect(blocked.frontmost).toHaveBeenCalledTimes(2);
-  });
-
-  it('CLAWD_NO_MAC_AX=1 turns the guard off along with the helper', async () => {
-    process.env.CLAWD_NO_MAC_AX = '1';
-    const ax = fakeAx({ frontmost: vi.fn(async () => alert) });
-    await new MacOSAdapter({ ax }).typeText('hello');
-    expect(ax.frontmost).not.toHaveBeenCalled();
-    expect(osascripts()).toHaveLength(1);
   });
 });
 

@@ -76,7 +76,7 @@ describe('typeTextMac', () => {
 
   it('without the helper it refuses, and the error does not repeat the text', async () => {
     typeUnicode.mockResolvedValue(false);
-    const err = await typeTextMac({ typeUnicode }, 'pässwörd', 5_000).catch((e: unknown) => e as Error);
+    const err = (await typeTextMac({ typeUnicode }, 'pässwörd', 5_000).catch((e: unknown) => e)) as Error;
     expect(err).toBeInstanceOf(Error);
     expect(err.message).toMatch(/outside ASCII/);
     expect(err.message).toMatch(/xcode-select --install/);

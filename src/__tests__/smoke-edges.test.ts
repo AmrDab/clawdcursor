@@ -5,8 +5,7 @@
  *   3. "Could not focus/select" dropped the platform's reason.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
-import { getA11yDepthTools } from '../tools/a11y_depth';
+import { buildUnifiedTools } from '../tools/projected/tools';
 import { classifyResult } from '../core/result-codes';
 import { preferControl } from '../platform/prefer-control';
 
@@ -22,17 +21,13 @@ function plat(found: any[], inv: (q: any) => any = () => ({ success: true })) {
     getActiveWindow: vi.fn(async () => null),
   };
 }
-const mcpTool = (n: string) => getA11yDepthTools().find(t => t.name === n)!;
 
 describe('1. a read-back toggle / select is confirmed', () => {
-  it('toggle (MCP and agent-loop) carries the marker, and the classifier accepts it', async () => {
+  it('toggle carries the marker, and the classifier accepts it', async () => {
     const p = plat([], () => ({ success: true, data: { toggleState: 'On', toggleChanged: true } }));
-    const a = await mcpTool('a11y_toggle').handler({ name: 'Accept', processId: 1 }, { ensureInitialized: async () => {}, platform: p } as any);
     const b = await agentTool('a11y_toggle').execute({ name: 'Accept', processId: 1 }, { platform: p } as any);
-    for (const t of [a.text, b.text]) {
-      expect(t).toBe('Toggled (read back ✓) "Accept" → On.');
-      expect(classifyResult(t, false, true)).toEqual({ outcome: 'confirmed' });
-    }
+    expect(b.text).toBe('Toggled (read back ✓) "Accept" → On.');
+    expect(classifyResult(b.text, false, true)).toEqual({ outcome: 'confirmed' });
     expect(classifyResult('Selected (read back ✓) "Green" in "Favorite color".', false, true)).toEqual({ outcome: 'confirmed' });
   });
 
@@ -40,6 +35,7 @@ describe('1. a read-back toggle / select is confirmed', () => {
     const p = plat([], () => ({ success: true, data: { toggleState: 'On', toggleChanged: false } }));
     const b = await agentTool('a11y_toggle').execute({ name: 'Accept', processId: 1 }, { platform: p } as any);
     expect(b.text).toMatch(/not confirmed/);
+    expect(b.text).not.toMatch(/→/);   // never presents the unchanged read as the result ("→ On")
     expect(classifyResult(b.text, false, true)).toEqual({ outcome: 'unverified' });
   });
 
@@ -61,13 +57,6 @@ describe('2. by-name actions prefer the control over its label', () => {
     await agentTool('set_field_value').execute({ name: 'Your name', value: 'x' }, { platform: p } as any);
     expect(p.invokeElement).toHaveBeenCalledWith(expect.objectContaining({ action: 'set-value', controlType: 'Edit' }));
     await agentTool('a11y_toggle').execute({ name: 'Your name' }, { platform: p } as any);
-    expect(p.invokeElement).toHaveBeenCalledWith(expect.objectContaining({ action: 'toggle', controlType: 'CheckBox' }));
-  });
-
-  it('MCP a11y_toggle uses it as well', async () => {
-    const p = plat([label, edit, { name: 'Your name', controlType: 'CheckBox' }]);
-    const ctx = { ensureInitialized: async () => {}, platform: p } as any;
-    await mcpTool('a11y_toggle').handler({ name: 'Your name', processId: 1 }, ctx);
     expect(p.invokeElement).toHaveBeenCalledWith(expect.objectContaining({ action: 'toggle', controlType: 'CheckBox' }));
   });
 
@@ -96,8 +85,6 @@ describe('3. failures keep the platform reason', () => {
     const p = plat([label, edit], () => ({ success: false }));
     const s = await agentTool('a11y_select').execute({ name: 'Your name' }, { platform: p } as any);
     expect(s.text).toMatch(/"Your name" is not a list item or tab to select.*pass value/);
-    const m = await mcpTool('a11y_select').handler({ name: 'Your name', processId: 1 }, { ensureInitialized: async () => {}, platform: p } as any);
-    expect(m.text).toMatch(/not a list item or tab to select.*pass value/);
   });
 });
 
@@ -107,18 +94,5 @@ describe('follow-ups', () => {
     expect(await preferControl(plat([t, { name: 'Wi-Fi', controlType: 'Button' }]), 'toggle', { name: 'Wi-Fi' })).toBe('Button');
     expect(await preferControl(plat([t, { name: 'Wi-Fi', controlType: 'Button' }, { name: 'Wi-Fi', controlType: 'CheckBox' }]), 'toggle', { name: 'Wi-Fi' })).toBe('CheckBox');
     expect(await preferControl(plat([t, { name: 'Wi-Fi', controlType: 'Image' }]), 'toggle', { name: 'Wi-Fi' })).toBeUndefined();
-  });
-
-  it('MCP toggle / select / focus failures keep the reason from res.error or res.data.error', async () => {
-    const ctx = (p: any) => ({ ensureInitialized: async () => {}, platform: p }) as any;
-    const viaError = plat([], () => ({ success: false, error: 'Element not found', data: { reason: 'not_found' } }));
-    const viaData = plat([], () => ({ success: false, data: { error: 'exists but is not visible' } }));
-    expect((await mcpTool('a11y_toggle').handler({ name: 'X', processId: 1 }, ctx(viaError))).text).toBe('a11y_toggle failed for "X": Element not found.');
-    expect((await mcpTool('a11y_select').handler({ name: 'X', processId: 1 }, ctx(viaError))).text).toBe('a11y_select failed for "X": Element not found.');
-    // a reply with no machine-readable reason is shown inside an untrusted block, never classified by its words
-    expect((await mcpTool('a11y_toggle').handler({ name: 'X', processId: 1 }, ctx(viaData))).text)
-      .toBe('a11y_toggle failed for "X": <untrusted-screen-content>\nexists but is not visible\n</untrusted-screen-content>.');
-    const focus = (await import('../tools/extras')).getExtraTools().find((t: any) => t.name === 'focus_element')!;
-    expect((await focus.handler({ name: 'X', processId: 1 }, ctx(viaError))).text).toBe('Focus failed for "X": Element not found.');
   });
 });

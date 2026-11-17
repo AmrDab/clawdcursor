@@ -1,49 +1,32 @@
 /**
  * Diff-and-poll helper for `launchApp` across platforms.
  *
- * Background — what this fixes:
- *
- *   Before this helper, every platform adapter's `launchApp` did:
- *     1. spawn the launch primitive (Start-Process / open -a / xdg-open / …)
- *     2. `await delay(800ms)` — single fixed settle
- *     3. `await listWindows()` once and pick the best name match
- *     4. return `{ pid, title }` or `{}` if nothing matched
- *
  *   On Windows 11, modern UWP apps (Calculator, Photos, Edge, Settings, etc.)
  *   take 2–6 seconds to surface a window in the a11y tree on a cold start.
- *   The 800ms scan misses them, returns `{}`, and the agent sees
- *   "Launched X (no window surfaced yet)" — so it falls back to keyboard
+ *   A single 800ms scan missed them, returned `{}`, and the agent saw
+ *   "Launched X (no window surfaced yet)" — so it fell back to keyboard
  *   shortcuts (`win+r`, `cmd+space`, `win+d`, etc.), a slower and less reliable
  *   route than waiting for the window.
- *
- *   The router (`src/core/router/router.ts`) already had the right pattern
- *   for its zero-LLM fast path — diff before/after, poll for a NEW window —
- *   but the platform adapter ignored it. This module exists so all three
- *   adapters can use the same proven pattern; the agent's `open_app` tool
- *   (and any other caller of `launchApp`) gets the reliability for free.
  *
  * Properties:
  *   - **OS-agnostic.** Operates on the abstract `WindowInfo` shape; no
  *     win32 / AppKit / X11 specifics.
  *   - **App-agnostic.** No allowlist of known apps. The predicate is supplied
  *     by the caller (an identity match — see `buildAppPredicate`).
- *   - **Model-agnostic.** No prompt or LLM coupling — pure async function.
- *   - **MCP-safe.** No tool signature change. Callers' return contracts are
- *     unchanged; only the latency-to-truth improves.
  */
 
 import type { WindowInfo } from './types';
 import { appIdentity, ownsWindow, type AppIdentityHints } from './app-identity';
+import { sleep } from '../sleep';
 
 /**
  * How often the diff-and-poll loop re-checks `listWindows()`.
- * Mirrors `READY_POLL_INTERVAL_MS` in the router so behavior is consistent.
  */
 const DEFAULT_POLL_INTERVAL_MS = 300;
 
 /**
  * Total budget the loop will wait for a matching window to surface.
- * Mirrors `READY_TIMEOUT_MS` in the router. Tuned for cold-start UWP apps;
+ * Tuned for cold-start UWP apps;
  * warm classic Win32 apps usually return in the first 1–2 ticks.
  */
 const DEFAULT_LAUNCH_TIMEOUT_MS = 8_000;
@@ -124,8 +107,6 @@ export async function waitForLaunchedWindow(
     if (read === null) continue;
     const current = read;
 
-    // Pass 1: prefer brand-new windows. PID match wins (most reliable),
-    // then predicate match.
     let pidNew: WindowInfo | null = null;
     let predNew: WindowInfo | null = null;
     // A new window with NO owning pid (X11 without _NET_WM_PID — xcalc) can
@@ -150,8 +131,6 @@ export async function waitForLaunchedWindow(
     if (predNew) return predNew;
     if (opts.spawnPid && unownedNews.length === 1) return unownedNews[0];
 
-    // Pass 2: remember the best already-existing match for the timeout
-    // fallback. Prefer PID, then predicate.
     if (opts.spawnPid) {
       const pidAny = current.find(w => !w.isMinimized && w.processId === opts.spawnPid);
       if (pidAny) {
@@ -191,8 +170,4 @@ export function within<T>(p: Promise<T>, ms: number): Promise<T | null | typeof 
     const timer = setTimeout(() => resolve(TIMED_OUT), ms);
     p.then(v => { clearTimeout(timer); resolve(v); }, () => { clearTimeout(timer); resolve(null); });
   });
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
 }

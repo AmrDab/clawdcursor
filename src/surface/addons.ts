@@ -14,7 +14,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
 import { DATA_DIR, getPackageRoot } from '../paths';
-import { VERSION } from './version';
+import { VERSION } from '../version';
 import { hasConsent } from './onboarding';
 
 export const AGENT_ADDON = 'clawdcursor-agent';

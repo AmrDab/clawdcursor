@@ -14,6 +14,9 @@ const UIA_CONTROL_TYPES: ReadonlySet<string> = new Set([
   'SplitButton', 'Tab', 'TabItem', 'Text', 'ToolBar', 'Tree', 'TreeItem', 'Window',
 ]);
 
+const UIA_CONTROL_TYPE_BY_KEY: ReadonlyMap<string, string> =
+  new Map([...UIA_CONTROL_TYPES].map(t => [t.toLowerCase(), t]));
+
 /**
  * Normalize a caller-supplied control type to the bridge's vocabulary.
  *
@@ -35,8 +38,6 @@ const UIA_CONTROL_TYPES: ReadonlySet<string> = new Set([
  * Returns null for a type the bridge cannot honor, so callers can fail closed
  * rather than silently searching without the filter they asked for.
  */
-const UIA_CONTROL_TYPE_BY_KEY: ReadonlyMap<string, string> =
-  new Map([...UIA_CONTROL_TYPES].map(t => [t.toLowerCase(), t]));
 export function normalizeControlType(raw: string | undefined): string | null | undefined {
   if (raw === undefined) return undefined;          // no filter requested
   const key = raw.replace(/^ControlType\./i, '').replace(/\s+/g, '').toLowerCase();

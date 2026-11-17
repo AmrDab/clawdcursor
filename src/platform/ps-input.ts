@@ -12,7 +12,6 @@ import { psOpts, powershellExe } from './ps-spawn';
 export const SET_CLIPBOARD_SCRIPT =
   '$b = [Console]::In.ReadToEnd(); Set-Clipboard -Value ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b.Trim())))';
 
-/** Run a PowerShell script with `input` on its stdin. */
 export function runPsWithStdin(script: string, input: string, timeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = execFile(powershellExe(), ['-NoProfile', '-NonInteractive', '-Command', script], psOpts({ timeout: timeoutMs }),
@@ -23,7 +22,6 @@ export function runPsWithStdin(script: string, input: string, timeoutMs: number)
   });
 }
 
-/** Set the Windows clipboard to `text`. */
 export async function setWindowsClipboard(text: string, timeoutMs: number): Promise<void> {
   await runPsWithStdin(SET_CLIPBOARD_SCRIPT, Buffer.from(text, 'utf8').toString('base64'), timeoutMs);
 }

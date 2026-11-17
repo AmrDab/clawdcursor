@@ -4,7 +4,7 @@
  * setup: agent host on one monitor, target window on another.
  */
 import { describe, it, expect, afterEach } from 'vitest';
-import { mapImagePoint, mapImageLength, setLastFrame } from '../core/agent-loop/coord-scale';
+import { mapImagePoint, mapImageLength, setLastFrame } from '../platform/coord-scale';
 import { toMouse, toImage, toMouseLength } from '../tools/types';
 
 const ctx = (msf: number) => ({ getMouseScaleFactor: () => msf, getScreenshotScaleFactor: () => msf }) as never;

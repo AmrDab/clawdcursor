@@ -46,7 +46,7 @@ const result = await build({
 });
 if (result.errors.length) process.exit(1);
 
-// Keep the shebang exactly once (tsc's output carries it; esbuild preserves it).
+// Keep the shebang exactly once (src/surface/cli.ts carries it; esbuild preserves it).
 let code = fs.readFileSync(tmp, 'utf8');
 if (!code.startsWith('#!')) code = '#!/usr/bin/env node\n' + code;
 fs.writeFileSync(entry, code);

@@ -3,6 +3,7 @@
  * when it fails, secure input is checked and, if on, named with its holder. Unknown keeps today's message.
  */
 import { describe, it, expect, vi } from 'vitest';
+import vm from 'node:vm';
 
 vi.mock('@nut-tree-fork/nut-js', () => ({
   mouse: { config: {}, move: vi.fn(), click: vi.fn(), setPosition: vi.fn() },
@@ -77,9 +78,15 @@ describe('checkSecureInput', () => {
     await expect(checkSecureInput(fakeExec({ osascript: 'undefined' }))).resolves.toBeNull();
   });
 
-  it('binds the function by hand, as PREFLIGHT_JXA does for CGPreflightScreenCaptureAccess', () => {
-    expect(SECURE_INPUT_JXA).toContain("ObjC.bindFunction('IsSecureEventInputEnabled', ['bool', []])");
-    expect(SECURE_INPUT_JXA).toContain('String(Boolean(');
+  it('the JXA (run in a vm) binds IsSecureEventInputEnabled by hand, as PREFLIGHT_JXA does, and answers "true" / "false"', () => {
+    const run = (on: unknown) => {
+      const bound: string[] = [];
+      const $: Record<string, unknown> = {};
+      const ObjC = { import: () => {}, bindFunction: (name: string, sig: unknown) => { bound.push(`${name} ${JSON.stringify(sig)}`); $[name] = () => on; } };
+      return { out: vm.runInNewContext(SECURE_INPUT_JXA, { ObjC, $, String, Boolean }), bound };
+    };
+    expect(run(true)).toEqual({ out: 'true', bound: ['IsSecureEventInputEnabled ["bool",[]]'] });
+    expect(run(0).out).toBe('false');
   });
 });
 

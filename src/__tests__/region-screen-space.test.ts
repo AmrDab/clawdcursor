@@ -21,11 +21,12 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
 vi.mock('sharp', () => ({ default: vi.fn() }));
 
 import { getDesktopTools } from '../tools/desktop';
-import { llmSize, setLastFrame } from '../core/agent-loop/coord-scale';
+import { getTool } from '../tools/registry';
+import { llmSize, setLastFrame } from '../platform/coord-scale';
 
 const tools = getDesktopTools();
 const region = tools.find(t => t.name === 'desktop_screenshot_region')!;
-const click = tools.find(t => t.name === 'mouse_click')!;
+const click = getTool('mouse_click')!;
 
 type Rect = { x: number; y: number; width: number; height: number };
 const realPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
@@ -80,7 +81,9 @@ async function zoomThenClick(m: ReturnType<typeof machine>, rect: Rect, element:
   const zx = (element.x * pxPerUnit - cap.x) / cap.width * zw;
   const zy = (element.y * pxPerUnit - cap.y) / cap.height * zh;
   expect(r.text).toMatch(/space:"screen"/);
-  await click.handler({ x: X + zx * W / zw, y: Y + zy * H / zh, space: 'screen' }, m.ctx);
+  // The click goes through the platform adapter, as the mouse_click agents call does.
+  const clickCtx = { ...(m.ctx as object), platform: { ...((m.ctx as { platform?: object }).platform ?? {}), mouseClick: m.mouseClick, getActiveWindow: async () => null } } as never;
+  await click.handler({ x: X + zx * W / zw, y: Y + zy * H / zh, space: 'screen' }, clickCtx);
   const [cx, cy] = m.mouseClick.mock.calls[m.mouseClick.mock.calls.length - 1] as unknown as [number, number];
   return { cap, clicked: { x: cx, y: cy } };
 }

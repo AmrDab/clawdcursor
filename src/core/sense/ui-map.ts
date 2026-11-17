@@ -14,9 +14,8 @@ import { computeAnchors } from './ui-map-anchors';
 import { normalizeRole, normText } from './ui-map-normalize';
 import { iou } from './ui-map-geom';
 import { captureSnapshot } from './snapshot';
-import { OcrEngine } from '../../platform/ocr-engine';
-import { ocrPointToClickPoint } from '../../tools/smart';
-import { windowOcrRegion } from '../../tools/ocr';
+import { ocrEngine } from '../../platform/ocr-engine';
+import { ocrPointToClickPoint, windowOcrRegion } from '../../platform/coord-scale';
 
 const SPARSE_A11Y_MAX = 0;          // ≤ this many named a11y elements ⇒ "sparse"
 const LOW_CONFIDENCE = 0.5;         // below this on a needed element ⇒ vision-worthy
@@ -24,7 +23,7 @@ const LOW_CONFIDENCE = 0.5;         // below this on a needed element ⇒ vision
 export interface CompileDeps {
   /** a11y spine — defaults to captureSnapshot(adapter) in production. */
   captureSnapshot: () => Promise<Snapshot>;
-  /** OCR puller — defaults to () => new OcrEngine().recognizeScreen(). */
+  /** OCR puller — defaults to the shared engine's recognizeScreen(). */
   ocr: () => Promise<OcrResult>;
   /** Vision puller — defaults to adapter.screenshot(). */
   vision: () => Promise<ScreenshotResult>;
@@ -50,7 +49,6 @@ export async function compileUIMap(deps: CompileDeps, hints: CompileHints): Prom
 
   let elements: UIElement[] = snap.elements.map((se, i) => a11yToUI(se, `el_${i}`));
 
-  // Lazy OCR: only when a11y is sparse OR a requested target_text isn't present.
   const sparse = namedCount(snap) <= SPARSE_A11Y_MAX;
   const wantText = hints.target_text ? hints.target_text.trim().toLowerCase() : '';
   const a11yHasTarget = wantText
@@ -66,7 +64,6 @@ export async function compileUIMap(deps: CompileDeps, hints: CompileHints): Prom
     }
   }
 
-  // Lazy vision: only when allowed AND nothing usable surfaced from a11y+OCR.
   const visionAllowed = maxCost === 'vision_ok';
   const nothingActionable = !elements.some(e => e.actionable && e.confidence >= LOW_CONFIDENCE);
   if (visionAllowed && nothingActionable) {
@@ -74,7 +71,6 @@ export async function compileUIMap(deps: CompileDeps, hints: CompileHints): Prom
     if (shot) sourcesUsed.push('vision');
   }
 
-  // Re-id ids contiguously after fusion so el_NN is dense within this snapshot.
   elements = elements.map((e, i) => ({ ...e, id: `el_${i}` }));
 
   // Mark the focused element so the focused anchor resolves. The platform's
@@ -132,11 +128,9 @@ export async function compileUIMap(deps: CompileDeps, hints: CompileHints): Prom
   };
 }
 
-let _ocr: OcrEngine | null = null;
-function ocrEngine(): OcrEngine { return (_ocr ??= new OcrEngine()); }
 
 /** Production deps wired to a real adapter. now/snapshotId are caller-passed
- *  (the agent loop owns the clock + the obs_N counter). `processId` scopes the
+ *  (the UIMapHolder owns the obs_N counter). `processId` scopes the
  *  map to that app's window: its a11y tree, and OCR of its window only. */
 export function defaultCompileDeps(
   adapter: PlatformAdapter, now: number, snapshotId: string, prevAnchors?: UIMap['anchors'], processId?: number,

@@ -2,14 +2,11 @@
  * PR5 invariant tests — compact surface as a transform over the granular registry.
  *
  * Asserts:
- *   1. Every (compound, action) pair in the ACTION_MAP delegates to a granular
+ *   1. Every (compound, action) route of compact-routes.ts delegates to a granular
  *      tool that actually exists in getAllTools().
- *   2. For 5+ representative actions, dispatching via the compact compound
+ *   3. Each compact description lists every route action.
+ *   5. For representative actions, dispatching via the compact compound
  *      produces the same result as calling the granular tool directly.
- *   3. The 6 compound names are exactly the expected set.
- *   4. actionCatalog (as used in compact descriptions) lists every route action.
- *   6. getTools({ palette: 'compact' }) === getCompactSurface().
- *   7. getTools({ compactGroup: X }) returns only tools whose .compactGroup === X.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -35,18 +32,20 @@ vi.mock('sharp', () => ({
   })),
 }));
 
-vi.mock('../platform/ocr-engine', () => ({
-  OcrEngine: class {
+vi.mock('../platform/ocr-engine', () => {
+  class OcrEngine {
     isAvailable() { return false; }
     async recognizeScreen() { return { elements: [], fullText: '', durationMs: 0 }; }
     invalidateCache() {}
-  },
-}));
+  }
+  return { OcrEngine, ocrEngine: () => new OcrEngine() };
+});
 
 // ── Imports after mocks ──────────────────────────────────────────────────────
 
-import { getAllTools, getCompactSurface, getTools } from '../tools/registry';
-import { getCompactTools, COMPOUND_ROUTE_INDEX } from '../tools/compact';
+import { getAllTools, getTools } from '../tools/registry';
+import { getCompactTools } from '../tools/compact';
+import { COMPOUND_ROUTE_INDEX } from '../tools/compact-routes';
 import type { ToolContext } from '../tools/types';
 import { makeMockPlatform } from './helpers/mock-platform';
 
@@ -100,154 +99,30 @@ function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
   };
 }
 
-// ── Internal ACTION_MAP reconstruction ─────────────────────────────────────
-// We reconstruct the mapping by inspecting the compact tool descriptions and
-// the existing ACTION_MAP values. For invariant testing we use a typed table
-// that mirrors compact.ts exactly (we don't export it from compact.ts, so we
-// re-declare it here for assertion purposes only).
-
-interface ActionRoute {
-  compound: string;
-  action: string;
-  delegate: string;
-  argRemap?: Record<string, string>;
-}
-
-const ACTION_MAP: ActionRoute[] = [
-  // computer
-  { compound: 'computer', action: 'screenshot',          delegate: 'desktop_screenshot' },
-  { compound: 'computer', action: 'screenshot_region',   delegate: 'desktop_screenshot_region' },
-  { compound: 'computer', action: 'click',               delegate: 'mouse_click' },
-  { compound: 'computer', action: 'double_click',        delegate: 'mouse_double_click' },
-  { compound: 'computer', action: 'right_click',         delegate: 'mouse_right_click' },
-  { compound: 'computer', action: 'middle_click',        delegate: 'mouse_middle_click' },
-  { compound: 'computer', action: 'triple_click',        delegate: 'mouse_triple_click' },
-  { compound: 'computer', action: 'hover',               delegate: 'mouse_hover' },
-  { compound: 'computer', action: 'move',                delegate: 'mouse_hover' },
-  { compound: 'computer', action: 'move_relative',       delegate: 'mouse_move_relative' },
-  { compound: 'computer', action: 'scroll',              delegate: 'mouse_scroll' },
-  { compound: 'computer', action: 'scroll_horizontal',   delegate: 'mouse_scroll_horizontal' },
-  { compound: 'computer', action: 'drag',                delegate: 'mouse_drag' },
-  { compound: 'computer', action: 'drag_path',           delegate: 'mouse_drag_stepped', argRemap: { path: 'path' } },
-  { compound: 'computer', action: 'mouse_down',          delegate: 'mouse_down' },
-  { compound: 'computer', action: 'mouse_up',            delegate: 'mouse_up' },
-  { compound: 'computer', action: 'type',                delegate: 'type_text' },
-  { compound: 'computer', action: 'key',                 delegate: 'key_press', argRemap: { combo: 'key' } },
-  { compound: 'computer', action: 'key_press',           delegate: 'key_press', argRemap: { combo: 'key' } },
-  { compound: 'computer', action: 'key_down',            delegate: 'key_down',  argRemap: { combo: 'key' } },
-  { compound: 'computer', action: 'key_up',              delegate: 'key_up',    argRemap: { combo: 'key' } },
-  { compound: 'computer', action: 'wait',                delegate: 'wait' },
-  // accessibility
-  { compound: 'accessibility', action: 'read_tree',      delegate: 'read_screen' },
-  { compound: 'accessibility', action: 'find',           delegate: 'find_element' },
-  { compound: 'accessibility', action: 'get_element',    delegate: 'a11y_get_element' },
-  { compound: 'accessibility', action: 'focused',        delegate: 'get_focused_element' },
-  { compound: 'accessibility', action: 'invoke',         delegate: 'invoke_element' },
-  { compound: 'accessibility', action: 'focus',          delegate: 'focus_element' },
-  { compound: 'accessibility', action: 'set_value',      delegate: 'set_field_value' },
-  { compound: 'accessibility', action: 'get_value',      delegate: 'a11y_get_value' },
-  { compound: 'accessibility', action: 'expand',         delegate: 'a11y_expand' },
-  { compound: 'accessibility', action: 'collapse',       delegate: 'a11y_collapse' },
-  { compound: 'accessibility', action: 'toggle',         delegate: 'a11y_toggle' },
-  { compound: 'accessibility', action: 'select',         delegate: 'a11y_select' },
-  { compound: 'accessibility', action: 'state',          delegate: 'get_element_state' },
-  { compound: 'accessibility', action: 'list_children',  delegate: 'a11y_list_children', argRemap: { name: 'parentName' } },
-  { compound: 'accessibility', action: 'wait_for',       delegate: 'wait_for_element' },
-  // window
-  { compound: 'window', action: 'list',           delegate: 'get_windows' },
-  { compound: 'window', action: 'active',         delegate: 'get_active_window' },
-  { compound: 'window', action: 'focus',          delegate: 'focus_window' },
-  { compound: 'window', action: 'maximize',       delegate: 'maximize_window' },
-  { compound: 'window', action: 'minimize',       delegate: 'minimize_window_to_taskbar' },
-  { compound: 'window', action: 'restore',        delegate: 'restore_window' },
-  { compound: 'window', action: 'close',          delegate: 'close_window' },
-  { compound: 'window', action: 'resize',         delegate: 'resize_window' },
-  { compound: 'window', action: 'list_displays',  delegate: 'list_displays' },
-  { compound: 'window', action: 'screen_size',    delegate: 'get_screen_size' },
-  { compound: 'window', action: 'open_app',       delegate: 'open_app' },
-  { compound: 'window', action: 'open_file',      delegate: 'open_file' },
-  { compound: 'window', action: 'open_url',       delegate: 'open_url' },
-  { compound: 'window', action: 'switch_tab',     delegate: 'switch_tab_os' },
-  { compound: 'window', action: 'navigate',       delegate: 'navigate_browser' },
-  // system
-  { compound: 'system', action: 'clipboard_read',    delegate: 'read_clipboard' },
-  { compound: 'system', action: 'clipboard_write',   delegate: 'write_clipboard' },
-  { compound: 'system', action: 'system_time',       delegate: 'get_system_time' },
-  { compound: 'system', action: 'ocr',               delegate: 'ocr_read_screen' },
-  { compound: 'system', action: 'undo',              delegate: 'undo_last' },
-  { compound: 'system', action: 'shortcuts_list',    delegate: 'shortcuts_list' },
-  { compound: 'system', action: 'shortcuts_run',     delegate: 'shortcuts_execute' },
-  { compound: 'system', action: 'detect_webview',    delegate: 'detect_webview_apps' },
-  { compound: 'system', action: 'relaunch_with_cdp', delegate: 'relaunch_with_cdp' },
-  // browser
-  { compound: 'browser', action: 'connect',        delegate: 'cdp_connect' },
-  { compound: 'browser', action: 'page_context',   delegate: 'cdp_page_context' },
-  { compound: 'browser', action: 'read_text',      delegate: 'cdp_read_text' },
-  { compound: 'browser', action: 'click',          delegate: 'cdp_click' },
-  { compound: 'browser', action: 'type',           delegate: 'cdp_type' },
-  { compound: 'browser', action: 'select_option',  delegate: 'cdp_select_option' },
-  { compound: 'browser', action: 'evaluate',       delegate: 'cdp_evaluate' },
-  { compound: 'browser', action: 'wait_for',       delegate: 'cdp_wait_for_selector' },
-  { compound: 'browser', action: 'list_tabs',      delegate: 'cdp_list_tabs' },
-  { compound: 'browser', action: 'switch_tab',     delegate: 'cdp_switch_tab' },
-  { compound: 'browser', action: 'scroll',         delegate: 'cdp_scroll' },
-  { compound: 'browser', action: 'navigate',       delegate: 'navigate_browser' },
-];
-
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe('compact-as-transform invariants', () => {
 
-  // ── 1. Every ACTION_MAP delegate exists in getAllTools() ─────────────────
-  describe('1. Every ACTION_MAP delegate resolves in getAllTools()', () => {
-    const granularNames = new Set(getAllTools().map(t => t.name));
-
-    for (const route of ACTION_MAP) {
-      it(`${route.compound}.${route.action} → delegate "${route.delegate}" exists`, () => {
-        expect(granularNames.has(route.delegate)).toBe(true);
-      });
-    }
-  });
-
-  // ── 1b. The LIVE route tables resolve too (no hand-copy drift) ───────────
-  // The local ACTION_MAP above is a readable snapshot, but it drifted (it
-  // missed compile_ui/find_*/smart_* — review 2026-06-11). This block iterates
-  // the REAL tables exported from compact.ts, so a future action whose
-  // delegate was never registered fails here even if the snapshot is stale.
-  describe('1b. Every LIVE compact route delegate resolves in getAllTools()', () => {
+  // ── 1. Every compact route delegate exists in getAllTools() ─────────────
+  describe('1. Every compact route delegate resolves in getAllTools()', () => {
     const granularNames = new Set(getAllTools().map(t => t.name));
 
     for (const [compound, routes] of Object.entries(COMPOUND_ROUTE_INDEX)) {
       for (const route of routes) {
-        it(`${compound}.${route.action} → delegate "${route.delegate}" exists (live table)`, () => {
+        it(`${compound}.${route.action} → delegate "${route.delegate}" exists `, () => {
           expect(granularNames.has(route.delegate)).toBe(true);
         });
       }
     }
   });
 
-  // ── 2. 6 compound names are exactly the expected set ────────────────────
-  it('2. Compact surface exposes the 6 primitive compounds + the batch meta-tool', () => {
-    const compactTools = getCompactTools();
-    const names = compactTools.map(t => t.name).sort();
-    expect(names).toEqual(
-      ['accessibility', 'batch', 'browser', 'computer', 'system', 'window'],
-    );
-  });
-
   // ── 3. actionCatalog lists every route action (via compact description) ─
   it('3. Each compact tool description mentions all its actions', () => {
     const compactTools = getCompactTools();
-    const compoundGroups: Record<string, string[]> = {};
-    for (const route of ACTION_MAP) {
-      if (!compoundGroups[route.compound]) compoundGroups[route.compound] = [];
-      compoundGroups[route.compound].push(route.action);
-    }
-
-    for (const compound of Object.keys(compoundGroups)) {
+    for (const [compound, routes] of Object.entries(COMPOUND_ROUTE_INDEX)) {
       const tool = compactTools.find(t => t.name === compound)!;
       expect(tool).toBeDefined();
-      for (const action of compoundGroups[compound]) {
+      for (const { action } of routes) {
         expect(tool.description).toContain(action);
       }
     }
@@ -375,62 +250,6 @@ describe('compact-as-transform invariants', () => {
     const result = await accessibilityTool.handler({}, ctx);
     expect(result.isError).toBe(true);
     expect(result.text).toContain('"action" is required');
-  });
-
-  // ── 8. getTools({ palette: 'compact' }) === getCompactSurface() ─────────
-  it('8. getTools({ palette: "compact" }) returns the same set as getCompactSurface()', () => {
-    const viaGetTools = getTools({ palette: 'compact' }).map(t => t.name).sort();
-    const viaGetCompactSurface = getCompactSurface().map(t => t.name).sort();
-    expect(viaGetTools).toEqual(viaGetCompactSurface);
-  });
-
-  // ── 9. getTools({ compactGroup: X }) returns only tools with that group ──
-  it('9. getTools({ compactGroup: "computer" }) returns only computer-group tools', () => {
-    const tools = getTools({ compactGroup: 'computer' });
-    expect(tools.length).toBeGreaterThan(0);
-    for (const tool of tools) {
-      expect(tool.compactGroup).toBe('computer');
-    }
-    // Spot-check: known computer tools
-    const names = tools.map(t => t.name);
-    expect(names).toContain('mouse_click');
-    expect(names).toContain('key_press');
-    expect(names).toContain('desktop_screenshot');
-    expect(names).toContain('type_text');
-  });
-
-  it('9b. getTools({ compactGroup: "accessibility" }) returns only accessibility-group tools', () => {
-    const tools = getTools({ compactGroup: 'accessibility' });
-    expect(tools.length).toBeGreaterThan(0);
-    for (const tool of tools) {
-      expect(tool.compactGroup).toBe('accessibility');
-    }
-    const names = tools.map(t => t.name);
-    expect(names).toContain('read_screen');
-    expect(names).toContain('find_element');
-    expect(names).toContain('invoke_element');
-  });
-
-  it('9c. getTools({ compactGroup: "system" }) contains system tools', () => {
-    const tools = getTools({ compactGroup: 'system' });
-    const names = tools.map(t => t.name);
-    expect(names).toContain('read_clipboard');
-    expect(names).toContain('write_clipboard');
-    expect(names).toContain('get_system_time');
-    expect(names).toContain('ocr_read_screen');
-    expect(names).toContain('detect_webview_apps');
-    expect(names).toContain('relaunch_with_cdp');
-  });
-
-  // ── 10. granular tools not in any compactGroup ──────────────────────────
-  it('10. smart_read, smart_click, smart_type, minimize_window have no compactGroup', () => {
-    const all = getAllTools();
-    const noGroup = ['smart_read', 'smart_click', 'smart_type', 'minimize_window'];
-    for (const name of noGroup) {
-      const tool = all.find(t => t.name === name);
-      expect(tool, `tool ${name} should exist in getAllTools()`).toBeDefined();
-      expect(tool!.compactGroup, `${name} should have no compactGroup`).toBeUndefined();
-    }
   });
 
   // ── 11. getAllTools() back-compat === getTools() ────────────────────────

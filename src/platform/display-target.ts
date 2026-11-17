@@ -19,7 +19,6 @@ export function setWorkingPoint(x: number, y: number): void {
 export function getWorkingPoint(): { x: number; y: number } | null { return workingPoint; }
 export function resetWorkingPoint(): void { workingPoint = null; }
 
-/** The display containing (x, y), or null. */
 export function displayAt(displays: Display[], x: number, y: number): Display | null {
   return displays.find(d => x >= d.bounds.x && y >= d.bounds.y
     && x < d.bounds.x + d.bounds.width && y < d.bounds.y + d.bounds.height) ?? null;

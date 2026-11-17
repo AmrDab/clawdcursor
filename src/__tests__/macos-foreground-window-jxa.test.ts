@@ -7,7 +7,7 @@
  * smart_click warned "matched outside focused window" for the menu bar. The app's own AXMain /
  * AXFocused flag is the truth; area scoring stays only for apps that expose neither.
  *
- * (The compiled helper does this natively — see mac-ax-live.test.ts; this is the path used when
+ * (The compiled helper does this natively — see mac-ax-live.system.test.ts; this is the path used when
  * the helper cannot be built.)
  */
 import { describe, it, expect } from 'vitest';

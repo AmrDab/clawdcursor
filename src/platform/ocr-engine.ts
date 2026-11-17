@@ -8,7 +8,7 @@
  * macOS:   Apple Vision framework via Swift script (scripts/mac/ocr-recognize.swift).
  * Linux:   Tesseract OCR via Python script (scripts/linux/ocr-recognize.py).
  *
- * Caching: last result is kept for 300ms. Invalidated on any action execution.
+ * One engine per process (ocrEngine()): its last result is kept for 300 ms, and every agent act empties it.
  */
 
 import { fenceOcrCapture, fenceOcrText } from '../core/fence';
@@ -24,9 +24,10 @@ import { sharpFromGrab, type GrabImage } from './grab-image';
 import { rawScreenGrab } from './screen-grab';
 import { psRunner } from './ps-runner';
 import { pickDisplay } from './display-target';
-import { cachedMacOcrBinary, compileMacOcrBinary } from './mac-ocr-binary';
+import { cachedMacOcrBinary, compileMacOcrBinary } from './mac-swift-binary';
 import type { Display } from './types';
 import { psOpts, powershellExe } from './ps-spawn';
+import { onAgentAct } from './pointer-guard';
 
 const execFileAsync = promisify(execFile);
 
@@ -103,9 +104,24 @@ function isEngineMissing(err: any): boolean {
 
 // ─── OcrEngine ────────────────────────────────────────────────────────────────
 
+let shared: OcrEngine | null = null;
+/**
+ * The process's one OCR engine, for every reader: one 300 ms cache and one availability check. Each agent act (input,
+ * an act by element, a focus, a launch) empties the cache, so a read after an act never returns the screen from before it.
+ */
+export function ocrEngine(): OcrEngine {
+  if (!shared) {
+    shared = new OcrEngine();
+    onAgentAct(() => shared?.invalidateCache());
+  }
+  return shared;
+}
+
 export class OcrEngine {
   private cachedResult: OcrResult | null = null;
   private cacheTimestamp = 0;
+  /** Bumped by invalidateCache: a read that started before an act does not cache the screen from before it. */
+  private generation = 0;
   private available: boolean | null = null;
 
   /**
@@ -169,6 +185,7 @@ export class OcrEngine {
   invalidateCache(): void {
     this.cachedResult = null;
     this.cacheTimestamp = 0;
+    this.generation++;
   }
 
   /**
@@ -179,13 +196,13 @@ export class OcrEngine {
   async recognizeScreen(): Promise<OcrResult> {
     if (!this.isAvailable()) return { ...EMPTY_RESULT };
 
-    // Return cached if fresh
     const now = Date.now();
     if (this.cachedResult && (now - this.cacheTimestamp) < CACHE_TTL_MS) {
       return this.cachedResult;
     }
 
     const start = Date.now();
+    const generation = this.generation;
     try {
       // The working monitor via the bridge (Windows, non-primary); otherwise a
       // full-resolution nut-js grab (grim on Wayland) of the primary.
@@ -200,9 +217,10 @@ export class OcrEngine {
           console.log(`[OCR] Screenshot captured: ${img.width}x${img.height}px`);
         }
         pngBuffer = await sharpFromGrab(img).png().toBuffer();
-        // Release the raw RGBA buffer immediately after processing
         (img as any).data = null;
       }
+      // The result is the screen at this moment: its age counts from here, not from when the OCR finished.
+      const capturedAt = Date.now();
 
       // The test fence (core/fence.ts): only the fenced window's pixels reach the OCR engine. A no-op with no fence.
       pngBuffer = await fenceOcrCapture(pngBuffer, shot ? { x: shot.x, y: shot.y } : { x: 0, y: 0 });
@@ -218,9 +236,11 @@ export class OcrEngine {
         if (shot) for (const el of result.elements) { el.x += shot.x; el.y += shot.y; }
         result = await fenceOcrText(result);
 
-        // Cache
-        this.cachedResult = result;
-        this.cacheTimestamp = Date.now();
+        // Cached unless an act emptied the cache while this read ran: the result shows the screen from before it.
+        if (this.generation === generation) {
+          this.cachedResult = result;
+          this.cacheTimestamp = capturedAt;
+        }
 
         return result;
       } finally {
@@ -278,7 +298,6 @@ export class OcrEngine {
         .extract({ left: rx, top: ry, width: rw, height: rh })
         .png()
         .toBuffer(), { x: rx, y: ry });
-      // Release the raw RGBA buffer immediately after processing
       (img as any).data = null;
 
       const tmpPath = path.join(os.tmpdir(), `clawdcursor-ocr-region-${process.pid}-${crypto.randomUUID().slice(0, 8)}.png`);
@@ -288,7 +307,6 @@ export class OcrEngine {
         const result = await this.runOcr(tmpPath);
         result.durationMs = Date.now() - start;
 
-        // Offset coordinates back to full-screen space
         for (const el of result.elements) {
           el.x += rx;
           el.y += ry;
@@ -311,9 +329,6 @@ export class OcrEngine {
     return rawScreenGrab();
   }
 
-  /**
-   * Dispatch to the platform-specific OCR implementation.
-   */
   private async runOcr(imagePath: string): Promise<OcrResult> {
     if (process.platform === 'win32') {
       return this.runWindowsOcr(imagePath);

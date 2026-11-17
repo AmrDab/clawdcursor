@@ -1,7 +1,7 @@
 /**
  * Error Report — opt-in user report submission.
  *
- * Users can send task logs + system info to help improve the agent.
+ * Users can send a summary of their latest MCP session (or of a task log an old install left) plus system info.
  * All data is redacted before sending (no clipboard, no typed text,
  * no file paths with usernames, no API keys).
  *
@@ -12,7 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as readline from 'readline';
-import { getVersion } from './version';
+import { getVersion } from '../version';
 import { TASK_LOGS_DIR, REPORTS_DIR } from '../paths';
 import { listSessions, readSession, type SessionTally } from './session-log';
 import { system32Exe } from '../platform/ps-spawn';
@@ -148,7 +148,6 @@ function redactStep(raw: Record<string, unknown>): RedactedStep {
 
 // ─── Report Building ────────────────────────────────────────
 
-/** Read and parse a task log JSONL file */
 function readTaskLog(logPath: string): Record<string, unknown>[] {
   try {
     const content = fs.readFileSync(logPath, 'utf-8');
@@ -161,7 +160,6 @@ function readTaskLog(logPath: string): Record<string, unknown>[] {
   }
 }
 
-/** Get the most recent task log file path */
 function getMostRecentLog(): string | null {
   try {
     const files = fs.readdirSync(LOG_DIR)
@@ -175,7 +173,6 @@ function getMostRecentLog(): string | null {
   }
 }
 
-/** Get N most recent log files */
 function getRecentLogs(count: number): string[] {
   try {
     return fs.readdirSync(LOG_DIR)
@@ -194,7 +191,6 @@ export function buildReport(logPath?: string, userNote?: string, skipTaskLog = f
   const targetPath = skipTaskLog ? null : (logPath || getMostRecentLog());
   const entries = targetPath ? readTaskLog(targetPath) : [];
 
-  // Separate summary from steps
   const summary = entries.find(e => e._type === 'task_summary') as Record<string, unknown> | undefined;
   const steps = entries.filter(e => e._type !== 'task_summary');
 
@@ -228,7 +224,6 @@ export function buildReport(logPath?: string, userNote?: string, skipTaskLog = f
     report.userNote = userNote;
   }
 
-  // Check if the last step had an error
   const lastStep = steps[steps.length - 1];
   if (lastStep?.error) {
     report.errorContext = redactSensitive(String(lastStep.error));
@@ -326,7 +321,6 @@ export async function openInBrowser(url: string): Promise<boolean> {
 
 // ─── Submission ─────────────────────────────────────────────
 
-/** Submit a report to the backend */
 export async function submitReport(report: ErrorReport): Promise<{ success: boolean; reportId: string; error?: string }> {
   try {
     const resp = await fetch(REPORT_ENDPOINT, {
@@ -377,7 +371,6 @@ export async function interactiveReport(): Promise<void> {
     console.log(`\n  Most recent task log: ${path.basename(logPath!)}`);
   }
 
-  // Show available logs
   const recentLogs = report.session ? [] : getRecentLogs(5);
   if (recentLogs.length > 1) {
     console.log('\n  Recent logs:');
@@ -391,7 +384,6 @@ export async function interactiveReport(): Promise<void> {
     });
   }
 
-  // Show preview
   console.log('\n  ── Report Preview ──────────────────────────────');
   console.log(`  Report ID:  ${report.reportId}`);
   console.log(`  Version:    ${report.version}`);
@@ -419,7 +411,6 @@ export async function interactiveReport(): Promise<void> {
   console.log('\n  Privacy: No typed text, clipboard data, screenshots,');
   console.log('  or personal file paths are included.');
 
-  // Ask for optional note
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -433,21 +424,18 @@ export async function interactiveReport(): Promise<void> {
     report.userNote = note.trim();
   }
 
-  // Confirm
   const confirm = await new Promise<string>((resolve) => {
     rl.question('  Send this report? (y/N) ', resolve);
   });
   rl.close();
 
   if (confirm.toLowerCase() !== 'y' && confirm.toLowerCase() !== 'yes') {
-    // Save locally as fallback
     const savedPath = saveReportLocally(report);
     console.log(`\n  Report saved locally: ${savedPath}`);
     console.log('  You can manually share this file if needed.\n');
     return;
   }
 
-  // Submit
   console.log('\n  Sending report...');
   const result = await submitReport(report);
 
@@ -470,7 +458,7 @@ export async function interactiveReport(): Promise<void> {
 
 // ─── Server API Helpers ─────────────────────────────────────
 
-/** Build and submit a report programmatically (for REST API) */
+/** Build and submit a report from a task log, for the report tool (tools/extras.ts). */
 export async function apiSubmitReport(opts: {
   logPath?: string;
   userNote?: string;

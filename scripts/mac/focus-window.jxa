@@ -133,7 +133,6 @@ function findTitleMatchWindow(windows, needle) {
 // argv receives command-line arguments passed after the script path.
 function run(argv) {
     try {
-        // Parse arguments from argv array
         var params = { title: null, processId: null };
         for (var i = 0; i < argv.length; i++) {
             var a = argv[i];
@@ -146,7 +145,6 @@ function run(argv) {
             // -Restore: focusing on macOS always brings a minimized window back (see below); no other state is touched
         }
 
-        // Validate parameters
         if (!params.title && !params.processId) {
             return JSON.stringify({
                 success: false,
@@ -157,7 +155,6 @@ function run(argv) {
         var SystemEvents = Application('System Events');
         SystemEvents.includeStandardAdditions = true;
 
-        // Get all processes with UI
         var processes = SystemEvents.processes.where({ backgroundOnly: false });
         var targetWindow = null;
         var targetProcess = null;
@@ -237,24 +234,18 @@ function run(argv) {
             // Not every window exposes it; nothing to restore.
         }
 
-        // Bring window to front
-        // Method 1: Use System Events to set frontmost
         try {
             if (targetProcess) {
                 targetProcess.frontmost = true;
             }
         } catch (e) {
-            // Continue with other methods
         }
 
-        // Method 2: Focus the window
         try {
             targetWindow.focused = true;
         } catch (e) {
-            // Continue
         }
 
-        // Method 3: Use application level activation (if we can get the app name)
         try {
             if (targetProcess) {
                 var appName = safeGet(targetProcess, 'name', '');
@@ -264,10 +255,9 @@ function run(argv) {
                 }
             }
         } catch (e) {
-            // Continue
         }
 
-        // Method 4: AXRaise — the only call that, on multi-window apps, brings
+        // AXRaise — the only call that, on multi-window apps, brings
         // the SPECIFIC window forward instead of just activating the app and
         // letting macOS surface whichever window was frontmost last. Without
         // this, bug #2 would only be half-fixed: we'd pick the right window
@@ -278,7 +268,6 @@ function run(argv) {
             // Not all windows expose AXRaise; ignore if unavailable.
         }
 
-        // Get final window info
         var winTitle = '';
         var winProcessId = 0;
         var winProcessName = 'unknown';

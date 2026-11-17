@@ -4,15 +4,14 @@
  * prior clipboard restored after. Falls back to typeText if the clipboard or the paste fails.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { buildUnifiedTools } from '../tools/projected/tools';
 import { TYPE_KEYS_MAX } from '../tools/paste-guard';
-import type { AgentToolContext } from '../core/agent-loop/types';
+import type { AgentToolContext } from '../tools/projected/types';
 
 function ctxWith(platform: any): AgentToolContext {
   return {
-    platform, task: 't', mode: 'blind',
+    platform,
     screen: { logicalWidth: 1280, logicalHeight: 720, physicalWidth: 1280, physicalHeight: 720, dpiRatio: 1 },
-    screenshotsCaptured: { n: 0 },
   };
 }
 const typeTool = () => buildUnifiedTools().find(t => t.name === 'type')!;

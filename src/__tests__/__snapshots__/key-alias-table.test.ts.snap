@@ -1,0 +1,1027 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Linux (X11) adapter > keyDown t 1`] = `
+"
+mod       down LeftControl
+Mod       down LeftControl
+cmd       down LeftSuper
+Cmd       down LeftSuper
+command   down LeftSuper
+meta      down LeftSuper
+Meta      down LeftSuper
+super     down LeftSuper
+Super     down LeftSuper
+super_l   down LeftSuper
+win       down LeftSuper
+Win       down LeftSuper
+windows   down LeftSuper
+command_l down LeftSuper
+ctrl      down LeftControl
+Ctrl      down LeftControl
+CTRL      down LeftControl
+control   down LeftControl
+Control   down LeftControl
+shift     down LeftShift
+Shift     down LeftShift
+alt       down LeftAlt
+Alt       down LeftAlt
+opt       down LeftAlt
+option    down LeftAlt
+Option    down LeftAlt
+altgr     ERR Unknown key: "altgr"
+leftctrl  ERR Unknown key: "leftctrl"
+rightalt  ERR Unknown key: "rightalt"
+lwin      ERR Unknown key: "lwin"
+fn        ERR Unknown key: "fn"
+hyper     ERR Unknown key: "hyper"
+bogus     ERR Unknown key: "bogus"
+"
+`;
+
+exports[`Linux (X11) adapter > keyPress t 1`] = `
+"
+mod       down LeftControl ; up LeftControl
+Mod       down LeftControl ; up LeftControl
+cmd       down LeftSuper ; up LeftSuper
+Cmd       down LeftSuper ; up LeftSuper
+command   down LeftSuper ; up LeftSuper
+meta      down LeftSuper ; up LeftSuper
+Meta      down LeftSuper ; up LeftSuper
+super     down LeftSuper ; up LeftSuper
+Super     down LeftSuper ; up LeftSuper
+super_l   down LeftSuper ; up LeftSuper
+win       down LeftSuper ; up LeftSuper
+Win       down LeftSuper ; up LeftSuper
+windows   down LeftSuper ; up LeftSuper
+command_l down LeftSuper ; up LeftSuper
+ctrl      down LeftControl ; up LeftControl
+Ctrl      down LeftControl ; up LeftControl
+CTRL      down LeftControl ; up LeftControl
+control   down LeftControl ; up LeftControl
+Control   down LeftControl ; up LeftControl
+shift     down LeftShift ; up LeftShift
+Shift     down LeftShift ; up LeftShift
+alt       down LeftAlt ; up LeftAlt
+Alt       down LeftAlt ; up LeftAlt
+opt       down LeftAlt ; up LeftAlt
+option    down LeftAlt ; up LeftAlt
+Option    down LeftAlt ; up LeftAlt
+altgr     ERR Unknown key: "altgr"
+leftctrl  ERR Unknown key: "leftctrl"
+rightalt  ERR Unknown key: "rightalt"
+lwin      ERR Unknown key: "lwin"
+fn        ERR Unknown key: "fn"
+hyper     ERR Unknown key: "hyper"
+bogus     ERR Unknown key: "bogus"
+"
+`;
+
+exports[`Linux (X11) adapter > keyPress t+a 1`] = `
+"
+mod       down LeftControl+A ; up LeftControl+A
+Mod       down LeftControl+A ; up LeftControl+A
+cmd       down LeftSuper+A ; up LeftSuper+A
+Cmd       down LeftSuper+A ; up LeftSuper+A
+command   down LeftSuper+A ; up LeftSuper+A
+meta      down LeftSuper+A ; up LeftSuper+A
+Meta      down LeftSuper+A ; up LeftSuper+A
+super     down LeftSuper+A ; up LeftSuper+A
+Super     down LeftSuper+A ; up LeftSuper+A
+super_l   down LeftSuper+A ; up LeftSuper+A
+win       down LeftSuper+A ; up LeftSuper+A
+Win       down LeftSuper+A ; up LeftSuper+A
+windows   down LeftSuper+A ; up LeftSuper+A
+command_l down LeftSuper+A ; up LeftSuper+A
+ctrl      down LeftControl+A ; up LeftControl+A
+Ctrl      down LeftControl+A ; up LeftControl+A
+CTRL      down LeftControl+A ; up LeftControl+A
+control   down LeftControl+A ; up LeftControl+A
+Control   down LeftControl+A ; up LeftControl+A
+shift     down LeftShift+A ; up LeftShift+A
+Shift     down LeftShift+A ; up LeftShift+A
+alt       down LeftAlt+A ; up LeftAlt+A
+Alt       down LeftAlt+A ; up LeftAlt+A
+opt       down LeftAlt+A ; up LeftAlt+A
+option    down LeftAlt+A ; up LeftAlt+A
+Option    down LeftAlt+A ; up LeftAlt+A
+altgr     ERR Unknown key: "altgr"
+leftctrl  ERR Unknown key: "leftctrl"
+rightalt  ERR Unknown key: "rightalt"
+lwin      ERR Unknown key: "lwin"
+fn        ERR Unknown key: "fn"
+hyper     ERR Unknown key: "hyper"
+bogus     ERR Unknown key: "bogus"
+"
+`;
+
+exports[`NativeDesktop on macOS (its own AppleScript key path) > keyPress t 1`] = `
+"
+mod       key code 55
+Mod       key code 55
+cmd       key code 55
+Cmd       key code 55
+command   key code 55
+meta      key code 55
+Meta      key code 55
+super     key code 55
+Super     key code 55
+super_l   ERR Unknown key: "super_l"
+win       ERR Unknown key: "win"
+Win       ERR Unknown key: "Win"
+windows   ERR Unknown key: "windows"
+command_l ERR Unknown key: "command_l"
+ctrl      key code 59
+Ctrl      key code 59
+CTRL      key code 59
+control   key code 59
+Control   key code 59
+shift     key code 56
+Shift     key code 56
+alt       key code 58
+Alt       key code 58
+opt       key code 58
+option    key code 58
+Option    key code 58
+altgr     ERR Unknown key: "altgr"
+leftctrl  ERR Unknown key: "leftctrl"
+rightalt  ERR Unknown key: "rightalt"
+lwin      ERR Unknown key: "lwin"
+fn        ERR Unknown key: "fn"
+hyper     ERR Unknown key: "hyper"
+bogus     ERR Unknown key: "bogus"
+"
+`;
+
+exports[`NativeDesktop on macOS (its own AppleScript key path) > keyPress t+a 1`] = `
+"
+mod       keystroke "a" using {command down}
+Mod       keystroke "a" using {command down}
+cmd       keystroke "a" using {command down}
+Cmd       keystroke "a" using {command down}
+command   keystroke "a" using {command down}
+meta      keystroke "a" using {command down}
+Meta      keystroke "a" using {command down}
+super     keystroke "a" using {command down}
+Super     keystroke "a" using {command down}
+super_l   ERR Unknown modifier: "super_l"
+win       ERR Unknown modifier: "win"
+Win       ERR Unknown modifier: "Win"
+windows   ERR Unknown modifier: "windows"
+command_l ERR Unknown modifier: "command_l"
+ctrl      keystroke "a" using {control down}
+Ctrl      keystroke "a" using {control down}
+CTRL      keystroke "a" using {control down}
+control   keystroke "a" using {control down}
+Control   keystroke "a" using {control down}
+shift     keystroke "a" using {shift down}
+Shift     keystroke "a" using {shift down}
+alt       keystroke "a" using {option down}
+Alt       keystroke "a" using {option down}
+opt       keystroke "a" using {option down}
+option    keystroke "a" using {option down}
+Option    keystroke "a" using {option down}
+altgr     ERR Unknown modifier: "altgr"
+leftctrl  ERR Unknown modifier: "leftctrl"
+rightalt  ERR Unknown modifier: "rightalt"
+lwin      ERR Unknown modifier: "lwin"
+fn        ERR Unknown modifier: "fn"
+hyper     ERR Unknown modifier: "hyper"
+bogus     ERR Unknown modifier: "bogus"
+"
+`;
+
+exports[`Wayland backend > wtype keyPress t 1`] = `
+"
+mod       ERR Unknown key: "mod"
+Mod       ERR Unknown key: "Mod"
+cmd       ERR Unknown key: "cmd"
+Cmd       ERR Unknown key: "Cmd"
+command   ERR Unknown key: "command"
+meta      ERR Unknown key: "meta"
+Meta      ERR Unknown key: "Meta"
+super     ERR Unknown key: "super"
+Super     ERR Unknown key: "Super"
+super_l   ERR Unknown key: "super_l"
+win       ERR Unknown key: "win"
+Win       ERR Unknown key: "Win"
+windows   ERR Unknown key: "windows"
+command_l ERR Unknown key: "command_l"
+ctrl      ERR Unknown key: "ctrl"
+Ctrl      ERR Unknown key: "Ctrl"
+CTRL      ERR Unknown key: "CTRL"
+control   ERR Unknown key: "control"
+Control   ERR Unknown key: "Control"
+shift     ERR Unknown key: "shift"
+Shift     ERR Unknown key: "Shift"
+alt       ERR Unknown key: "alt"
+Alt       ERR Unknown key: "Alt"
+opt       ERR Unknown key: "opt"
+option    ERR Unknown key: "option"
+Option    ERR Unknown key: "Option"
+altgr     ERR Unknown key: "altgr"
+leftctrl  ERR Unknown key: "leftctrl"
+rightalt  ERR Unknown key: "rightalt"
+lwin      ERR Unknown key: "lwin"
+fn        ERR Unknown key: "fn"
+hyper     ERR Unknown key: "hyper"
+bogus     ERR Unknown key: "bogus"
+"
+`;
+
+exports[`Wayland backend > wtype keyPress t+a 1`] = `
+"
+mod       wtype -M ctrl a
+Mod       wtype -M ctrl a
+cmd       wtype -M logo a
+Cmd       wtype -M logo a
+command   wtype -M logo a
+meta      wtype -M logo a
+Meta      wtype -M logo a
+super     wtype -M logo a
+Super     wtype -M logo a
+super_l   wtype -M logo a
+win       wtype -M logo a
+Win       wtype -M logo a
+windows   wtype -M logo a
+command_l wtype -M logo a
+ctrl      wtype -M ctrl a
+Ctrl      wtype -M ctrl a
+CTRL      wtype -M ctrl a
+control   wtype -M ctrl a
+Control   wtype -M ctrl a
+shift     wtype -M shift a
+Shift     wtype -M shift a
+alt       wtype -M alt a
+Alt       wtype -M alt a
+opt       wtype -M alt a
+option    wtype -M alt a
+Option    wtype -M alt a
+altgr     ERR Unknown modifier: "altgr"
+leftctrl  ERR Unknown modifier: "leftctrl"
+rightalt  ERR Unknown modifier: "rightalt"
+lwin      ERR Unknown modifier: "lwin"
+fn        ERR Unknown modifier: "fn"
+hyper     ERR Unknown modifier: "hyper"
+bogus     ERR Unknown modifier: "bogus"
+"
+`;
+
+exports[`Wayland backend > ydotool 0.1.x keyPress t+a 1`] = `
+"
+mod       ydotool key CTRL+a
+Mod       ydotool key CTRL+a
+cmd       ydotool key SUPER+a
+Cmd       ydotool key SUPER+a
+command   ydotool key SUPER+a
+meta      ydotool key SUPER+a
+Meta      ydotool key SUPER+a
+super     ydotool key SUPER+a
+Super     ydotool key SUPER+a
+super_l   ydotool key SUPER+a
+win       ydotool key SUPER+a
+Win       ydotool key SUPER+a
+windows   ydotool key SUPER+a
+command_l ydotool key SUPER+a
+ctrl      ydotool key CTRL+a
+Ctrl      ydotool key CTRL+a
+CTRL      ydotool key CTRL+a
+control   ydotool key CTRL+a
+Control   ydotool key CTRL+a
+shift     ydotool key SHIFT+a
+Shift     ydotool key SHIFT+a
+alt       ydotool key ALT+a
+Alt       ydotool key ALT+a
+opt       ydotool key ALT+a
+option    ydotool key ALT+a
+Option    ydotool key ALT+a
+altgr     ERR Unknown modifier: "altgr"
+leftctrl  ERR Unknown modifier: "leftctrl"
+rightalt  ERR Unknown modifier: "rightalt"
+lwin      ERR Unknown modifier: "lwin"
+fn        ERR Unknown modifier: "fn"
+hyper     ERR Unknown modifier: "hyper"
+bogus     ERR Unknown modifier: "bogus"
+"
+`;
+
+exports[`Wayland backend > ydotool keyDown t 1`] = `
+"
+mod       ydotool key 29:1
+Mod       ydotool key 29:1
+cmd       ydotool key 125:1
+Cmd       ydotool key 125:1
+command   ydotool key 125:1
+meta      ydotool key 125:1
+Meta      ydotool key 125:1
+super     ydotool key 125:1
+Super     ydotool key 125:1
+super_l   ydotool key 125:1
+win       ydotool key 125:1
+Win       ydotool key 125:1
+windows   ydotool key 125:1
+command_l ydotool key 125:1
+ctrl      ydotool key 29:1
+Ctrl      ydotool key 29:1
+CTRL      ydotool key 29:1
+control   ydotool key 29:1
+Control   ydotool key 29:1
+shift     ydotool key 42:1
+Shift     ydotool key 42:1
+alt       ydotool key 56:1
+Alt       ydotool key 56:1
+opt       ydotool key 56:1
+option    ydotool key 56:1
+Option    ydotool key 56:1
+altgr     ydotool key 100:1
+leftctrl  ydotool key 29:1
+rightalt  ydotool key 100:1
+lwin      ERR Unknown key: "lwin"
+fn        ERR Unknown key: "fn"
+hyper     ERR Unknown key: "hyper"
+bogus     ERR Unknown key: "bogus"
+"
+`;
+
+exports[`Wayland backend > ydotool keyPress t 1`] = `
+"
+mod       ydotool key 29:1 29:0
+Mod       ydotool key 29:1 29:0
+cmd       ydotool key 125:1 125:0
+Cmd       ydotool key 125:1 125:0
+command   ydotool key 125:1 125:0
+meta      ydotool key 125:1 125:0
+Meta      ydotool key 125:1 125:0
+super     ydotool key 125:1 125:0
+Super     ydotool key 125:1 125:0
+super_l   ydotool key 125:1 125:0
+win       ydotool key 125:1 125:0
+Win       ydotool key 125:1 125:0
+windows   ydotool key 125:1 125:0
+command_l ydotool key 125:1 125:0
+ctrl      ydotool key 29:1 29:0
+Ctrl      ydotool key 29:1 29:0
+CTRL      ydotool key 29:1 29:0
+control   ydotool key 29:1 29:0
+Control   ydotool key 29:1 29:0
+shift     ydotool key 42:1 42:0
+Shift     ydotool key 42:1 42:0
+alt       ydotool key 56:1 56:0
+Alt       ydotool key 56:1 56:0
+opt       ydotool key 56:1 56:0
+option    ydotool key 56:1 56:0
+Option    ydotool key 56:1 56:0
+altgr     ydotool key 100:1 100:0
+leftctrl  ydotool key 29:1 29:0
+rightalt  ydotool key 100:1 100:0
+lwin      ERR Unknown key: "lwin"
+fn        ERR Unknown key: "fn"
+hyper     ERR Unknown key: "hyper"
+bogus     ERR Unknown key: "bogus"
+"
+`;
+
+exports[`Wayland backend > ydotool keyPress t+a 1`] = `
+"
+mod       ydotool key 29:1 ; ydotool key 30:1 30:0 ; ydotool key 29:0
+Mod       ydotool key 29:1 ; ydotool key 30:1 30:0 ; ydotool key 29:0
+cmd       ydotool key 125:1 ; ydotool key 30:1 30:0 ; ydotool key 125:0
+Cmd       ydotool key 125:1 ; ydotool key 30:1 30:0 ; ydotool key 125:0
+command   ydotool key 125:1 ; ydotool key 30:1 30:0 ; ydotool key 125:0
+meta      ydotool key 125:1 ; ydotool key 30:1 30:0 ; ydotool key 125:0
+Meta      ydotool key 125:1 ; ydotool key 30:1 30:0 ; ydotool key 125:0
+super     ydotool key 125:1 ; ydotool key 30:1 30:0 ; ydotool key 125:0
+Super     ydotool key 125:1 ; ydotool key 30:1 30:0 ; ydotool key 125:0
+super_l   ydotool key 125:1 ; ydotool key 30:1 30:0 ; ydotool key 125:0
+win       ydotool key 125:1 ; ydotool key 30:1 30:0 ; ydotool key 125:0
+Win       ydotool key 125:1 ; ydotool key 30:1 30:0 ; ydotool key 125:0
+windows   ydotool key 125:1 ; ydotool key 30:1 30:0 ; ydotool key 125:0
+command_l ydotool key 125:1 ; ydotool key 30:1 30:0 ; ydotool key 125:0
+ctrl      ydotool key 29:1 ; ydotool key 30:1 30:0 ; ydotool key 29:0
+Ctrl      ydotool key 29:1 ; ydotool key 30:1 30:0 ; ydotool key 29:0
+CTRL      ydotool key 29:1 ; ydotool key 30:1 30:0 ; ydotool key 29:0
+control   ydotool key 29:1 ; ydotool key 30:1 30:0 ; ydotool key 29:0
+Control   ydotool key 29:1 ; ydotool key 30:1 30:0 ; ydotool key 29:0
+shift     ydotool key 42:1 ; ydotool key 30:1 30:0 ; ydotool key 42:0
+Shift     ydotool key 42:1 ; ydotool key 30:1 30:0 ; ydotool key 42:0
+alt       ydotool key 56:1 ; ydotool key 30:1 30:0 ; ydotool key 56:0
+Alt       ydotool key 56:1 ; ydotool key 30:1 30:0 ; ydotool key 56:0
+opt       ydotool key 56:1 ; ydotool key 30:1 30:0 ; ydotool key 56:0
+option    ydotool key 56:1 ; ydotool key 30:1 30:0 ; ydotool key 56:0
+Option    ydotool key 56:1 ; ydotool key 30:1 30:0 ; ydotool key 56:0
+altgr     ERR Unknown modifier: "altgr"
+leftctrl  ERR Unknown modifier: "leftctrl"
+rightalt  ERR Unknown modifier: "rightalt"
+lwin      ERR Unknown modifier: "lwin"
+fn        ERR Unknown modifier: "fn"
+hyper     ERR Unknown modifier: "hyper"
+bogus     ERR Unknown modifier: "bogus"
+"
+`;
+
+exports[`Windows adapter > keyDown t 1`] = `
+"
+mod       down LeftControl
+Mod       down LeftControl
+cmd       down LeftControl
+Cmd       down LeftControl
+command   down LeftControl
+meta      down LeftSuper
+Meta      down LeftSuper
+super     down LeftSuper
+Super     down LeftSuper
+super_l   down LeftSuper
+win       down LeftSuper
+Win       down LeftSuper
+windows   down LeftSuper
+command_l down LeftSuper
+ctrl      down LeftControl
+Ctrl      down LeftControl
+CTRL      down LeftControl
+control   down LeftControl
+Control   down LeftControl
+shift     down LeftShift
+Shift     down LeftShift
+alt       down LeftAlt
+Alt       down LeftAlt
+opt       down LeftAlt
+option    down LeftAlt
+Option    down LeftAlt
+altgr     ERR Unknown key: "altgr"
+leftctrl  ERR Unknown key: "leftctrl"
+rightalt  ERR Unknown key: "rightalt"
+lwin      ERR Unknown key: "lwin"
+fn        ERR Unknown key: "fn"
+hyper     ERR Unknown key: "hyper"
+bogus     ERR Unknown key: "bogus"
+"
+`;
+
+exports[`Windows adapter > keyPress t 1`] = `
+"
+mod       down LeftControl ; up LeftControl
+Mod       down LeftControl ; up LeftControl
+cmd       down LeftControl ; up LeftControl
+Cmd       down LeftControl ; up LeftControl
+command   down LeftControl ; up LeftControl
+meta      down LeftControl ; up LeftControl
+Meta      down LeftControl ; up LeftControl
+super     down LeftSuper ; up LeftSuper
+Super     down LeftSuper ; up LeftSuper
+super_l   down LeftSuper ; up LeftSuper
+win       down LeftSuper ; up LeftSuper
+Win       down LeftSuper ; up LeftSuper
+windows   down LeftSuper ; up LeftSuper
+command_l down LeftSuper ; up LeftSuper
+ctrl      down LeftControl ; up LeftControl
+Ctrl      down LeftControl ; up LeftControl
+CTRL      down LeftControl ; up LeftControl
+control   down LeftControl ; up LeftControl
+Control   down LeftControl ; up LeftControl
+shift     down LeftShift ; up LeftShift
+Shift     down LeftShift ; up LeftShift
+alt       down LeftAlt ; up LeftAlt
+Alt       down LeftAlt ; up LeftAlt
+opt       down LeftAlt ; up LeftAlt
+option    down LeftAlt ; up LeftAlt
+Option    down LeftAlt ; up LeftAlt
+altgr     ERR Unknown key: "altgr"
+leftctrl  ERR Unknown key: "leftctrl"
+rightalt  ERR Unknown key: "rightalt"
+lwin      ERR Unknown key: "lwin"
+fn        ERR Unknown key: "fn"
+hyper     ERR Unknown key: "hyper"
+bogus     ERR Unknown key: "bogus"
+"
+`;
+
+exports[`Windows adapter > keyPress t+a 1`] = `
+"
+mod       down LeftControl ; down A ; up A ; up LeftControl
+Mod       down LeftControl ; down A ; up A ; up LeftControl
+cmd       down LeftControl ; down A ; up A ; up LeftControl
+Cmd       down LeftControl ; down A ; up A ; up LeftControl
+command   down LeftControl ; down A ; up A ; up LeftControl
+meta      down LeftControl ; down A ; up A ; up LeftControl
+Meta      down LeftControl ; down A ; up A ; up LeftControl
+super     down LeftSuper ; down A ; up A ; up LeftSuper
+Super     down LeftSuper ; down A ; up A ; up LeftSuper
+super_l   down LeftSuper ; down A ; up A ; up LeftSuper
+win       down LeftSuper ; down A ; up A ; up LeftSuper
+Win       down LeftSuper ; down A ; up A ; up LeftSuper
+windows   down LeftSuper ; down A ; up A ; up LeftSuper
+command_l down LeftSuper ; down A ; up A ; up LeftSuper
+ctrl      down LeftControl ; down A ; up A ; up LeftControl
+Ctrl      down LeftControl ; down A ; up A ; up LeftControl
+CTRL      down LeftControl ; down A ; up A ; up LeftControl
+control   down LeftControl ; down A ; up A ; up LeftControl
+Control   down LeftControl ; down A ; up A ; up LeftControl
+shift     down LeftShift ; down A ; up A ; up LeftShift
+Shift     down LeftShift ; down A ; up A ; up LeftShift
+alt       down LeftAlt ; down A ; up A ; up LeftAlt
+Alt       down LeftAlt ; down A ; up A ; up LeftAlt
+opt       down LeftAlt ; down A ; up A ; up LeftAlt
+option    down LeftAlt ; down A ; up A ; up LeftAlt
+Option    down LeftAlt ; down A ; up A ; up LeftAlt
+altgr     ERR Unknown key: "altgr"
+leftctrl  ERR Unknown key: "leftctrl"
+rightalt  ERR Unknown key: "rightalt"
+lwin      ERR Unknown key: "lwin"
+fn        ERR Unknown key: "fn"
+hyper     ERR Unknown key: "hyper"
+bogus     ERR Unknown key: "bogus"
+"
+`;
+
+exports[`hard-keys keysOf (the Stop / hard-key guard's reading), per OS > darwin 1`] = `
+"
+mod       super,a
+Mod       super,a
+cmd       super,a
+Cmd       super,a
+command   super,a
+meta      super,a
+Meta      super,a
+super     super,a
+Super     super,a
+super_l   super,a
+win       super,a
+Win       super,a
+windows   super,a
+command_l super,a
+ctrl      ctrl,a
+Ctrl      ctrl,a
+CTRL      ctrl,a
+control   ctrl,a
+Control   ctrl,a
+shift     shift,a
+Shift     shift,a
+alt       alt,a
+Alt       alt,a
+opt       alt,a
+option    alt,a
+Option    alt,a
+altgr     alt,a
+leftctrl  ctrl,a
+rightalt  alt,a
+lwin      super,a
+fn        fn,a
+hyper     hyper,a
+bogus     bogus,a
+"
+`;
+
+exports[`hard-keys keysOf (the Stop / hard-key guard's reading), per OS > linux 1`] = `
+"
+mod       ctrl,a
+Mod       ctrl,a
+cmd       super,a
+Cmd       super,a
+command   super,a
+meta      super,a
+Meta      super,a
+super     super,a
+Super     super,a
+super_l   super,a
+win       super,a
+Win       super,a
+windows   super,a
+command_l super,a
+ctrl      ctrl,a
+Ctrl      ctrl,a
+CTRL      ctrl,a
+control   ctrl,a
+Control   ctrl,a
+shift     shift,a
+Shift     shift,a
+alt       alt,a
+Alt       alt,a
+opt       alt,a
+option    alt,a
+Option    alt,a
+altgr     alt,a
+leftctrl  ctrl,a
+rightalt  alt,a
+lwin      super,a
+fn        fn,a
+hyper     hyper,a
+bogus     bogus,a
+"
+`;
+
+exports[`hard-keys keysOf (the Stop / hard-key guard's reading), per OS > win32 1`] = `
+"
+mod       ctrl,a
+Mod       ctrl,a
+cmd       ctrl,a
+Cmd       ctrl,a
+command   ctrl,a
+meta      super,a
+Meta      super,a
+super     super,a
+Super     super,a
+super_l   super,a
+win       super,a
+Win       super,a
+windows   super,a
+command_l super,a
+ctrl      ctrl,a
+Ctrl      ctrl,a
+CTRL      ctrl,a
+control   ctrl,a
+Control   ctrl,a
+shift     shift,a
+Shift     shift,a
+alt       alt,a
+Alt       alt,a
+opt       alt,a
+option    alt,a
+Option    alt,a
+altgr     alt,a
+leftctrl  ctrl,a
+rightalt  alt,a
+lwin      super,a
+fn        fn,a
+hyper     hyper,a
+bogus     bogus,a
+"
+`;
+
+exports[`macOS adapter > keyDown t 1`] = `
+"
+mod       key down command
+Mod       key down command
+cmd       key down command
+Cmd       key down command
+command   key down command
+meta      key down command
+Meta      key down command
+super     key down command
+Super     key down command
+super_l   ERR Unknown key: "super_l"
+win       ERR Unknown key: "win"
+Win       ERR Unknown key: "Win"
+windows   ERR Unknown key: "windows"
+command_l ERR Unknown key: "command_l"
+ctrl      key down control
+Ctrl      key down control
+CTRL      key down control
+control   key down control
+Control   key down control
+shift     key down shift
+Shift     key down shift
+alt       key down option
+Alt       key down option
+opt       key down option
+option    key down option
+Option    key down option
+altgr     ERR Unknown key: "altgr"
+leftctrl  ERR Unknown key: "leftctrl"
+rightalt  ERR Unknown key: "rightalt"
+lwin      ERR Unknown key: "lwin"
+fn        ERR Unknown key: "fn"
+hyper     ERR Unknown key: "hyper"
+bogus     ERR Unknown key: "bogus"
+"
+`;
+
+exports[`macOS adapter > keyPress t 1`] = `
+"
+mod       key code 55
+Mod       key code 55
+cmd       key code 55
+Cmd       key code 55
+command   key code 55
+meta      key code 55
+Meta      key code 55
+super     key code 55
+Super     key code 55
+super_l   ERR Unknown key: "super_l"
+win       ERR Unknown key: "win"
+Win       ERR Unknown key: "Win"
+windows   ERR Unknown key: "windows"
+command_l ERR Unknown key: "command_l"
+ctrl      key code 59
+Ctrl      key code 59
+CTRL      key code 59
+control   key code 59
+Control   key code 59
+shift     key code 56
+Shift     key code 56
+alt       key code 58
+Alt       key code 58
+opt       key code 58
+option    key code 58
+Option    key code 58
+altgr     ERR Unknown key: "altgr"
+leftctrl  ERR Unknown key: "leftctrl"
+rightalt  ERR Unknown key: "rightalt"
+lwin      ERR Unknown key: "lwin"
+fn        ERR Unknown key: "fn"
+hyper     ERR Unknown key: "hyper"
+bogus     ERR Unknown key: "bogus"
+"
+`;
+
+exports[`macOS adapter > keyPress t+a 1`] = `
+"
+mod       keystroke "a" using {command down}
+Mod       keystroke "a" using {command down}
+cmd       keystroke "a" using {command down}
+Cmd       keystroke "a" using {command down}
+command   keystroke "a" using {command down}
+meta      keystroke "a" using {command down}
+Meta      keystroke "a" using {command down}
+super     keystroke "a" using {command down}
+Super     keystroke "a" using {command down}
+super_l   ERR Unknown modifier: "super_l"
+win       ERR Unknown modifier: "win"
+Win       ERR Unknown modifier: "Win"
+windows   ERR Unknown modifier: "windows"
+command_l ERR Unknown modifier: "command_l"
+ctrl      keystroke "a" using {control down}
+Ctrl      keystroke "a" using {control down}
+CTRL      keystroke "a" using {control down}
+control   keystroke "a" using {control down}
+Control   keystroke "a" using {control down}
+shift     keystroke "a" using {shift down}
+Shift     keystroke "a" using {shift down}
+alt       keystroke "a" using {option down}
+Alt       keystroke "a" using {option down}
+opt       keystroke "a" using {option down}
+option    keystroke "a" using {option down}
+Option    keystroke "a" using {option down}
+altgr     ERR Unknown modifier: "altgr"
+leftctrl  ERR Unknown modifier: "leftctrl"
+rightalt  ERR Unknown modifier: "rightalt"
+lwin      ERR Unknown modifier: "lwin"
+fn        ERR Unknown modifier: "fn"
+hyper     ERR Unknown modifier: "hyper"
+bogus     ERR Unknown modifier: "bogus"
+"
+`;
+
+exports[`macOS adapter > keyUp t 1`] = `
+"
+mod       key up command
+Mod       key up command
+cmd       key up command
+Cmd       key up command
+command   key up command
+meta      key up command
+Meta      key up command
+super     key up command
+Super     key up command
+super_l   ERR Unknown key: "super_l"
+win       ERR Unknown key: "win"
+Win       ERR Unknown key: "Win"
+windows   ERR Unknown key: "windows"
+command_l ERR Unknown key: "command_l"
+ctrl      key up control
+Ctrl      key up control
+CTRL      key up control
+control   key up control
+Control   key up control
+shift     key up shift
+Shift     key up shift
+alt       key up option
+Alt       key up option
+opt       key up option
+option    key up option
+Option    key up option
+altgr     ERR Unknown key: "altgr"
+leftctrl  ERR Unknown key: "leftctrl"
+rightalt  ERR Unknown key: "rightalt"
+lwin      ERR Unknown key: "lwin"
+fn        ERR Unknown key: "fn"
+hyper     ERR Unknown key: "hyper"
+bogus     ERR Unknown key: "bogus"
+"
+`;
+
+exports[`modifierOf, per OS > darwin 1`] = `
+"
+mod       super
+Mod       super
+cmd       super
+Cmd       super
+command   super
+meta      super
+Meta      super
+super     super
+Super     super
+super_l   null
+win       null
+Win       null
+windows   null
+command_l null
+ctrl      ctrl
+Ctrl      ctrl
+CTRL      ctrl
+control   ctrl
+Control   ctrl
+shift     shift
+Shift     shift
+alt       alt
+Alt       alt
+opt       alt
+option    alt
+Option    alt
+altgr     null
+leftctrl  null
+rightalt  null
+lwin      null
+fn        null
+hyper     null
+bogus     null
+"
+`;
+
+exports[`modifierOf, per OS > linux 1`] = `
+"
+mod       ctrl
+Mod       ctrl
+cmd       super
+Cmd       super
+command   super
+meta      super
+Meta      super
+super     super
+Super     super
+super_l   super
+win       super
+Win       super
+windows   super
+command_l super
+ctrl      ctrl
+Ctrl      ctrl
+CTRL      ctrl
+control   ctrl
+Control   ctrl
+shift     shift
+Shift     shift
+alt       alt
+Alt       alt
+opt       alt
+option    alt
+Option    alt
+altgr     null
+leftctrl  null
+rightalt  null
+lwin      null
+fn        null
+hyper     null
+bogus     null
+"
+`;
+
+exports[`modifierOf, per OS > win32 1`] = `
+"
+mod       ctrl
+Mod       ctrl
+cmd       ctrl
+Cmd       ctrl
+command   ctrl
+meta      ctrl
+Meta      ctrl
+super     super
+Super     super
+super_l   super
+win       super
+Win       super
+windows   super
+command_l super
+ctrl      ctrl
+Ctrl      ctrl
+CTRL      ctrl
+control   ctrl
+Control   ctrl
+shift     shift
+Shift     shift
+alt       alt
+Alt       alt
+opt       alt
+option    alt
+Option    alt
+altgr     null
+leftctrl  null
+rightalt  null
+lwin      null
+fn        null
+hyper     null
+bogus     null
+"
+`;
+
+exports[`normalizeKey, in a process on each OS > darwin 1`] = `
+"
+mod       Super
+Mod       Super
+cmd       Super
+Cmd       Super
+command   Super
+meta      Super
+Meta      Super
+super     Super
+Super     Super
+super_l   Super
+win       Super
+Win       Super
+windows   Super
+command_l Super
+ctrl      Control
+Ctrl      Control
+CTRL      Control
+control   Control
+Control   Control
+shift     Shift
+Shift     Shift
+alt       Alt
+Alt       Alt
+opt       Alt
+option    Alt
+Option    Alt
+altgr     altgr
+leftctrl  leftctrl
+rightalt  rightalt
+lwin      lwin
+fn        fn
+hyper     hyper
+bogus     bogus
+"
+`;
+
+exports[`normalizeKey, in a process on each OS > linux 1`] = `
+"
+mod       Control
+Mod       Control
+cmd       Super
+Cmd       Super
+command   Super
+meta      Super
+Meta      Super
+super     Super
+Super     Super
+super_l   Super
+win       Super
+Win       Super
+windows   Super
+command_l Super
+ctrl      Control
+Ctrl      Control
+CTRL      Control
+control   Control
+Control   Control
+shift     Shift
+Shift     Shift
+alt       Alt
+Alt       Alt
+opt       Alt
+option    Alt
+Option    Alt
+altgr     altgr
+leftctrl  leftctrl
+rightalt  rightalt
+lwin      lwin
+fn        fn
+hyper     hyper
+bogus     bogus
+"
+`;
+
+exports[`normalizeKey, in a process on each OS > win32 1`] = `
+"
+mod       Control
+Mod       Control
+cmd       Control
+Cmd       Control
+command   Control
+meta      Control
+Meta      Control
+super     Super
+Super     Super
+super_l   Super
+win       Super
+Win       Super
+windows   Super
+command_l Super
+ctrl      Control
+Ctrl      Control
+CTRL      Control
+control   Control
+Control   Control
+shift     Shift
+Shift     Shift
+alt       Alt
+Alt       Alt
+opt       Alt
+option    Alt
+Option    Alt
+altgr     altgr
+leftctrl  leftctrl
+rightalt  rightalt
+lwin      lwin
+fn        fn
+hyper     hyper
+bogus     bogus
+"
+`;

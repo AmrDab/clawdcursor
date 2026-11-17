@@ -114,7 +114,6 @@ export async function getUiTreeWithWake(
   lastTry.set(key, now);
   if (first.length < SPARSE_TREE_MAX) browser = await askBrowser();
 
-  // A browser's read is better when it has the page; otherwise more is better.
   const better = (a: UiElement[], b: UiElement[]) => {
     if (browser && hasWebContent(a) !== hasWebContent(b)) return hasWebContent(a);
     return a.length > b.length;

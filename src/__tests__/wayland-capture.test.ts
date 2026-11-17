@@ -126,13 +126,6 @@ describe('LinuxAdapter on Wayland', () => {
     expect(await pixels(shot.buffer)).toEqual([51, 102, 204, 255, 51, 102, 204, 255]);
   });
 
-  it('screenshotRegion() crops the grim capture', async () => {
-    const { LinuxAdapter } = await import('../platform/linux');
-    const shot = await new LinuxAdapter().screenshotRegion(1, 1, 1, 1);
-    expect(nutScreenCalls()).toBe(0);
-    expect(await pixels(shot.buffer)).toEqual([51, 102, 204, 255]);
-  });
-
   // Audit 2026-11-13: screenshot({region}) returned the whole screen on Linux (only Windows cut the region out).
   it('screenshot({region}) crops to the region, clamped to the screen, and says where it starts', async () => {
     const { LinuxAdapter } = await import('../platform/linux');

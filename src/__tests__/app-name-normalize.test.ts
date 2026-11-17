@@ -11,8 +11,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { normalizeAppName } from '../core/router/normalize';
-import { resolveAlias } from '../core/router/aliases';
+import { normalizeAppName } from '../platform/app-name-normalize';
+import { resolveAlias } from '../platform/app-aliases';
 
 describe('normalizeAppName', () => {
   it('lowercases and trims', () => {

@@ -12,7 +12,7 @@ function adapter(over: Partial<Record<string, unknown>> = {}): PlatformAdapter {
   } as unknown as PlatformAdapter;
 }
 
-const base = { toolText: 'Pressed a', toolSuccess: true, changesScreen: true, observedChange: false };
+const base = { toolText: 'Pressed a', toolSuccess: true };
 
 describe('reactiveCheck', () => {
   it('passing expect → success preserved, "verified" note', async () => {
@@ -57,24 +57,8 @@ describe('reactiveCheck', () => {
     expect(r!.text.toLowerCase()).toContain('expect rejected');
   });
 
-  it('no expect + consequential + no observable change → soft note, success stays true', async () => {
-    const r = await reactiveCheck({ ...base, expect: undefined, observedChange: false, adapter: adapter() });
-    expect(r!.success).toBe(true);
-    expect(r!.text).toContain('no observable change');
-  });
-
-  it('no expect + observable change → null (no modification)', async () => {
-    const r = await reactiveCheck({ ...base, expect: undefined, observedChange: true, adapter: adapter() });
-    expect(r).toBeNull();
-  });
-
-  it('no expect + NOT consequential → null', async () => {
-    const r = await reactiveCheck({ ...base, expect: undefined, changesScreen: false, observedChange: false, adapter: adapter() });
-    expect(r).toBeNull();
-  });
-
-  it('does not add a soft note to an already-failed action', async () => {
-    const r = await reactiveCheck({ ...base, expect: undefined, toolSuccess: false, observedChange: false, adapter: adapter() });
+  it('no expect → null (nothing to check)', async () => {
+    const r = await reactiveCheck({ ...base, expect: undefined, adapter: adapter() });
     expect(r).toBeNull();
   });
 

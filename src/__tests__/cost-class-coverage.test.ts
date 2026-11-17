@@ -8,7 +8,7 @@
  * `expect(missing.length).toBe(0)` block from `it.skip` to `it` and the
  * coverage becomes enforced.
  *
- * Compound dispatcher tools (compactGroup-as-tool: `computer`,
+ * Compound dispatcher tools (`computer`,
  * `accessibility`, `window`, `system`, `browser`, `task`) are exempt —
  * their cost varies per-action and they intentionally leave costClass
  * undefined. The exemption list is below; if a compound tool is added,
@@ -33,17 +33,6 @@ describe('costClass coverage (Phase A — warn mode)', () => {
       .filter(t => t.costClass !== undefined)
       .filter(t => !VALID_CLASSES.includes(t.costClass as ToolCostClass));
     expect(invalid.map(t => `${t.name} -> ${t.costClass}`)).toEqual([]);
-  });
-
-  it('every cheaperAlternatives entry references an existing tool', () => {
-    const knownNames = new Set(tools.map(t => t.name));
-    const bad: string[] = [];
-    for (const t of tools) {
-      for (const alt of t.cheaperAlternatives ?? []) {
-        if (!knownNames.has(alt)) bad.push(`${t.name}.cheaperAlternatives -> "${alt}" (unknown)`);
-      }
-    }
-    expect(bad).toEqual([]);
   });
 
   // Enforced (Phase A back-fill complete): every granular tool must carry a

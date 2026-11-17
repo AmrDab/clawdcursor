@@ -66,7 +66,6 @@ describe('surfaces and rendering', () => {
   it('next calls use the caller\'s own tool names', () => {
     const t = 'a11y invoke "X" missed — element not found';
     expect(classifyResult(t, true, true, 'mcp')?.next).toMatch(/^accessibility \{"action":"smart_click"/);
-    expect(classifyResult(t, true, true, 'agent')?.next).toMatch(/^smart_click/);
     const other = 'accessibility find: nothing matched';
     expect(classifyResult(other, true, true, 'mcp')?.next).toMatch(/^accessibility \{"action":"compile_ui"\}/);
   });
@@ -91,7 +90,7 @@ describe('surfaces and rendering', () => {
 
   it('no vendor or model names in any hint or next call (model-agnostic)', () => {
     const all = [true, false].flatMap(e => ['x', 'is a dangerous key combo', 'not found', 'timed out', 'screen is locked']
-      .map(t => JSON.stringify(classifyResult(t, e, true, 'mcp')) + JSON.stringify(classifyResult(t, e, true, 'agent'))));
+      .map(t => JSON.stringify(classifyResult(t, e, true, 'mcp'))));
     expect(all.join(' ')).not.toMatch(/claude|anthropic|openai|gpt|gemini/i);
   });
 });
@@ -152,12 +151,8 @@ describe('review fixes', () => {
   });
 
   it('the repeat guard is REPEATED, not "fix the arguments"', () => {
-    expect(classifyResult('NOT EXECUTED (repeat guard). Do not repeat this exact call.', true, true, 'agent')?.code).toBe('REPEATED');
-    expect(classifyResult('NOT EXECUTED: arguments were not valid JSON', true, true, 'agent')?.code).toBe('INVALID_ARGS');
-  });
-
-  it('the built-in agent is told to connect, not to call the navigate that just failed', () => {
-    expect(classifyResult('browser_navigate: not connected — call browser_connect first', true, true, 'agent')?.next).toBe('browser_connect {}');
+    expect(classifyResult('NOT EXECUTED (repeat guard). Do not repeat this exact call.', true, true)?.code).toBe('REPEATED');
+    expect(classifyResult('NOT EXECUTED: arguments were not valid JSON', true, true)?.code).toBe('INVALID_ARGS');
   });
 
   it('a blocked submit is READBACK_MISMATCH (both the suggestion and the different-text wording)', () => {

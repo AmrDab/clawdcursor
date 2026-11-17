@@ -63,7 +63,6 @@ export async function openBrowser(b: BrowserExe, o: { profileDir: string; url: s
   // Stop whatever runs on this profile, by its own debug port when there is one, and remove the profile.
   const close = async (cdpPort?: number) => {
 
-      // Ask this instance (by its own debug port) to close, then stop whatever still runs on its profile.
       try {
         const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`, { timeout: 5000 });
         const session = await browser.newBrowserCDPSession();

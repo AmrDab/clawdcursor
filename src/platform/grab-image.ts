@@ -50,7 +50,6 @@ export function normalizeGrab(img: GrabImage): RawSpec {
   return { data, width: img.width, height: img.height, channels };
 }
 
-/** A sharp pipeline over a correctly ordered, opaque copy of the grab. */
 export function sharpFromGrab(img: GrabImage): ReturnType<typeof sharp> {
   const raw = normalizeGrab(img);
   return sharp(raw.data, { raw: { width: raw.width, height: raw.height, channels: raw.channels } });

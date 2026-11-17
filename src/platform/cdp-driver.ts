@@ -13,15 +13,6 @@
  *   - Page state queries (URL, title, ready state)
  *   - Script evaluation for custom interactions
  *
- * Architecture:
- *   ┌─────────────────────────────┐
- *   │   UIDriver (native UI)      │  ← Windows UI Automation
- *   ├─────────────────────────────┤
- *   │   CDPDriver (browser DOM)   │  ← This module (CDP)
- *   ├─────────────────────────────┤
- *   │   Browser tools (CDP)       │  ← Pipeline browser MCP surface
- *   └─────────────────────────────┘
- *
  * Connection:
  *   Edge/Chrome must be launched with --remote-debugging-port=9223
  *   Or connect to an existing Playwright-managed browser's CDP endpoint.
@@ -36,9 +27,6 @@
  *   // Type into a Gmail field
  *   await cdp.typeInField('[aria-label="To"]', 'user@example.com');
  *
- *   // Fill a form by label
- *   await cdp.fillFormByLabels({ 'Subject': 'Hello', 'To': 'user@example.com' });
- *
  *   // Query elements
  *   const results = await cdp.querySelectorAll('button');
  */
@@ -50,7 +38,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { AGENT_CDP_PORT } from './browser-config';
 import { fenceCdpOnly } from '../core/fence';
-import { quoteScreenText } from '../core/result-codes';
+import { quoteScreenText } from '../core/untrusted-screen-content';
 import { guardInputMethods } from './pointer-guard';
 
 // ── Default CDP port — matches browser-config.ts and tool launch flags ──
@@ -119,7 +107,6 @@ async function whyNoCdp(port: number, err: unknown): Promise<string> {
 
 // ── Types ──
 
-/** Information about a DOM element */
 export interface DOMElementInfo {
   /** CSS selector that uniquely identifies this element */
   selector: string;
@@ -127,29 +114,20 @@ export interface DOMElementInfo {
   tagName: string;
   /** Inner text content (truncated) */
   text: string;
-  /** Element's id attribute */
   id: string;
-  /** Element's class attribute */
   className: string;
-  /** ARIA role */
   role: string;
-  /** ARIA label */
   ariaLabel: string;
   /** Input type (for input elements) */
   type: string;
-  /** Placeholder text */
   placeholder: string;
-  /** Element's name attribute */
   name: string;
   /** Bounding rect in viewport coordinates */
   bounds: { x: number; y: number; width: number; height: number };
-  /** Whether the element is visible */
   isVisible: boolean;
-  /** Whether the element is enabled (not disabled) */
   isEnabled: boolean;
 }
 
-/** Result of a CDP interaction */
 export interface CDPInteractionResult {
   success: boolean;
   method?: string;
@@ -182,13 +160,6 @@ function readerOf(locator: Locator): () => Promise<FieldShown | null> {
   }, undefined, { timeout: 1000 }).catch(() => null);
 }
 
-/**
- * CDPDriver — interact with web page DOM elements via Chrome DevTools Protocol.
- *
- * Uses Playwright's CDP connection under the hood, so it works with any
- * Chromium-based browser launched with --remote-debugging-port. You can
- * also share a Page object directly.
- */
 /**
  * Launch flags for the agent's OWN dedicated browser (never the user's).
  * On Linux Chromium only builds its renderer accessibility tree for AT-SPI
@@ -243,6 +214,13 @@ export function seedAgentProfile(profileDir: string): void {
   } catch { /* best-effort: the browser still launches */ }
 }
 
+/**
+ * CDPDriver — interact with web page DOM elements via Chrome DevTools Protocol.
+ *
+ * Uses Playwright's CDP connection under the hood, so it works with any
+ * Chromium-based browser launched with --remote-debugging-port. You can
+ * also share a Page object directly.
+ */
 export class CDPDriver {
   private browser: Browser | null = null;
   private activePage: Page | null = null;
@@ -547,7 +525,7 @@ export class CDPDriver {
   async isConnected(): Promise<boolean> {
     if (!this.connected || !this.activePage) return false;
     try {
-      await this.activePage.title(); // Health check
+      await this.activePage.title();
       return true;
     } catch {
       this.connected = false;
@@ -602,10 +580,6 @@ export class CDPDriver {
   // ELEMENT QUERIES
   // ════════════════════════════════════════════════════════════════════
 
-  /**
-   * Query elements by CSS selector.
-   * Returns info about all matching elements.
-   */
   async querySelectorAll(selector: string, maxResults = 20): Promise<DOMElementInfo[]> {
     const pg = this.requirePage();
 
@@ -627,7 +601,6 @@ export class CDPDriver {
             if (testId) {
               selector = `[data-testid="${testId}"]`;
             } else {
-              // Calculate correct nth-of-type among siblings
               const parent = el.parentElement;
               if (parent) {
                 let typeIndex = 0;
@@ -672,9 +645,6 @@ export class CDPDriver {
     );
   }
 
-  /**
-   * Find a single element by CSS selector.
-   */
   async querySelector(selector: string): Promise<DOMElementInfo | null> {
     const results = await this.querySelectorAll(selector, 1);
     return results.length > 0 ? results[0] : null;
@@ -801,7 +771,6 @@ export class CDPDriver {
         return true;
       }, selector);
       if (clicked) return { success: true, method: 'js.click', frame };
-      // Fallback: Playwright click with force
       await this.moveCursorToSelector(selector, f);
       await f.click(selector, { timeout: 5000, force: true });
       return { success: true, method: 'playwright.click', frame };
@@ -815,11 +784,6 @@ export class CDPDriver {
 
   /**
    * Click an element by its visible text content.
-   *
-   * This is the most natural way to interact with web UIs:
-   *   await cdp.clickByText('Compose');
-   *   await cdp.clickByText('Send');
-   *   await cdp.clickByText('Discard');
    */
   async clickByText(text: string, deadline = Infinity, inFrame?: string): Promise<CDPInteractionResult> {
     this.requirePage();
@@ -853,7 +817,6 @@ export class CDPDriver {
   private async controlByText(f: Frame, text: string): Promise<ElementHandle | null> {
     const h = await f.evaluateHandle((searchText: string) => {
       const lower = searchText.toLowerCase();
-      // Deduplicate: elements matching multiple selectors should only appear once
       const seen = new Set<Element>();
       const candidates: HTMLElement[] = [];
       for (const sel of ['button, [role="button"]', 'a[href]', '[role="link"], [role="menuitem"], [role="tab"]']) {
@@ -868,7 +831,6 @@ export class CDPDriver {
         const elText = (htmlEl.textContent || '').trim().toLowerCase();
         const ariaLabel = (htmlEl.getAttribute('aria-label') || '').toLowerCase();
         if (elText.includes(lower) || ariaLabel.includes(lower)) {
-          // Visibility check — skip hidden elements
           const style = getComputedStyle(htmlEl);
           if (style.display === 'none' || style.visibility === 'hidden') continue;
           return htmlEl;
@@ -895,9 +857,9 @@ export class CDPDriver {
   /**
    * Type text into a field identified by CSS selector.
    *
-   * Clears the field first (select all + delete), then types.
-   * For content-editable divs (like Gmail compose body), uses fill() which
-   * works better than type() for non-input elements.
+   * fill() replaces the field's content, content-editable divs (like Gmail
+   * compose body) included; a field that refuses it is clicked, select-all,
+   * then typed into.
    */
   async typeInField(selector: string, text: string, inFrame?: string): Promise<CDPInteractionResult> {
     let f = this.requirePage().mainFrame();
@@ -936,10 +898,6 @@ export class CDPDriver {
 
   /**
    * Type into a field found by its label or aria-label.
-   *
-   * This is the most user-friendly way to fill forms:
-   *   await cdp.typeByLabel('To', 'user@example.com');
-   *   await cdp.typeByLabel('Subject', 'Meeting notes');
    */
   async typeByLabel(label: string, text: string, inFrame?: string): Promise<CDPInteractionResult> {
     this.requirePage();
@@ -964,37 +922,6 @@ export class CDPDriver {
     }
   }
 
-  /**
-   * Fill a form by mapping label text → value.
-   *
-   * Example (Gmail compose):
-   *   await cdp.fillFormByLabels({
-   *     'To': 'friend@gmail.com',
-   *     'Subject': 'Hello!',
-   *     'Message Body': 'How are you doing?'
-   *   });
-   */
-  async fillFormByLabels(
-    fields: Record<string, string>,
-  ): Promise<{ success: boolean; results: Record<string, CDPInteractionResult> }> {
-    const results: Record<string, CDPInteractionResult> = {};
-    let allSuccess = true;
-
-    for (const [label, value] of Object.entries(fields)) {
-      const result = await this.typeByLabel(label, value);
-      results[label] = result;
-      if (!result.success) {
-        allSuccess = false;
-        console.log(`   ⚠️ CDPDriver: failed to fill "${label}": ${result.error}`);
-      }
-    }
-
-    return { success: allSuccess, results };
-  }
-
-  /**
-   * Focus an element by CSS selector.
-   */
   async focus(selector: string): Promise<CDPInteractionResult> {
     const pg = this.requirePage();
     try {
@@ -1028,7 +955,6 @@ export class CDPDriver {
       // Try by value first, then by label
       const selected = await f.selectOption(selector, valueOrLabel, { timeout: 3000 });
       if (selected.length === 0) {
-        // Try by label
         await f.selectOption(selector, { label: valueOrLabel }, { timeout: 3000 });
       }
       return { success: true, method: 'playwright.selectOption', value: valueOrLabel, read: readerOf(f.locator(selector).first()), frame: this.frameUrl(f) };
@@ -1060,7 +986,6 @@ export class CDPDriver {
   // PAGE STATE
   // ════════════════════════════════════════════════════════════════════
 
-  /** Get current page URL */
   async getUrl(): Promise<string | null> {
     if (!this.activePage) return null;
     try {
@@ -1070,7 +995,6 @@ export class CDPDriver {
     }
   }
 
-  /** Get current page title */
   async getTitle(): Promise<string | null> {
     if (!this.activePage) return null;
     try {
@@ -1081,7 +1005,7 @@ export class CDPDriver {
   }
 
   /**
-   * Get a text summary of the visible, interactive elements on the page.
+   * The visible, interactive elements on the page (at most 50).
    * Useful for building context for an LLM without screenshots.
    */
   async getInteractiveElements(frame: Frame = this.requirePage().mainFrame()): Promise<DOMElementInfo[]> {
@@ -1146,7 +1070,7 @@ export class CDPDriver {
           isEnabled: !(htmlEl as HTMLInputElement).disabled,
         });
 
-        if (results.length >= 50) break; // Cap results
+        if (results.length >= 50) break;
       }
 
       return results;
@@ -1326,7 +1250,6 @@ export class CDPDriver {
     this.cursorInjected = false;
   }
 
-  /** Get the underlying Playwright Page (for advanced usage) */
   getPage(): Page | null {
     return this.activePage;
   }
@@ -1335,7 +1258,6 @@ export class CDPDriver {
   // PRIVATE
   // ════════════════════════════════════════════════════════════════════
 
-  /** Ensure a virtual cursor overlay exists in the page */
   private async ensureCursorOverlay(): Promise<void> {
     const pg = this.requirePage();
     if (this.cursorInjected) return;
@@ -1447,7 +1369,7 @@ export class CDPDriver {
   }
 
   /**
-   * Where `find` finds something. Without `frame`: the main frame first (searched exactly as before; its errors are the
+   * Where `find` finds something. Without `frame`: the main frame first (its errors are the
    * caller's), so a match there always wins; then the same-origin iframes. A cross-origin iframe is only looked in to say
    * the match is there ({foreign}): it is never acted in unless named. With `frame`: only the iframes whose URL holds it,
    * whatever their origin. An iframe is a probe(), and none is started once `deadline` has passed. `find` only looks: the
@@ -1528,10 +1450,6 @@ export class CDPDriver {
     return n ? `the page and its ${n} iframe${n === 1 ? '' : 's'}` : 'the page';
   }
 
-  /**
-   * Guard: ensure we have an active page and return it.
-   * Throws if not connected.
-   */
   private requirePage(): Page {
     if (!this.activePage || !this.connected) {
       throw new Error(

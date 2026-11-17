@@ -17,7 +17,7 @@ import { PassThrough } from 'stream';
 import type { ChildProcess } from 'child_process';
 import { controlBanner, type OverlayMode } from '../core/banner';
 import { pauseGate } from '../core/pause-gate';
-import { macOverlayBinary } from '../platform/mac-ocr-binary';
+import { macOverlayBinary } from '../platform/mac-swift-binary';
 
 class FakeChild extends EventEmitter {
   stdout = new PassThrough();

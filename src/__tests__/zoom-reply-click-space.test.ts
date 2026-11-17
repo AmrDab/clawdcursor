@@ -18,7 +18,7 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
 vi.mock('sharp', () => ({ default: vi.fn() }));
 
 import { getDesktopTools, SPACE_PARAM } from '../tools/desktop';
-import { setLastFrame } from '../core/agent-loop/coord-scale';
+import { setLastFrame } from '../platform/coord-scale';
 
 const region = getDesktopTools().find(t => t.name === 'desktop_screenshot_region')!;
 const ctx = () => ({

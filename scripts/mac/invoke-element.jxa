@@ -19,7 +19,6 @@
  *        osascript -l JavaScript invoke-element.jxa -action set-value -name "Username" -value "john" -processId 1234
  */
 
-// Utility function to safely get property values
 function safeGet(obj, property, defaultValue) {
     try {
         var val = obj[property]();
@@ -132,7 +131,6 @@ function getElementBounds(element) {
 // argv receives command-line arguments passed after the script path.
 function run(argv) {
     try {
-        // Parse arguments from argv array
         var params = { 
             action: null,
             name: null, 
@@ -140,7 +138,7 @@ function run(argv) {
             processId: null,
             value: null
         };
-        // Windows ControlType → macOS AX role mapping (mirrors find-element.jxa)
+        // Windows ControlType → macOS AX role mapping. Not find-element.jxa's: ComboBox, TabItem and ListItem map differently.
         var CONTROL_TYPE_MAP = {
             'Button': 'button', 'Edit': 'text field', 'Document': 'web area',
             'ComboBox': 'pop up button', 'CheckBox': 'checkbox',
@@ -181,7 +179,6 @@ function run(argv) {
             // -AutomationId and -Restore have no macOS equivalent; silently ignore
         }
 
-        // Validate required parameters
         if (!params.action) {
             return JSON.stringify({ 
                 success: false, 
@@ -199,7 +196,6 @@ function run(argv) {
         var SystemEvents = Application('System Events');
         SystemEvents.includeStandardAdditions = true;
         
-        // Find the target process
         var targetProcess = null;
         var processes = SystemEvents.processes.where({ unixId: params.processId });
         
@@ -212,7 +208,6 @@ function run(argv) {
         
         targetProcess = processes[0];
         
-        // Find target element
         var targetElement = null;
         var windows = targetProcess.windows;
         
@@ -241,7 +236,6 @@ function run(argv) {
             });
         }
         
-        // Execute the requested action
         var result = { success: false };
         
         switch (params.action) {
@@ -301,10 +295,8 @@ function run(argv) {
                             };
                             break;
                         }
-                        // Try setting through focused property
                         try {
                             targetElement.focused = true;
-                            // Use System Events to type the value
                             var app = Application.currentApplication();
                             app.includeStandardAdditions = true;
                             app.keystroke(params.value);
@@ -375,13 +367,8 @@ function run(argv) {
                 }
                 break;
 
-            // ── Tranche 1A: AX Expand/Collapse/Toggle/Select ────────────
-            // macOS AX exposes these through attributes (`AXExpanded`,
-            // `AXValue` for checkboxes) rather than actions. JXA lets us
-            // set them directly. Failing gracefully when an element
-            // doesn't support the attribute is important — UIA-style
-            // pattern-query equivalents don't exist on AX, so we just
-            // attempt the assignment and catch.
+            // ── AX Expand/Collapse/Toggle/Select ────────────
+            // AX has no UIA-style pattern query: each case attempts the attribute or action and catches.
             // Success is only reported for a change that was read back. AXShowMenu is NOT a way to expand: on web content it opens
             // the page's context menu (Reload, Back, ...) and was reported as "Expanded". The compiled helper (ax-helper.swift) also
             // opens a web <summary> from the keyboard; this slower fallback cannot, and says so.

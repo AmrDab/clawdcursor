@@ -50,7 +50,7 @@ function fakeDesktop() {
     async focusWindow(q: Win) { if (d.focusLagMs) later(q, d.focusLagMs); else fg = q; return true; },
     // The Start-menu fallback: its own keys go to the Start menu, a different process.
     // The window that comes up belongs to another process than the one started (pid 999): matched by its title.
-    async openApp(name: string) { await d.keyPress('Super'); fg = START; await d.typeText(name); fg = NOTEPAD; return { pid: 999, title: 'Untitled - Notepad' }; },
+    async launchApp(name: string) { await d.keyPress('Super'); fg = START; await d.typeText(name); fg = NOTEPAD; return { pid: 999, title: 'Untitled - Notepad' }; },
   };
   return guardInputMethods(d);
 }
@@ -139,7 +139,7 @@ describe('the window in front (#294)', () => {
   it("a launch's own Start-menu keys are not refused, and the next input binds to what opened", async () => {
     const d = fakeDesktop();
     await d.keyPress('a');                 // bound to Edge
-    await d.openApp('notepad');
+    await d.launchApp('notepad');
     await d.keyPress('b');
     expect(d.sent).toEqual(['key a', 'key Super', 'key mod+v', 'type notepad', 'key b']);
   });
@@ -165,7 +165,7 @@ describe('the window in front (#294)', () => {
   it('a launch binds to the launched window: after a gap in which the user switched, typing is refused', async () => {
     vi.useRealTimers();  // the wait for the launched window is measured on the real clock; the gap itself does not matter
     const d = fakeDesktop();
-    await d.openApp('notepad');
+    await d.launchApp('notepad');
     fg = CLAUDE;
     await expect(d.keyPress('x')).rejects.toThrow(/you opened "Untitled - Notepad", but "claude"/);
   }, 10_000);

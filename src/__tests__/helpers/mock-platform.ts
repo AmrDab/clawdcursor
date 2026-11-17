@@ -43,12 +43,6 @@ export function makeMockPlatform(): PlatformAdapter {
       height: 720,
       scaleFactor: 1,
     }),
-    screenshotRegion: vi.fn().mockResolvedValue({
-      buffer: Buffer.from('fake-region'),
-      width: 100,
-      height: 100,
-      scaleFactor: 1,
-    }),
     mouseClick: vi.fn().mockResolvedValue(undefined),
     mouseDrag: vi.fn().mockResolvedValue(undefined),
     mouseMove: vi.fn().mockResolvedValue(undefined),
@@ -64,7 +58,6 @@ export function makeMockPlatform(): PlatformAdapter {
     readClipboard: vi.fn(async () => clip.value),
     writeClipboard: vi.fn(async (t: string) => { clip.value = t; }),
     launchApp: vi.fn().mockResolvedValue({ pid: 99, title: 'App' }),
-    openApp: vi.fn().mockResolvedValue({ pid: 99, title: 'App' }),
     setWindowState: vi.fn().mockResolvedValue(true),
     setWindowBounds: vi.fn().mockResolvedValue(true),
     listDisplays: vi.fn().mockResolvedValue([]),
@@ -76,17 +69,10 @@ export function makeMockPlatform(): PlatformAdapter {
       dpiRatio: 1,
     }),
     init: vi.fn().mockResolvedValue(undefined),
-    shutdown: vi.fn().mockResolvedValue(undefined),
     checkPermissions: vi.fn().mockResolvedValue({
       input: true,
       accessibility: true,
       screenRecording: true,
     }),
-    requestPermissions: vi.fn().mockResolvedValue({
-      input: true,
-      accessibility: true,
-      screenRecording: true,
-    }),
-    maximizeWindow: vi.fn().mockResolvedValue(undefined),
   } as unknown as PlatformAdapter;
 }

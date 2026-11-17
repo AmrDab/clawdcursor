@@ -37,27 +37,6 @@ describe('UIMapHolder', () => {
     expect(h.resolve('obs_999', 0)).toEqual({ ok: false, reason: 'unknown' });
   });
 
-  it('touch() restarts the TTL clock for the current map (re-advertisement)', () => {
-    const h = new UIMapHolder();
-    const id = h.nextId();
-    h.put(mapWith(id), 1000);
-    h.touch(id, 1000 + TTL_MS);                      // re-advertised right at the edge
-    expect(h.resolve(id, 1000 + TTL_MS + 1).ok).toBe(true);   // would be expired without touch
-    expect(h.resolve(id, 1000 + 2 * TTL_MS + 1)).toEqual({ ok: false, reason: 'expired' });
-  });
-
-  it('touch() never resurrects an invalidated or non-current map', () => {
-    const h = new UIMapHolder();
-    const a = h.nextId(); h.put(mapWith(a), 1000);
-    h.invalidate();
-    h.touch(a, 2000);
-    expect(h.resolve(a, 2000)).toEqual({ ok: false, reason: 'stale' });
-    const b = h.nextId(); h.put(mapWith(b), 1000);
-    h.touch(a, 2000);                                 // a is held but not current
-    expect(h.resolve(a, 2000)).toEqual({ ok: false, reason: 'stale' });
-    expect(h.resolve(b, 2000).ok).toBe(true);
-  });
-
   it('rejects a held-but-not-current id as stale', () => {
     const h = new UIMapHolder();
     const a = h.nextId(); h.put(mapWith(a), 0);

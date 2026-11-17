@@ -28,7 +28,6 @@ const buildSh = path.join(nativeDir, 'build.sh');
 // Dev checkouts / odd layouts: if sources aren't present, there's nothing to do.
 if (!fs.existsSync(buildSh)) process.exit(0);
 
-// Is the Swift toolchain available?
 try {
   execSync('command -v swift', { stdio: 'ignore', shell: '/bin/bash' });
 } catch {

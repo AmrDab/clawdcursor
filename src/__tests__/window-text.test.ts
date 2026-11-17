@@ -5,7 +5,7 @@
  * matches the live title.
  */
 import { describe, it, expect } from 'vitest';
-import { normalizeWindowText, windowTextIncludes } from '../tools/window-text';
+import { normalizeWindowText, windowTextIncludes } from '../platform/window-text';
 
 const NBSP = String.fromCharCode(0x00a0);   // NO-BREAK SPACE (Edge title separator)
 const NNBSP = String.fromCharCode(0x202f);  // NARROW NO-BREAK SPACE

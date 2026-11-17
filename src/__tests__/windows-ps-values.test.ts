@@ -81,8 +81,8 @@ describe('WindowsAdapter — values reach PowerShell as data', () => {
 
   it('an app name crosses as $env:CLAWD_PS_FILE, not in the script', async () => {
     vi.spyOn(adapter, 'listWindows').mockResolvedValue([]);
-    vi.spyOn(adapter as never, 'findLaunchedWindow').mockResolvedValue({ title: 'x', pid: 1 } as never);
-    vi.spyOn(adapter as never, 'foregroundLaunched').mockImplementation((r: unknown) => Promise.resolve(r) as never);
+    vi.spyOn(adapter as any, 'findLaunchedWindow').mockResolvedValue({ title: 'x', pid: 1 } as never);
+    vi.spyOn(adapter as any, 'foregroundLaunched').mockImplementation((r: unknown) => Promise.resolve(r) as never);
     await adapter.launchApp(EVIL, { url: 'https://example.com', alwaysNewInstance: true });
     const ps = calls.find(isPs)!;
     expect(ps.args.join(' ')).not.toContain('calc');

@@ -3,7 +3,7 @@
  * and types into it — live 2026-10-20 that was the browser's address bar, reported as `Set "" = 31 chars`.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { buildUnifiedTools } from '../tools/projected/tools';
 
 function platform() {
   return {

@@ -17,7 +17,7 @@ vi.mock('../platform/copy-all-text', async (orig) => ({
   copyAllText: vi.fn(async () => ({ ok: true, text: page.text, window: '[msedge] "Bench Reading"' })),
 }));
 
-import { pageTextPart, PAGE_TEXT_CAP } from '../platform/copy-all-text';
+import { pageTextPart, PAGE_TEXT_CAP } from '../tools/a11y';
 import { getCompactTools } from '../tools/compact';
 
 /** The web-long-read page's shape: 60 paragraphs, a station table, 60 more. `cells`: how a row comes out — tab-separated

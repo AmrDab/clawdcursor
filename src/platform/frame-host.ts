@@ -131,12 +131,6 @@ export async function freshHostedAppOf(w: FrameWindow): Promise<HostedApp | unde
 }
 
 /**
- * The window with its app resolved. For a Store app frame: `hostedProcessId` / `hostedProcessName` say which process the
- * app is, and `appName` becomes the APP's name ("Calculator"), not its host's ("Application Frame Host"). `processId`
- * and `processName` stay the window's own: the window does belong to the host, and focus and input are tracked by it.
- * Any other window is returned as it is.
- */
-/**
  * A whole window list, resolved for display with at most ONE bridge read, and none when it holds no Store app frame or
  * every frame in it is already known. (Resolving each window by itself asked the bridge once per unresolved frame.)
  */
@@ -148,7 +142,6 @@ export async function withHostedApps<T extends FrameWindow & { appName?: string 
       for (const w of unknown) remember(frames, String(w.handle));
     } catch { /* no bridge: the frames keep their host's name this time */ }
   }
-  // Everything is in the cache now (or cannot be known): no further read.
   return Promise.all(windows.map(w => withHostedApp(w)));
 }
 
@@ -158,6 +151,12 @@ function fresh(key: string): boolean {
   return !!hit && Date.now() - hit.at < (hit.app ? KNOWN_MS : UNKNOWN_MS);
 }
 
+/**
+ * The window with its app resolved. For a Store app frame: `hostedProcessId` / `hostedProcessName` say which process the
+ * app is, and `appName` becomes the APP's name ("Calculator"), not its host's ("Application Frame Host"). `processId`
+ * and `processName` stay the window's own: the window does belong to the host, and focus and input are tracked by it.
+ * Any other window is returned as it is.
+ */
 export async function withHostedApp<T extends FrameWindow & { appName?: string }>(w: T): Promise<T> {
   const hosted = await hostedAppOf(w);
   if (!hosted) return w;
