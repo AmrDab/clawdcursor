@@ -14,6 +14,11 @@ All notable changes to Clawd Cursor will be documented in this file.
   screenshot), as `smart_click` does, instead of failing; it says so in the result. The same when every element it
   matched only contains the name ("New to NX?" for "New"). Not with `within`. An ambiguous invoke's next step names the
   element (controlType, within) instead of a coordinate click.
+- **A host app can draw the pill itself.** With `CLAWD_PILL_CMD` (a JSON array: the command and its arguments),
+  clawdcursor starts that command in place of its own pill, with the same arguments, environment and stdin/stdout lines;
+  if it cannot start, the built-in pill is used. `CLAWD_OWN_UI_PIDS` (comma-separated pids) names the host's processes
+  whose windows are clawdcursor's own controls, never a target. The outline stays built-in. With neither set, nothing
+  changes. The line protocol is in [docs/pill-host.md](docs/pill-host.md).
 
 ### Fixed
 - **`accessibility read_tree` / `read_screen` on the browser clawdcursor drives over CDP points at the browser tools**

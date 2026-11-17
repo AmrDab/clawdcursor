@@ -772,6 +772,23 @@ function Cmd-ActivateAtPoint {
     }
 }
 
+# -- Command: pid-at-point -----------------------------------------------------
+# The process of the top-level window a click at (x, y) would land on (physical virtual-desktop pixels; the pointer's
+# own position when no point is given). 0 when no window is there. Reads only: nothing is raised or moved. A host
+# app's own UI is refused by it before a pointer action (pointer-guard.ts).
+function Cmd-PidAtPoint {
+    param($cmd)
+    $prev = [ScreenPM]::Aware()
+    try {
+        $p = New-Object ScreenPM+PT
+        if ($null -eq $cmd.x -or $null -eq $cmd.y) { [void][ScreenPM]::GetCursorPos([ref]$p) } else { $p.X = [int]$cmd.x; $p.Y = [int]$cmd.y }
+        $root = [ScreenPM]::WindowAt($p.X, $p.Y)
+        $wp = 0
+        if ($root -ne [IntPtr]::Zero) { [void][Win32UIA]::GetWindowThreadProcessId($root, [ref]$wp) }
+        return @{ success = $true; processId = $wp }
+    } finally { [ScreenPM]::Restore($prev) }
+}
+
 # -- Command: get-process-paths ------------------------------------------------
 # The exe path of each pid ('' when the process is gone or may not be opened). launchApp reads a packaged app's
 # identity from it: a window is the app's when its process runs from the app's package folder (app-identity.ts).
@@ -2108,6 +2125,7 @@ while ($true) {
             "get-focused-element"   { Cmd-GetFocusedElement }
             "get-page-text"         { Cmd-GetPageText $cmd }
             "activate-at-point"     { Cmd-ActivateAtPoint $cmd }
+            "pid-at-point"          { Cmd-PidAtPoint $cmd }
             "list-displays"         { Cmd-ListDisplays }
             "move-cursor"           { Cmd-MoveCursor $cmd }
             "get-cursor"            { Cmd-GetCursor }
