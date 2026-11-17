@@ -330,6 +330,10 @@ export class MacOSAdapter implements PlatformAdapter {
     return this.ax.activeWindow();
   }
 
+  async windowAtPoint(x: number, y: number): Promise<{ processId: number; title?: string; processName?: string } | null> {
+    try { return (await this.ax.windowAt?.(x, y)) ?? null; } catch { return null; }
+  }
+
   /** Why the last focusWindow returned false, when more is known than "no match". Taken once. */
   private focusFailure: string | null = null;
   takeFocusFailure(): string | null {

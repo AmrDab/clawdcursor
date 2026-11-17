@@ -22,6 +22,7 @@ import { ensureVisible } from '../core/sense/ui-map-visible';
 import { locateFieldByLabel } from '../core/sense/ui-map-field';
 import { unguarded } from '../platform/pointer-guard';
 import { isGuardRefusal } from '../core/control';
+import { foreignWindowRefusal } from './click-owner';
 import { untrusted, missText, structuredMissFields, targetOf, targetText } from '../core/miss-text';
 
 
@@ -300,6 +301,13 @@ export function getSmartTools(): ToolDefinition[] {
         }
         // Set when OCR matched only outside the caller's window and was refused.
         let ocrRefused = false;
+        // A click point in another app's window (a system dialog on top of the target) is refused, not clicked.
+        const clickTargetPid = processId || activeWin?.processId;
+        const clickTargetName = activeWin && activeWin.processId === clickTargetPid
+          ? (activeWin.title ? `${quoteScreenText(activeWin.title)} (${activeWin.processName || 'process ' + clickTargetPid})` : activeWin.processName)
+          : undefined;
+        const foreignRefusal = (x: number, y: number, label: string) =>
+          foreignWindowRefusal(ctx.platform, x, y, clickTargetPid, label, clickTargetName);
 
         // ── Step 1: OCR + a11y in parallel ──
         // OCR finds text coordinates, a11y tries invoke — a successful invoke wins over an OCR match.
@@ -650,6 +658,8 @@ export function getSmartTools(): ToolDefinition[] {
           const { x: cx, y: cy } = ocrPointToClickPoint(
             m.x, m.y, ctx.desktop.getDpiRatio?.() || 1, process.platform,
           );
+          const ocrForeign = await foreignRefusal(cx, cy, m.text);
+          if (ocrForeign) return { text: ocrForeign, isError: true };
           try {
             await ctx.desktop.mouseClick(cx, cy);
           } catch (err: any) {
@@ -705,6 +715,8 @@ export function getSmartTools(): ToolDefinition[] {
               confidence: null,
             });
           }
+          const boundsForeign = await foreignRefusal(a.clickPoint.x, a.clickPoint.y, a.text ?? target);
+          if (boundsForeign) return { text: boundsForeign, isError: true };
           try {
             await ctx.desktop.mouseClick(a.clickPoint.x, a.clickPoint.y);
           } catch (err: any) {

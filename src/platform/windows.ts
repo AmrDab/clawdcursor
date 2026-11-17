@@ -1006,6 +1006,15 @@ export class WindowsAdapter implements PlatformAdapter {
     }
   }
 
+  /** Read-only: the window a user sees at a PHYSICAL virtual-desktop point (the click's space). Null = unknown. */
+  async windowAtPoint(x: number, y: number): Promise<{ processId: number; title?: string; processName?: string } | null> {
+    try {
+      const r = await psRunner.run({ cmd: 'window-at-point', x: Math.round(x), y: Math.round(y) }) as { processId?: number; title?: string; processName?: string };
+      if (!r || typeof r.processId !== 'number' || r.processId <= 0) return null;
+      return { processId: r.processId, title: r.title || undefined, processName: r.processName || undefined };
+    } catch { return null; }
+  }
+
   private toNutButton(button?: MouseButton): Button {
     if (button === 'right') return Button.RIGHT;
     if (button === 'middle') return Button.MIDDLE;

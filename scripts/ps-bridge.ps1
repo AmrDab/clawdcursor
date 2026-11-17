@@ -772,6 +772,29 @@ function Cmd-ActivateAtPoint {
     }
 }
 
+# ── Command: window-at-point ──────────────────────────────────────────────────
+# Read-only twin of activate-at-point: who owns the window a user SEES at (x, y)
+# (physical virtual-desktop pixels), without raising anything. smart_click uses it
+# to refuse a click that would land in another app's window (a system dialog over
+# the target). A denylisted self/host window or no window answers processId 0 = unknown.
+function Cmd-WindowAtPoint {
+    param($cmd)
+    $hwnd = [ScreenPM]::WindowAt([int]$cmd.x, [int]$cmd.y)
+    if ($hwnd -eq [IntPtr]::Zero) { return @{ success=$true; processId=0 } }
+    $root = [Win32UIA]::GetAncestor($hwnd, 2)
+    if ($root -eq [IntPtr]::Zero) { $root = $hwnd }
+    $procId = 0
+    [void][Win32UIA]::GetWindowThreadProcessId($root, [ref]$procId)
+    $name = "unknown"; $title = ""
+    try { $name = [System.Diagnostics.Process]::GetProcessById($procId).ProcessName } catch {}
+    try {
+        $el = [System.Windows.Automation.AutomationElement]::FromHandle($root)
+        if ($el) { $title = $el.Current.Name }
+    } catch {}
+    if (Test-ForegroundDenylisted $name $title) { return @{ success=$true; processId=0 } }
+    return @{ success=$true; processId=$procId; processName=$name; title=$title }
+}
+
 # -- Command: get-process-paths ------------------------------------------------
 # The exe path of each pid ('' when the process is gone or may not be opened). launchApp reads a packaged app's
 # identity from it: a window is the app's when its process runs from the app's package folder (app-identity.ts).
@@ -2108,6 +2131,7 @@ while ($true) {
             "get-focused-element"   { Cmd-GetFocusedElement }
             "get-page-text"         { Cmd-GetPageText $cmd }
             "activate-at-point"     { Cmd-ActivateAtPoint $cmd }
+            "window-at-point"       { Cmd-WindowAtPoint $cmd }
             "list-displays"         { Cmd-ListDisplays }
             "move-cursor"           { Cmd-MoveCursor $cmd }
             "get-cursor"            { Cmd-GetCursor }

@@ -97,6 +97,10 @@ const RULES: Rule[] = [
   { code: 'FOREGROUND_CHANGED', outcome: 'refused', test: /an AI assistant — nothing was sent|the app this agent runs in \(.*\) — nothing was sent/i,
     hint: 'the window in front is an AI assistant, not your target; focus your target window first',
     next: { mcp: 'window {"action":"list"}' } },
+  // smart_click: the point is in another app's window, such as a system dialog on top of the target (tools/click-owner.ts).
+  { code: 'FOREGROUND_CHANGED', outcome: 'refused', test: /which is on top of .* — nothing was clicked/i,
+    hint: 'a window of another app is on top of the target at that point, so nothing was clicked; bring the target to the front or close that window',
+    next: { mcp: 'window {"action":"list"}' } },
   { code: 'FOREGROUND_CHANGED', outcome: 'refused', test: /foreground changed: /i,
     hint: 'the window in front is not the one you were working in; nothing was sent',
     next: { mcp: 'window {"action":"focus","processName":"<your app>"}' } },

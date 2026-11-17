@@ -237,6 +237,11 @@ export interface PlatformAdapter {
   // ─── WINDOWS ────────────────────────────────────────────────────
   listWindows(): Promise<WindowInfo[]>;
   getActiveWindow(): Promise<WindowInfo | null>;
+  /**
+   * Optional: the window a user SEES at a point, in the space `mouseClick` takes (physical pixels on Windows, points on
+   * macOS) — read-only, nothing is raised. Null = unknown or no window: callers treat it as allowed (fail open).
+   */
+  windowAtPoint?(x: number, y: number): Promise<{ processId: number; title?: string; processName?: string } | null>;
   /** `handle`: the exact window (Windows). When given, nothing else in the query is used. */
   focusWindow(query: { processName?: string; processId?: number; title?: string; handle?: number }): Promise<boolean>;
   /**
