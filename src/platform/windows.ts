@@ -47,6 +47,7 @@ import type {
   WaitForElementQuery,
   WindowState,
   FocusActivation,
+  WindowAtPoint,
 } from './types';
 import { waitForLaunchedWindow, within, TIMED_OUT } from './launch-poll';
 import { findWindowsProcesses } from './win-processes';
@@ -1007,11 +1008,12 @@ export class WindowsAdapter implements PlatformAdapter {
   }
 
   /** Read-only: the window a user sees at a PHYSICAL virtual-desktop point (the click's space). Null = unknown. */
-  async windowAtPoint(x: number, y: number): Promise<{ processId: number; title?: string; processName?: string } | null> {
+  async windowAtPoint(x: number, y: number): Promise<WindowAtPoint | null> {
     try {
-      const r = await psRunner.run({ cmd: 'window-at-point', x: Math.round(x), y: Math.round(y) }) as { processId?: number; title?: string; processName?: string };
+      const r = await psRunner.run({ cmd: 'window-at-point', x: Math.round(x), y: Math.round(y) }) as Partial<WindowAtPoint>;
       if (!r || typeof r.processId !== 'number' || r.processId <= 0) return null;
-      return { processId: r.processId, title: r.title || undefined, processName: r.processName || undefined };
+      return { processId: r.processId, title: r.title || undefined, processName: r.processName || undefined,
+        ...(r.hostedProcessId ? { hostedProcessId: r.hostedProcessId, hostedProcessName: r.hostedProcessName || undefined } : {}) };
     } catch { return null; }
   }
 

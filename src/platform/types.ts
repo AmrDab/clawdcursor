@@ -210,6 +210,10 @@ export interface WaitForElementQuery {
  *
  * Business logic uses this interface and never touches `process.platform`.
  */
+/** The window a user sees at a point. A Windows Store app's frame belongs to ApplicationFrameHost (`processId`); the app
+ *  itself is `hostedProcessId`, as window lists report it (frame-host.ts). */
+export interface WindowAtPoint { processId: number; title?: string; processName?: string; hostedProcessId?: number; hostedProcessName?: string }
+
 export interface PlatformAdapter {
   /** OS family this adapter handles. */
   readonly platform: 'darwin' | 'win32' | 'linux';
@@ -241,7 +245,7 @@ export interface PlatformAdapter {
    * Optional: the window a user SEES at a point, in the space `mouseClick` takes (physical pixels on Windows, points on
    * macOS) — read-only, nothing is raised. Null = unknown or no window: callers treat it as allowed (fail open).
    */
-  windowAtPoint?(x: number, y: number): Promise<{ processId: number; title?: string; processName?: string } | null>;
+  windowAtPoint?(x: number, y: number): Promise<WindowAtPoint | null>;
   /** `handle`: the exact window (Windows). When given, nothing else in the query is used. */
   focusWindow(query: { processName?: string; processId?: number; title?: string; handle?: number }): Promise<boolean>;
   /**

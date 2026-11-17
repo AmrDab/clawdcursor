@@ -30,6 +30,7 @@ import type {
   ScrollDirection,
   WaitForElementQuery,
   WindowState,
+  WindowAtPoint,
 } from './types';
 import { waitForLaunchedWindow, buildAppPredicate } from './launch-poll';
 import { checkSecureInput, secureInputMessage, type SecureInputState } from './mac-secure-input';
@@ -331,7 +332,7 @@ export class MacOSAdapter implements PlatformAdapter {
     return this.ax.activeWindow();
   }
 
-  async windowAtPoint(x: number, y: number): Promise<{ processId: number; title?: string; processName?: string } | null> {
+  async windowAtPoint(x: number, y: number): Promise<WindowAtPoint | null> {
     try { return (await this.ax.windowAt?.(x, y)) ?? null; } catch { return null; }
   }
 

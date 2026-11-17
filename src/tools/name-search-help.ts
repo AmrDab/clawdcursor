@@ -7,7 +7,7 @@
  */
 import type { PlatformAdapter } from '../platform/types';
 import { wakeAccessibility } from '../platform/a11y-wake';
-import { describeWindowAt } from './click-owner';
+import { describeWindowAt, ownsPoint } from './click-owner';
 
 const woken = new Set<number>();
 
@@ -45,7 +45,7 @@ export async function onTopOfLine(
     if (!target?.bounds || !target.processId) return null;
     const b = target.bounds;
     const at = await platform.windowAtPoint(Math.round(b.x + b.width / 2), Math.round(b.y + b.height / 2));
-    if (!at || !at.processId || at.processId === target.processId) return null;
+    if (!at || !at.processId || ownsPoint(at, target.processId, target.hostedProcessId)) return null;
     return `→ ${describeWindowAt(at)} is on top of this window; pass processId:${at.processId} to read it`;
   } catch { return null; }
 }

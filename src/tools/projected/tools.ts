@@ -17,6 +17,7 @@ import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength } f
 import type { InvokeAction, UiElement } from '../../platform/types';
 import { ocrEngine } from '../../platform/ocr-engine';
 import { selectOption, selectedResult } from '../../platform/select-option';
+import { ownsPoint } from '../click-owner';
 import { SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, SPARSE_NEXT_STEP, isSparseTree, CUT_VALUE_NEXT_STEP, cdpStepFor } from '../blind-hints';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
 import { wakeForNameSearch, onTopOfLine } from '../name-search-help';
@@ -1738,7 +1739,7 @@ export function focusTheftWarning(
   before: WindowRead,
   after: WindowRead,
   /** The window at the click point after the click (platform.windowAtPoint), when the platform could say. */
-  atPoint?: { processId?: number } | null,
+  atPoint?: { processId: number; hostedProcessId?: number } | null,
   platform: NodeJS.Platform = process.platform,
 ): string {
   // The bridge deliberately refused to raise a self/host window (agent hub,
@@ -1755,7 +1756,7 @@ export function focusTheftWarning(
   }
   const activationFailed = activation && activation.activated === false;
   // Another app is in front, and it owns the clicked point: the click activated the app it hit. That is the click working.
-  const frontOwnsPoint = !!atPoint?.processId && atPoint.processId === (after?.hostedProcessId ?? after?.processId);
+  const frontOwnsPoint = !!atPoint?.processId && ownsPoint(atPoint, after?.processId, after?.hostedProcessId);
   if (!activationFailed && (windowChange(before, after) !== 'other-app' || frontOwnsPoint)) return '';
   if (platform === 'darwin' && !activationFailed) {
     const name = after?.processName || after?.appName || (after?.title ? quoteScreenText(truncateTitle(after.title)) : 'an unknown app');

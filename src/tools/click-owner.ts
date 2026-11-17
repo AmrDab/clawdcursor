@@ -4,13 +4,23 @@
  * The check asks the platform which window is at the point (`windowAtPoint`, read-only); a platform that cannot say
  * (null, no such method, an error) allows the click — it fails open.
  */
-import type { PlatformAdapter } from '../platform/types';
+import type { PlatformAdapter, WindowAtPoint } from '../platform/types';
 import { quoteScreenText } from '../core/untrusted-screen-content';
 
 /** `"Title" (process, pid N)` for a window found at a point: the title is screen text, so quoted. */
-export function describeWindowAt(at: { processId: number; title?: string; processName?: string }): string {
-  const name = at.processName ? at.processName.replace(/[^\w .+-]/g, '').slice(0, 60) : 'unknown app';
+export function describeWindowAt(at: WindowAtPoint): string {
+  const shown = at.hostedProcessName || at.processName;   // a Store app by its own name, not ApplicationFrameHost
+  const name = shown ? shown.replace(/[^\w .+-]/g, '').slice(0, 60) : 'unknown app';
   return `${at.title ? quoteScreenText(at.title) : 'a window'} (${name}, pid ${at.processId})`;
+}
+
+/**
+ * Does the window at a point belong to one of these processes? A Windows Store app's frame belongs to ApplicationFrameHost
+ * and hosts the app's own process: window lists report the first as `processId` and the second as `hostedProcessId`, and a
+ * caller may target either, so either matches (else every click in Calculator or Settings would read as another app's).
+ */
+export function ownsPoint(at: Pick<WindowAtPoint, 'processId' | 'hostedProcessId'> | null | undefined, ...pids: Array<number | undefined>): boolean {
+  return !!at && pids.some(p => !!p && (p === at.processId || p === at.hostedProcessId));
 }
 
 /**
@@ -26,7 +36,7 @@ export async function foreignWindowRefusal(
 ): Promise<string | null> {
   if (!platform?.windowAtPoint || !targetPid) return null;
   const at = await platform.windowAtPoint(x, y).catch(() => null);
-  if (!at || !at.processId || at.processId === targetPid) return null;
+  if (!at || !at.processId || ownsPoint(at, targetPid)) return null;
   const target = targetName || `process ${targetPid}`;
   const what = describeWindowAt(at);
   return `refused: the point ${quoteScreenText(label)} matched is in ${what}, which is on top of ${target} — nothing was clicked. `
