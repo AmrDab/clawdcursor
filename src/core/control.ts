@@ -121,6 +121,7 @@ let working: Foreground | undefined;
 const agentSet: Foreground[] = [];
 const AGENT_WINDOWS_MAX = 8;
 function remember(f: Foreground): void {
+  if (isOwnUiPid(f.processId)) return;   // the pill, the outline: the user's controls, never a window the agent works in
   const at = agentSet.findIndex(w => sameTarget(w, f));
   const old = at >= 0 ? agentSet.splice(at, 1)[0] : undefined;
   agentSet.push({ ...f, handle: f.handle ?? old?.handle });
@@ -304,6 +305,7 @@ async function byName(processId?: number): Promise<void> {
     if (processId !== undefined) await byProcess(processId);
     return;
   }
+  if (isOwnUiPid(now.processId)) return;   // the user clicked or dragged the pill: nothing of the agent's, so never the working window
   const explicit = (!!pending && matches(pending, now)) || openedBy(now) || (leaseExplicit && !!lease && sameTarget(lease, now));
   await refuseAiHost(now, explicit);
   const at: Foreground = { ...now, actPid: await verifiedPid(now, decided) };
@@ -323,7 +325,7 @@ const pidNames = new Map<number, { processName: string; appName?: string; handle
  * app is named as the app its frame hosts. Nothing else changes: the window input is bound to stays where it is.
  */
 async function byProcess(pid: number | null | undefined): Promise<void> {
-  if (!pid) return;
+  if (!pid || isOwnUiPid(pid)) return;
   let n = pidNames.get(pid);
   if (!n) {
     const w = (await readWindows().catch(() => [])).find(w => w.processId === pid || w.hostedProcessId === pid);
@@ -373,7 +375,7 @@ async function arrived(): Promise<void> {
   for (let tries = FOCUS_ARRIVAL_MS / 100; ; tries--) {
     const now = await readForeground().catch(() => null);
     if (!now) return;
-    if (mine(now)) { working = now; remember(now); return; }
+    if (mine(now) && !isOwnUiPid(now.processId)) { working = now; remember(now); return; }
     if (tries <= 0 || pending !== q) return;
     await new Promise(r => setTimeout(r, 100));
   }

@@ -49,7 +49,7 @@ import { psOpts, powershellExe } from '../platform/ps-spawn';
 import * as readline from 'readline';
 import { getPackageRoot } from '../paths';
 import { macOverlayBinary } from '../platform/mac-swift-binary';
-import { setBeforePointerPress, setBeforeCapture, setOwnUiPids, setOnAgentInput, setOnAgentPoint, GUARDED_METHODS } from '../platform/pointer-guard';
+import { setBeforePointerPress, setBeforeCapture, setOwnUiPids, isOwnUiPid, setOnAgentInput, setOnAgentPoint, GUARDED_METHODS } from '../platform/pointer-guard';
 import type { PauseAnswer, PauseInfo } from './pause-gate';
 import { publishOverlayState, foreignOverlayState } from './overlay-state';
 import { agentWindows, isStopped, workingIn, workingWindow } from './control';
@@ -270,10 +270,11 @@ class ControlBanner {
 
   /** The window the agent works in now: the outline moves to it, or draws nothing when there is none. */
   setWorkingWindow(w: WorkingWindow | undefined): void {
+    if (w && isOwnUiPid(w.processId)) return;   // the pill and the other overlays are never framed
     this.working = w;
     // Windows draws one border per window: the working one, then the agent's other windows that have a handle.
     const others = process.platform === 'win32' && w
-      ? agentWindows().filter(a => Number(a.handle) && Number(a.handle) !== Number(w.handle)).map(a => ` ${Number(a.handle)} ${a.processId}`).join('')
+      ? agentWindows().filter(a => Number(a.handle) && !isOwnUiPid(a.processId) && Number(a.handle) !== Number(w.handle)).map(a => ` ${Number(a.handle)} ${a.processId}`).join('')
       : '';
     const line = w ? `TARGET ${Number(w.handle) || 0} ${w.processId}${others}` : 'TARGET';
     if (line === this.target) return;

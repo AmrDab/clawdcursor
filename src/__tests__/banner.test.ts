@@ -14,7 +14,7 @@ import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import { controlBanner, outlineFlags, glowFlags } from '../core/banner';
 import { stopControl, __setControlDirForTests, __setForegroundReaderForTests } from '../core/control';
-import { guardInputMethods } from '../platform/pointer-guard';
+import { guardInputMethods, setOwnUiPids } from '../platform/pointer-guard';
 import { withForegroundBurst } from '../platform/foreground-burst';
 import type { ChildProcess } from 'child_process';
 import { readFileSync } from 'fs';
@@ -546,6 +546,20 @@ describe('the full-screen glow is the foreground-mode drawer only', () => {
     } finally {
       Object.defineProperty(process, 'platform', platform);
       __setForegroundReaderForTests(null);
+    }
+  });
+});
+
+describe('the window frame never goes round clawdcursor\'s own windows', () => {
+  it('a working window or an agent window that is an overlay is never sent as a TARGET', () => {
+    setOwnUiPids(() => [777]);
+    try {
+      controlBanner.pin();
+      controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
+      controlBanner.setWorkingWindow({ processId: 777, handle: 0x9f0 });
+      expect(outlines[0].written).toEqual(['TARGET 1440 100']);
+    } finally {
+      setOwnUiPids(() => [...controlBanner.overlayPids()]);
     }
   });
 });

@@ -109,6 +109,8 @@ function isActingCall(toolName: string, action: string | undefined, test: typeof
 
 /** Does any step of a batch (compact or granular tool names, host prefix or not) change something? */
 export function batchActs(steps: unknown): boolean {
+  // `steps` may arrive as a JSON string (the batch tool accepts both).
+  if (typeof steps === 'string') { try { steps = JSON.parse(steps); } catch { return false; } }
   if (!Array.isArray(steps)) return false;
   return steps.some(s => {
     const step = (s ?? {}) as { name?: unknown; arguments?: { action?: unknown }; args?: { action?: unknown } };

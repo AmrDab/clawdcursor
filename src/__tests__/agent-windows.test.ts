@@ -4,8 +4,8 @@
  * front, the user's, is still refused.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { agentWindows, isAgentWindow, __setForegroundReaderForTests, __setControlDirForTests } from '../core/control';
-import { guardInputMethods } from '../platform/pointer-guard';
+import { agentWindows, isAgentWindow, workingWindow, __setForegroundReaderForTests, __setControlDirForTests } from '../core/control';
+import { guardInputMethods, setOwnUiPids } from '../platform/pointer-guard';
 
 vi.mock('../core/banner', () => ({
   controlBanner: { overlayPids: () => [], showPaused: vi.fn(), showRunning: vi.fn(), canShow: () => true, whenCanShow: async () => true, touch: vi.fn() },
@@ -67,5 +67,30 @@ describe('the agent windows', () => {
     await d.invokeElement({ name: 'OK', processId: 300 });
     expect(isAgentWindow({ processId: 300 })).toBe(true);
     expect(isAgentWindow({ processId: 100 })).toBe(false);
+  });
+});
+
+describe('clawdcursor\'s own windows are never the agent\'s', () => {
+  const PILL: Win = { processId: 777, processName: 'powershell', handle: 0x9f0 };
+  beforeEach(() => setOwnUiPids(() => [777]));
+  afterEach(() => setOwnUiPids(() => []));
+
+  it('an act by name while the pill is in front (the user clicked or dragged it) does not make it the working or an agent window', async () => {
+    const d = desktop();
+    await d.invokeElement({ name: 'Save', processId: 100 });
+    fg = PILL;
+    await d.invokeElement({ name: 'Save' });
+    expect(workingWindow()).toEqual({ processId: 100, handle: 0x5a0 });
+    expect(agentWindows().map(w => w.processId)).toEqual([100]);
+    expect(isAgentWindow({ handle: 0x9f0 })).toBe(false);
+  });
+
+  it('an act by name on the overlay\'s own process, or a focus of it, is not remembered either', async () => {
+    const d = desktop();
+    await d.invokeElement({ name: 'Stop', processId: 777 });
+    await d.focusWindow(PILL);
+    await d.invokeElement({ name: 'x', processId: 100 });
+    expect(agentWindows().map(w => w.processId)).toEqual([100]);
+    expect(isAgentWindow({ processId: 777 })).toBe(false);
   });
 });
