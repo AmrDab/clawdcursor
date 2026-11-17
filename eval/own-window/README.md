@@ -96,3 +96,64 @@ node eval/own-window/live-windows.mjs              # the live run, about 40 s; h
 - Safety: never addresses a pid it did not start, never touches the user form; Notepad is skipped if it would reuse one of your processes or opens with text; everything is closed in `finally`; hard timeout 120 s.
 - An R2 burst is a deliberate focus steal and will show as one; a R0 act that takes the foreground and is given back shows as a short steal. The goal line in the plan is 0 steals and 0 cursor moves.
 - Browser steps (f)-(h): before the sampler starts, it opens Microsoft Edge as its own instance (`--inprivate --new-window --remote-debugging-port=<free port> --user-data-dir=<new dir in the temp home> --no-first-run`, a local page with a field `Your name` and a button `Send`; never your Edge). The server gets `CLAWD_AGENT_CDP_PORT=<that port>`, so `browser {"action":"connect"}` attaches to it as clawdcursor's own browser. Then `accessibility set_value` / `invoke` with `processId` = that Edge's browser pid are page acts (route note "CDP page act, focus not moved"); the script reads the field and the button's effect back over CDP itself. The Edge pids count as agent windows in the steal analysis. Cleanup kills that Edge by its pid tree (found from its debug port) and deletes its profile with the temp home. The hard timeout is 120 s (170 s with `--with-you`).
+
+## macOS
+
+Plan (h) step 1 for macOS, plus the `--external` two-agent run. Written on Windows, never run on a Mac: expect to fix small things.
+Files: `probe-macos.mjs`, `live-macos.mjs`, `macos-common.mjs` (shared), `macos-helper.swift` (compiled with `swiftc` into a temp dir at each run).
+
+Needs: macOS with Xcode command line tools (`xcode-select --install`), node 22+, TextEdit, Google Chrome (skipped if missing), Safari (skipped if already running).
+Permissions for the terminal app that runs the commands (System Settings > Privacy & Security): **Accessibility** (required: AX reads/writes and posted events),
+**Screen Recording** (not used by the probe; needed for the computer-use agent and clawdcursor in the live run), and **Automation** (allow the terminal to control
+System Events, TextEdit and Safari when macOS asks, for the AppleScript method). Restart the terminal after granting.
+
+### 1. The probe (M0..M5 per app, background delivery)
+
+```
+cd <the clawdcursor checkout on feat/own-window>
+node eval/own-window/probe-macos.mjs --dry-run                 # plan and checks, launches nothing
+node eval/own-window/probe-macos.mjs                           # the run, about 2 minutes; hands off keyboard and mouse
+node eval/own-window/probe-macos.mjs --targets native,textedit # a subset (native, textedit, chrome, safari)
+```
+
+A "user" window `ClawdUser` (our own Cocoa window holding `user-was-here`) is put in front before each method. Targets, all started by the script and closed at the end:
+our own Cocoa window (baseline: field + buttons), a new TextEdit instance on a temp file (never your TextEdit windows), Chrome with a temp `--user-data-dir`, incognito, own
+debug port (never your Chrome), Safari as a new private window on the same local page (only if Safari is not already running; Notes is not probed). Methods:
+
+| id | method | rung |
+|---|---|---|
+| M0 | AX `setValue` (AXValue) on the text element | R0, text |
+| M1 | `AXPress` on the button | R0, click |
+| M2 | `CGEventPostToPid` keyboard, one unicode event per char (`hello@1!`, so shifted chars) | R1 text |
+| M3 | `CGEventPostToPid` left click at the button's AX centre | R1 click |
+| M4 | AppleScript `tell application ... to set ...` (TextEdit `set text of document`, Safari `do JavaScript`) | text |
+| M5 | Chrome DevTools Protocol: `Input.insertText`, `Input.dispatchMouseEvent` (`t:` / `c:` in the table) | R1 for browsers |
+
+Output: `eval/own-window/results/macos-<time>.jsonl` (do not commit; one `method` line per target x method with outcome, `foregroundChanged`/`foregroundTo`, `cursorMoved`,
+`userTextChanged`; one `target` line each) and two tables on stdout: outcomes (`ok`, `no-effect`, `partial`, `error`, `n/a`, as for Windows) and side effects
+(`F` frontmost app changed, `C` real cursor moved, `U` user text changed, `none`). An `ok` counts as background delivery only with `none`.
+
+Caveats: Safari reads back through Accessibility only (page eval needs "Allow JavaScript from Apple Events"), so its M0 is read through the route it used. AppleScript
+addresses `application "TextEdit"` by name, so with your own TextEdit running it may reach the wrong instance (it names a unique document, so the worst case is an error).
+The `File > New Private Window` step needs English menus. The frontmost app is read with NSWorkspace every 50 ms; bringing `ClawdUser` back uses `activate`, then System Events.
+
+### 2. The two-agent live run (`--external`)
+
+Agent A is computer use typing in the user app; agent B is a subagent driving clawdcursor through the bridge.
+
+```
+npm run build
+node eval/own-window/live-macos.mjs --dry-run
+node eval/own-window/live-macos.mjs --external /tmp/cc-ext         # terminal 1: sets up, writes /tmp/cc-ext/setup.json, waits
+node eval/own-window/agent-bridge.mjs /tmp/cc-ext                  # terminal 2: writes /tmp/cc-ext/bridge-ready (the token), serves 127.0.0.1:8766
+```
+
+Then: agent A (computer use; grant it TextEdit) types in the TextEdit window `user.txt` (the user app). Agent B reads `setup.json` (`target.pid`, `chrome.pid`, `chrome.port`),
+calls tools over HTTP (`POST /call`, header `X-Bridge-Token` = contents of `bridge-ready`) addressed by `processId` to the ClawdTarget window (`ClawdField` text area, `ClawdGo`,
+`ClawdReset`) and to Chrome's page (`browser connect`, then field `Your name`, button `Send`). When B starts, write the time to the start file: `node -e "require('fs').writeFileSync('/tmp/cc-ext/start', String(Date.now()))"`;
+when both are finished, `POST /done` to the bridge and `touch /tmp/cc-ext/done`. The script then prints the focus steals (an agent window frontmost), cursor moves (agent A's own
+moves count), the agent effects and the text agent A typed, and writes `results/live-macos-<time>.jsonl` (meta, the step, all samples).
+
+### Send back
+
+The `results/macos-*.jsonl` and `results/live-macos-*.jsonl` files and the printed tables (outcomes, side effects, the live summary), plus any `FAILED:` / `skip` / `note:` lines.

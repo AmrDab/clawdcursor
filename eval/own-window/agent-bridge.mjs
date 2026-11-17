@@ -1,11 +1,12 @@
 // A localhost bridge for agent B: one persistent clawdcursor MCP server (the branch build), tools called over plain HTTP.
 // POST /call {"name":"accessibility","arguments":{...}} -> the tool result text.  GET /tools -> names + descriptions.
 // POST /done ends it. Every request sends header X-Bridge-Token: the contents of <dir>/bridge-ready.
-import fs from 'fs'; import path from 'path'; import http from 'http'; import crypto from 'crypto';
+import fs from 'fs'; import path from 'path'; import http from 'http'; import crypto from 'crypto'; import { fileURLToPath, pathToFileURL } from 'url';
 const dir = process.argv[2];
-const root = new URL('../..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
-const { Client } = await import(`file:///${root}/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js`);
-const { StdioClientTransport } = await import(`file:///${root}/node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js`);
+const root = fileURLToPath(new URL('../..', import.meta.url));
+const sdk = f => import(pathToFileURL(path.join(root, 'node_modules/@modelcontextprotocol/sdk/dist/esm', f)).href);
+const { Client } = await sdk('client/index.js');
+const { StdioClientTransport } = await sdk('client/stdio.js');
 const s = JSON.parse(fs.readFileSync(path.join(dir, 'setup.json'), 'utf8'));
 const t = new StdioClientTransport({ command: process.execPath, args: [s.cli, 'mcp', '--compact'], env: { ...process.env, ...s.env }, cwd: s.env.HOME, stderr: 'pipe' });
 t.stderr?.on('data', () => {});
