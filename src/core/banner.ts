@@ -3,16 +3,14 @@
  *   - the pill: topmost, never-focused; a small dotted orb (a pulsing dot on Linux), what the agent is doing
  *     ("Typing in Edge", sent as `ACTIVITY <text>` on its stdin), the time since
  *     it appeared, and a Stop button (a double-click anywhere stops too).
- *   - the outline: a thin, click-through amber border around the window the
- *     agent is working in (control.ts workingWindow), and nothing else: no fill,
- *     nothing on the rest of the screen, nothing at all while no window is known
- *     or that window is not in front. Spawned/killed in lockstep with the pill;
- *     `TARGET <handle> <pid>` on its stdin names the window, a bare `TARGET` none.
+ *   - the glow: a click-through amber glow that pulses along every edge of every
+ *     display, and nothing in the middle of the screen. Spawned/killed in lockstep
+ *     with the pill, so the two are always in sync. Opt out via CLAWD_NO_GLOW=1.
  * Both exit by themselves when their stdin closes: a host that hard-kills this
  * process must not leave them on screen.
  *
  * One contract, three drawers (same modes, same stdout lines):
- *   - Windows: scripts/banner.ps1 + scripts/window-outline.ps1 (WinForms)
+ *   - Windows: scripts/banner.ps1 + scripts/edge-glow.ps1 (WinForms)
  *   - macOS:   scripts/mac/overlay.swift, compiled once into ~/.clawdcursor/bin
  *   - Linux:   scripts/linux/overlay.py (GTK 3; X11, or Wayland via XWayland)
  * Where the drawer can't run (no swiftc, no python3-gi, no display) the overlay
@@ -23,7 +21,7 @@
  * runs the `clawdcursor stop` flow). Two lifecycles feed it:
  *
  * Paused mode (pause-gate.ts): when an agent hands the desktop to the user at a
- * roadblock, both overlays are respawned in their paused form — a BLUE outline and
+ * roadblock, both overlays are respawned in their paused form — a BLUE glow and
  * a pill that says what to do, with Resume / End task. The pill prints
  * BANNER_RESUME / BANNER_END; showRunning() swaps back to the amber form. The card can add choice buttons
  * (CLAWD_BANNER_CHOICES, a JSON array of strings; a click prints BANNER_CHOICE <index>) and a text box
@@ -48,14 +46,16 @@ import { macOverlayBinary } from '../platform/mac-swift-binary';
 import { setBeforePointerPress, setBeforeCapture, setOwnUiPids, setOnAgentInput, GUARDED_METHODS } from '../platform/pointer-guard';
 import type { PauseAnswer, PauseInfo } from './pause-gate';
 import { publishOverlayState, foreignOverlayState } from './overlay-state';
-import { isStopped, workingIn, workingWindow } from './control';
+import { isStopped, workingIn } from './control';
 import { appLabel } from './app-label';
 
 const IDLE_HIDE_MS = 30_000;
 /** How long the pill stays hidden around an agent's click, and how long to wait for it to be gone before clicking. */
 const DODGE_MS = 1_500;
 const DODGE_SETTLE_MS = 90;
-const PAUSED_OUTLINE = '#3b82f6'; // blue — "your turn"
+/** How long the pill hides when the Linux glow says it is up (the shortest the pill takes). */
+const GLOW_READY_PILL_HIDE_MS = 50;
+const PAUSED_GLOW = '#3b82f6'; // blue — "your turn"
 
 /**
  * Which form of the overlay to draw: running (default) or paused for the user. `activity` is what the running pill says
@@ -75,8 +75,6 @@ export function activityLabel(method: string, processName?: string, appName?: st
   return app ? `${g.activity} in ${app}` : g.activity;
 }
 type Spawner = (mode: OverlayMode) => ChildProcess;
-/** The window the outline goes around: Windows and Linux find it by handle, macOS by its process. */
-type WorkingWindow = { processId: number; handle?: number | string };
 
 /** One line to an overlay's stdin; false when it has none or is gone. */
 function send(child: ChildProcess | null, line: string): boolean {
@@ -176,18 +174,20 @@ function overlayReady(): boolean {
   return false;
 }
 
-/** The outline drawer's flags: the paused form is blue and still (#392). */
-export function outlineFlags(paused: boolean, platform: NodeJS.Platform): string[] {
-  if (!paused) return [];
-  return platform === 'win32' ? ['-Color', PAUSED_OUTLINE, '-Paused'] : ['--color', PAUSED_OUTLINE, '--paused'];
+/** The glow drawer's flags: the paused form is blue; on Windows the pill's pid, so the glow stays under it. */
+export function glowFlags(paused: boolean, platform: NodeJS.Platform, pillPid?: number): string[] {
+  const flags = paused ? (platform === 'win32' ? ['-Color', PAUSED_GLOW] : ['--color', PAUSED_GLOW]) : [];
+  return platform === 'win32' && pillPid ? [...flags, '-PillPid', String(pillPid)] : flags;
 }
 
 class ControlBanner {
   private child: ChildProcess | null = null;        // the pill (carries BANNER_STOP)
-  private outlineChild: ChildProcess | null = null; // the border around the agent's window
+  private glowChild: ChildProcess | null = null;    // the screen-edge glow
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private pinned = false;
   private enabled = OVERLAY_OS.has(process.platform) && process.env.CLAWD_NO_BANNER !== '1';
+  // The glow rides the pill's lifecycle but is independently switchable (CLAWD_NO_GLOW=1 leaves the pill alone).
+  private glowEnabled = process.env.CLAWD_NO_GLOW !== '1';
   private ready: () => boolean = overlayReady;
   private onStopRequested: (() => void) | undefined;
   private paused: PauseInfo | null = null;
@@ -208,16 +208,16 @@ class ControlBanner {
       // can't briefly steal foreground from the app the agent is driving.
       psOpts({ stdio, windowsHide: true, env: overlayEnv(mode) }));
   };
-  private outlineSpawner: Spawner = (mode) => {
-    const stdio: ['pipe', 'pipe', 'ignore'] = ['pipe', 'pipe', 'ignore']; // stdin names the window; stdout: OUTLINE_CAPTURABLE
-    const flags = outlineFlags(!!mode.paused, process.platform);
+  private glowSpawner: Spawner = (mode) => {
+    const stdio: ['pipe', 'pipe', 'ignore'] = ['pipe', 'pipe', 'ignore']; // stdin: HIDE, and its EOF ends the glow; stdout: GLOW_CAPTURABLE
+    const flags = glowFlags(!!mode.paused, process.platform, this.child?.pid);
     if (process.platform === 'darwin') {
-      return spawn(macOverlayBinary.cached(macScript())!, ['outline', ...flags], { stdio });
+      return spawn(macOverlayBinary.cached(macScript())!, ['glow', ...flags], { stdio });
     }
     if (process.platform === 'linux') {
-      return spawn('python3', [linuxScript(), 'outline', ...flags], { stdio, env: { ...process.env, GDK_BACKEND: 'x11' } });
+      return spawn('python3', [linuxScript(), 'glow', ...flags], { stdio, env: { ...process.env, GDK_BACKEND: 'x11' } });
     }
-    const script = path.join(getPackageRoot(), 'scripts', 'window-outline.ps1');
+    const script = path.join(getPackageRoot(), 'scripts', 'edge-glow.ps1');
     return spawn(powershellExe(), psArgs(script, flags),
       psOpts({ stdio, windowsHide: true }));
   };
@@ -225,33 +225,22 @@ class ControlBanner {
   /**
    * Hide the pill for a moment so an agent's click under it reaches the app instead (it comes back by itself after `ms`).
    * The pill is a real window at the top centre — where browsers keep their tab strip and address bar. Called before every
-   * synthetic mouse press, drag or scroll (pointer-guard.ts). The outline is click-through and stays — except
+   * synthetic mouse press, drag or scroll (pointer-guard.ts). The glow is click-through and stays — except
    * `forCapture`, where the OS cannot keep a window out of a capture: then it steps aside too.
    */
   async dodge(ms = DODGE_MS, forCapture = false): Promise<void> {
     const pill = send(this.child, `HIDE ${ms}`);
-    const outline = forCapture && send(this.outlineChild, `HIDE ${ms}`);
-    if (pill || outline) await new Promise(r => setTimeout(r, DODGE_SETTLE_MS));
+    const glow = forCapture && send(this.glowChild, `HIDE ${ms}`);
+    if (pill || glow) await new Promise(r => setTimeout(r, DODGE_SETTLE_MS));
   }
 
   // The Windows and macOS overlays keep themselves out of captures (WDA_EXCLUDEFROMCAPTURE, sharingType none + the
-  // helper's filter). Linux cannot, and Windows 10 before 2004 cannot either: there the outline says OUTLINE_CAPTURABLE.
+  // helper's filter). Linux cannot, and Windows 10 before 2004 cannot either: there the glow says GLOW_CAPTURABLE.
   private capturable = process.platform === 'linux';
 
-  /** Before a screenshot or OCR: where the overlay would be in the capture, the pill and the outline step aside. */
+  /** Before a screenshot or OCR: where the overlay would be in the capture, the pill and the glow step aside. */
   async beforeCapture(): Promise<void> {
     if (this.capturable) await this.dodge(DODGE_MS, true);
-  }
-
-  private working: WorkingWindow | undefined;
-  private target = ''; // the last line the live outline was sent
-
-  /** The window the agent works in now: the outline moves to it, or draws nothing when there is none. */
-  setWorkingWindow(w: WorkingWindow | undefined): void {
-    this.working = w;
-    const line = w ? `TARGET ${Number(w.handle) || 0} ${w.processId}` : 'TARGET';
-    if (line === this.target) return;
-    if (send(this.outlineChild, line)) this.target = line;
   }
 
   private activity = '';
@@ -280,9 +269,9 @@ class ControlBanner {
     return this.child !== null;
   }
 
-  /** Pids of the live overlay processes (pill, outline) — the user's controls, never a target (own-ui-guard.ts). */
+  /** Pids of the live overlay processes (pill, glow) — the user's controls, never a target (own-ui-guard.ts). */
   overlayPids(): number[] {
-    return [this.child?.pid, this.outlineChild?.pid].filter((p): p is number => typeof p === 'number');
+    return [this.child?.pid, this.glowChild?.pid].filter((p): p is number => typeof p === 'number');
   }
 
   /** The overlay's current mode; a pending pause is 'paused' with its message. */
@@ -306,7 +295,7 @@ class ControlBanner {
   }
 
   /**
-   * Switch to the paused form (blue outline + instruction + Resume / End task) and
+   * Switch to the paused form (blue glow + instruction + Resume / End task) and
    * keep it up until showRunning(), regardless of pin or idle timers.
    */
   showPaused(info: PauseInfo, onAnswer: (a: PauseAnswer, reply?: string, choice?: number) => void, onRefocus?: (pid?: number) => void): void {
@@ -315,9 +304,6 @@ class ControlBanner {
     this.activity = ''; // after the answer the pill says "Working" until the agent's next input, not what it did before
     this.onAnswer = onAnswer;
     this.onRefocus = onRefocus;
-    // After an idle hide the outline has forgotten the window, but the card still names the app the agent worked in
-    // (control.ts): the blue outline goes round that same window.
-    if (!this.working) this.working = workingWindow();
     this.clearIdleTimer();
     this.killChildren();
     this.show();
@@ -399,7 +385,7 @@ class ControlBanner {
     }
     this.installExitHook();
     this.spawnPill();
-    this.spawnOutline();
+    this.spawnGlow();
   }
 
   /** The "control in progress" pill — also the BANNER_STOP / kill-switch source. */
@@ -441,48 +427,52 @@ class ControlBanner {
       });
     }
     child.on('error', () => { if (this.child === child) { this.child = null; this.publish(); } });
-    // If the pill dies, take the outline down with it so the two never desync
-    // into a half-on state (outline without the stop affordance).
-    child.on('exit', () => { if (this.child === child) { this.child = null; this.killOutline(); } });
+    // If the pill dies, take the glow down with it so the two never desync
+    // into a half-on state (glow without the stop affordance).
+    child.on('exit', () => { if (this.child === child) { this.child = null; this.killGlow(); } });
   }
 
-  /** The border around the agent's window — pure visual, click-through, no stdout. It starts with no window. */
-  private spawnOutline(): void {
-    if (this.outlineChild) return;
+  /** The ambient screen-edge glow — click-through; its stdout only says whether a capture would see it. */
+  private spawnGlow(): void {
+    if (!this.glowEnabled || this.glowChild) return;
     let child: ChildProcess;
     try {
-      child = this.outlineSpawner({ paused: this.paused ?? undefined });
+      child = this.glowSpawner({ paused: this.paused ?? undefined });
     } catch {
       return; // cosmetic — never let it break control
     }
-    this.outlineChild = child;
-    this.target = '';
+    this.glowChild = child;
     this.publish();
-    child.stdin?.on?.('error', () => { /* the outline is gone */ });
-    child.stdout?.on?.('data', d => { if (String(d).includes('OUTLINE_CAPTURABLE')) this.capturable = true; });
-    child.on('error', () => { if (this.outlineChild === child) { this.outlineChild = null; this.publish(); } });
-    child.on('exit', () => { if (this.outlineChild === child) { this.outlineChild = null; this.publish(); } });
-    if (this.working) this.setWorkingWindow(this.working);
+    child.stdin?.on?.('error', () => { /* the glow is gone */ });
+    child.stdout?.on?.('data', d => {
+      const text = String(d);
+      if (text.includes('GLOW_CAPTURABLE')) this.capturable = true;
+      // Linux: windows stack in the order they were mapped, so a glow that came up after the pill is over it. The pill
+      // hides and shows itself again (its HIDE), which puts it back on top.
+      if (text.includes('GLOW_READY') && this.glowChild === child) send(this.child, `HIDE ${GLOW_READY_PILL_HIDE_MS}`);
+    });
+    child.on('error', () => { if (this.glowChild === child) { this.glowChild = null; this.publish(); } });
+    child.on('exit', () => { if (this.glowChild === child) { this.glowChild = null; this.publish(); } });
   }
 
   // Neither overlay may outlive its owner — an orphaned "control in progress"
-  // pill or outline after the daemon stopped would be a lie on screen. kill() is a
+  // pill or glow after the daemon stopped would be a lie on screen. kill() is a
   // sync syscall, safe inside an 'exit' handler.
   private installExitHook(): void {
     if (this.exitHookInstalled) return;
     this.exitHookInstalled = true;
     process.on('exit', () => {
       try { this.child?.kill(); } catch { /* gone */ }
-      try { this.outlineChild?.kill(); } catch { /* gone */ }
+      try { this.glowChild?.kill(); } catch { /* gone */ }
       publishOverlayState({ pids: [], paused: false });
     });
   }
 
-  private killOutline(): void {
-    const o = this.outlineChild;
-    this.outlineChild = null;
-    if (o) {
-      try { o.kill(); } catch { /* already gone */ }
+  private killGlow(): void {
+    const g = this.glowChild;
+    this.glowChild = null;
+    if (g) {
+      try { g.kill(); } catch { /* already gone */ }
     }
     this.publish();
   }
@@ -498,13 +488,12 @@ class ControlBanner {
     if (c) {
       try { c.kill(); } catch { /* already gone */ }
     }
-    this.killOutline();
+    this.killGlow();
   }
 
   private forceHide(): void {
     this.clearIdleTimer();
     this.activity = ''; // the next session's pill must not open with this one's last action
-    this.working = undefined; // ...nor its outline on this one's window
     this.paused = null;
     this.onAnswer = undefined;
     this.onRefocus = undefined;
@@ -520,13 +509,15 @@ class ControlBanner {
 
   // ── test hooks ──
   __setSpawnerForTests(s: Spawner): void { this.spawner = s; }
-  __setOutlineSpawnerForTests(s: Spawner): void { this.outlineSpawner = s; }
+  __setGlowSpawnerForTests(s: Spawner): void { this.glowSpawner = s; }
+  __setGlowEnabledForTests(v: boolean): void { this.glowEnabled = v; }
   __setPlatformEnabledForTests(v: boolean): void { this.enabled = v; this.ready = () => v; }
   __resetForTests(): void {
     this.forceHide();
     this.pinned = false;
     this.onStopRequested = undefined;
     this.capturable = process.platform === 'linux';
+    this.glowEnabled = true;
     this.holds = 0;
     this.idleWhileHeld = false;
   }
@@ -542,7 +533,6 @@ setOwnUiPids(() => [...controlBanner.overlayPids(), ...foreignOverlayState().pid
 setOnAgentInput(method => {
   const label = activityLabel(method, workingIn()?.processName, workingIn()?.appName);
   if (label) controlBanner.setActivity(label);
-  controlBanner.setWorkingWindow(workingWindow());
 });
 // Captures: the overlay is never in one — it excludes itself where the OS can, and steps aside where it cannot.
 setBeforeCapture(() => controlBanner.beforeCapture());

@@ -1,6 +1,6 @@
 /**
- * The Windows drawers are C# compiled at run time: Add-Type in scripts/window-outline.ps1 (the outline) and
- * scripts/banner.ps1 (the pill and its orb). Their spawn errors go nowhere, so a compile error means no outline or no
+ * The Windows drawers are C# compiled at run time: Add-Type in scripts/edge-glow.ps1 (the glow) and
+ * scripts/banner.ps1 (the pill and its orb). Their spawn errors go nowhere, so a compile error means no glow or no
  * pill, and nothing says so. Here the C# of each is compiled the way the script compiles it (WinForms and System.Drawing
  * referenced), into a DLL in a temp folder. The types are only built, never used: no form, nothing on screen.
  */
@@ -39,9 +39,9 @@ function compile(source: string): { status: number | null; output: string } {
 }
 
 describe.runIf(process.platform === 'win32')('the Windows drawers\' C# compiles', () => {
-  it('scripts/window-outline.ps1: the outline', () => {
-    const source = csharp('window-outline.ps1', "$source = @'");
-    expect(source).toContain('public class WindowOutline : Form');
+  it('scripts/edge-glow.ps1: the glow', () => {
+    const source = csharp('edge-glow.ps1', "$source = @'");
+    expect(source).toContain('public class GlowEdge : Form');
     const r = compile(source);
     expect(r.status, r.output).toBe(0);
     expect(r.output).not.toMatch(/error|exception/i);

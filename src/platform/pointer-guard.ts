@@ -214,7 +214,7 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
     const q: WindowQuery = typeof args[0] === 'object' && args[0] !== null
       ? args[0] as WindowQuery
       : { title: args[0] as string | undefined, processId: args[1] as number | undefined };
-    // Told after `focused` has the window: the outline goes to it now, not at the next act.
+    // Told after `focused` has the window: the pill names that app now, not at the next act.
     if (r === true || (typeof r === 'object' && r?.success)) { await g.focused(q); announce('focusWindow'); }
     return r;
   });
@@ -223,7 +223,7 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
     if (!nested) { g.stopCheck(); announce('launchApp'); }
     const r = await f(...args) as { pid?: number; title?: string } | undefined;
     await g.launched(r, typeof args[0] === 'string' ? args[0] : undefined);
-    announce('launchApp');  // again, now that the launched window is known: the outline goes to it
+    announce('launchApp');  // again, now that the launched window is known: the pill names its app
     return r;
   });
   guardHardKeys(target);
@@ -319,7 +319,7 @@ function movesFocus(method: string, args: unknown[]): boolean {
 }
 
 /**
- * Runs before every screen capture (screenshot, OCR). The pill and outline are for the person at the screen, never part of
+ * Runs before every screen capture (screenshot, OCR). The pill and glow are for the person at the screen, never part of
  * what the agent sees: where the OS can exclude a window from capture (Windows, macOS) the overlay does so itself;
  * elsewhere (Linux, Windows 10 before 2004) the banner's hook hides them for the moment of the capture.
  */
@@ -336,7 +336,7 @@ export async function beforeCapture(): Promise<void> {
 }
 
 /**
- * clawdcursor's own overlay processes (the pill, the outline) are the user's: never a window or app that a lookup by name, title
+ * clawdcursor's own overlay processes (the pill, the glow) are the user's: never a window or app that a lookup by name, title
  * or pid resolves to. Window lookups match process names by substring, and on Windows and Linux the overlay runs under a
  * shared interpreter (powershell, python3), so `focus {processName:"powershell"}` could land on the pill. The banner
  * registers its live pids; the platform layer filters them out of its window and app lists.
