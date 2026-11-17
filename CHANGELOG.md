@@ -51,6 +51,11 @@ All notable changes to Clawd Cursor will be documented in this file.
   screenshot helper, which holds its own grant. OCR (`system ocr`, `smart_click` / `smart_read` by visible text, and an
   `invoke` that falls back to the visible label) now captures through the helper too, and uses nut-js only when no helper
   is built.
+- **A screen read limited to one window by an argument it does not take reads nothing.** `system ocr` with `processId`
+  read the whole screen, other apps' windows included, and only then warned that it had ignored `processId`. A read of
+  screen content (`ocr`, `copy_all_text`, `screenshot`, `find_button`, …) given `processId`, `processName`, `title` or
+  `windowId` that it cannot honour is now refused before it reads, with the call that reads that one window: focus it,
+  then `ocr` with `scope:"window"`. Other calls still run and warn as before.
 - **`accessibility read_tree` / `read_screen` on the browser clawdcursor drives over CDP points at the browser tools**
   (#235). The hint after a thin read (and after a full read of that browser) now leads with `browser page_context` /
   `read_text` / `click`, as `find` already did; the 1.x fix had gone into a copy of `read_tree` that no longer ran.

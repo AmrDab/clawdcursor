@@ -36,6 +36,11 @@ import type { ToolDefinition, ToolContext, ToolResult } from './types';
 import { expectRefusal, checkExpect } from '../core/sense/reactive-check';
 import { EXPECT_SCHEMA } from '../core/verify/assertions';
 import { COMPOUND_ROUTE_INDEX, type ActionRoute } from './compact-routes';
+import { COST_CLASS_BY_TOOL } from './cost-class';
+import { isActingAction } from '../core/result-codes';
+
+/** Arguments that limit a call to one app's window. */
+const WINDOW_SCOPE_ARGS = ['processId', 'processName', 'title', 'windowId'];
 
 const {
   computer: COMPUTER_ACTIONS, accessibility: ACCESSIBILITY_ACTIONS, window: WINDOW_ACTIONS, system: SYSTEM_ACTIONS,
@@ -335,6 +340,22 @@ async function dispatchCompound(
     k => (k !== 'expect' || (!granular.honorsExpect && !ctx.platform))
       && !declared.has(k) && forwarded[k] !== undefined && forwarded[k] !== null,
   );
+
+  // A read of screen content that the caller limited to one app's window, but that cannot be limited, is refused before
+  // it reads anything. The warning came after the read: system ocr with processId returned the text of the whole screen,
+  // the user's Terminal included (Mac, 2026-11-17).
+  const unscoped = WINDOW_SCOPE_ARGS.filter(k => ignored.includes(k));
+  const cost = COST_CLASS_BY_TOOL[route.delegate];
+  if (unscoped.length && (cost === 'perceive-text' || cost === 'perceive-image') && !isActingAction(compoundName, actionName)) {
+    const by = unscoped.find(k => k !== 'windowId');
+    const focus = by ? `window ${JSON.stringify({ action: 'focus', [by]: forwarded[by] })}` : 'window focus';
+    const then = actionName === 'ocr' ? 'system {"action":"ocr","scope":"window"}' : `${actionName} again without ${unscoped.join(', ')}`;
+    return {
+      text: `${compoundName} ${actionName} NOT EXECUTED: it cannot be limited to one window by ${unscoped.join(', ')}, so it would ` +
+        `read other apps' text too. Nothing was read. To read one window: focus it (${focus}), then ${then}.`,
+      isError: true,
+    };
+  }
 
   // Transparency: show the overlay for what the ACTION does, not the compound
   // it came through — accessibility invoke/set_value act (the compound is tier
