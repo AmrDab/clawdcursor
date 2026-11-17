@@ -800,7 +800,7 @@ export class WindowsAdapter implements PlatformAdapter {
   }
 
   private routeNotes: string[] = [];
-  private routeNote(n: string): void { if (!this.routeNotes.includes(n)) this.routeNotes.push(n); }
+  noteRoute(n: string): void { if (!this.routeNotes.includes(n)) this.routeNotes.push(n); }
   takeRouteNote(): string | null {
     const n = this.routeNotes.join('; ');
     this.routeNotes = [];
@@ -892,7 +892,7 @@ export class WindowsAdapter implements PlatformAdapter {
     try {
       // An act (not a read) on a process that is not in front may take the foreground: the user's window is put back.
       const acts = query.action !== 'get-value';
-      const { result, gaveBack } = await withGiveBack(this, acts ? processId : undefined, () => psRunner.run({
+      const { result, gaveBack, focus } = await withGiveBack(this, acts ? processId : undefined, () => psRunner.run({
         cmd: 'invoke-element',
         processId,
         action: query.action ?? 'click',
@@ -902,7 +902,9 @@ export class WindowsAdapter implements PlatformAdapter {
         ...(query.value !== undefined ? { value: query.value } : {}),
         ...(query.within ? { within: query.within } : {}),
       }) as Promise<any>);
-      if (gaveBack) this.routeNote('gave your window back');
+      if (focus === 'kept') this.noteRoute('R0 by name, focus not moved');
+      else if (focus === 'gave-back') this.noteRoute('R0 by name, gave your window back');
+      else if (focus === 'lost') this.noteRoute('R0 by name, but it took the foreground and your window could not be put back');
       return {
         success: result?.success === true,
         // On a "found but no invoke/toggle/select pattern" miss the bridge

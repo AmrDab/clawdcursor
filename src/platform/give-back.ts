@@ -9,13 +9,19 @@ interface Front { getActiveWindow(): Promise<WindowInfo | null>; restoreForegrou
 
 const isTarget = (w: WindowInfo, pid: number) => w.processId === pid || w.hostedProcessId === pid;
 
-/** Runs `act`; `gaveBack` is true only when the foreground went to `pid` during it and the user's window is verified back in front. */
-export async function withGiveBack<T>(front: Front, pid: number | undefined, act: () => Promise<T>): Promise<{ result: T; gaveBack: boolean }> {
+/**
+ * Runs `act`. `focus`: what happened to the user's window, when it could be told (the target was not in front before):
+ * 'kept' (it stayed in front), 'gave-back' (the act took the foreground and the user's window is verified back in front), 'lost'
+ * (the act took it and it could not be given back). `gaveBack` is the second.
+ */
+export async function withGiveBack<T>(front: Front, pid: number | undefined, act: () => Promise<T>): Promise<{ result: T; gaveBack: boolean; focus?: 'kept' | 'gave-back' | 'lost' }> {
   const before = pid === undefined ? null : await front.getActiveWindow().catch(() => null);
   const userHandle = typeof before?.handle === 'number' && before.handle > 0 ? before.handle : undefined;
   if (!before || userHandle === undefined || isTarget(before, pid!)) return { result: await act(), gaveBack: false };
   const result = await act();
   const after = await front.getActiveWindow().catch(() => null);
-  const gaveBack = !!after && isTarget(after, pid!) && await front.restoreForeground(userHandle).catch(() => false);
-  return { result, gaveBack };
+  if (!after) return { result, gaveBack: false };
+  if (!isTarget(after, pid!)) return { result, gaveBack: false, focus: 'kept' };
+  const gaveBack = await front.restoreForeground(userHandle).catch(() => false);
+  return { result, gaveBack, focus: gaveBack ? 'gave-back' : 'lost' };
 }

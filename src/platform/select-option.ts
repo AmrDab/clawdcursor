@@ -17,7 +17,8 @@
  * A plain `select name:"High"` (the item itself, no value) ends in selectedResult: the item's own state, read by the bridge.
  */
 import type { PlatformAdapter } from './types';
-import { findControls, typeAheadSelects, isListItem, isTextBox, sameElement, inside, ensureInFront } from './prefer-control';
+import { findControls, typeAheadSelects, isListItem, isTextBox, sameElement, inside } from './prefer-control';
+import { viaLadder, type LadderPlatform } from './ladder';
 import { quoteScreenText } from '../core/untrusted-screen-content';
 import { sleep } from '../sleep';
 
@@ -74,7 +75,7 @@ export function shownResult(shown: { value?: string; option?: string } | null | 
 }
 
 type KeysPlatform = Pick<PlatformAdapter, 'invokeElement' | 'findElements'>
-  & Partial<Pick<PlatformAdapter, 'getActiveWindow' | 'focusWindow' | 'getFocusedElement' | 'typeText'>>;
+  & Partial<LadderPlatform & Pick<PlatformAdapter, 'getFocusedElement' | 'typeText'>>;
 
 /**
  * The second try, after a pattern route the control ignored: give the control the keyboard focus and type the option's
@@ -101,16 +102,20 @@ async function pickByKeys(
   if (!el || named.some(h => isTextBox(h.controlType) && inside(h.bounds, el.bounds))) return 'skipped';
   const pid = control.processId ?? el.processId;
   if (pid === undefined) return 'skipped';
-  if (!await ensureInFront({ getActiveWindow: getActiveWindow.bind(platform), focusWindow: focusWindow.bind(platform) }, pid)) return 'skipped';
-  const focus = await platform.invokeElement({ ...control, action: 'focus' }).catch(() => null);
-  if (!focus?.success) return 'unfocused';
-  await sleep(100);
-  const focused = await getFocusedElement.call(platform).catch(() => null);
-  const role = focused?.controlType;
-  const itemInside = !!focused?.bounds && isListItem(role) && inside(focused.bounds, el.bounds);
-  if (!focused || focused.secure || !(itemInside || (typeAheadSelects(role) && sameElement(focused, el)))) return 'unfocused';
-  await typeText.call(platform, value);
-  return 'typed';
+  const via = await viaLadder(platform as LadderPlatform, pid, {
+    r2: async act => {
+      const focus = await act(() => platform.invokeElement({ ...control, action: 'focus' }).catch(() => null));
+      if (!focus?.success) return 'unfocused' as const;
+      await sleep(100);
+      const focused = await getFocusedElement.call(platform).catch(() => null);
+      const role = focused?.controlType;
+      const itemInside = !!focused?.bounds && isListItem(role) && inside(focused.bounds, el.bounds);
+      if (!focused || focused.secure || !(itemInside || (typeAheadSelects(role) && sameElement(focused, el)))) return 'unfocused' as const;
+      await act(() => typeText.call(platform, value));
+      return 'typed' as const;
+    },
+  });
+  return via.rung === 'R2' ? via.value : 'skipped';
 }
 
 export async function selectOption(

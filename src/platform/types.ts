@@ -317,6 +317,8 @@ export interface PlatformAdapter {
    * whether focus moved, or that it gave the user's window back. Taking it clears it; null when there is nothing to say.
    */
   takeRouteNote?(): string | null;
+  /** Optional (Windows): add to what `takeRouteNote` says (the ladder, ladder.ts, names the rung it used). */
+  noteRoute?(note: string): void;
   /**
    * Optional (Windows): rung R1. Deliver text (`text`: typed at the caret by window messages), a whole value (`setText`) or a
    * click to a native control of a window that is NOT in front, without taking the foreground or moving the cursor. Never to

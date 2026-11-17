@@ -88,7 +88,22 @@ describe('the adapter keeps what it did for the tool result', () => {
     const reads = [USER, TARGET];
     vi.spyOn(adapter, 'getActiveWindow').mockImplementation(async () => (reads.shift() ?? null) as never);
     await adapter.invokeElement({ name: 'Search', processId: 42, action: 'click' });
-    expect(adapter.takeRouteNote()).toBe('gave your window back');
+    expect(adapter.takeRouteNote()).toBe('R0 by name, gave your window back');
     expect(adapter.takeRouteNote()).toBeNull();
+  });
+
+  it('names the rung and that focus did not move, and when it moved and could not be given back', async () => {
+    for (const [reads, ok, note] of [
+      [[USER, USER], true, 'R0 by name, focus not moved'],
+      [[USER, TARGET], false, 'R0 by name, but it took the foreground and your window could not be put back'],
+      [[TARGET, TARGET], true, null],   // the target was in front already: nothing to say
+    ] as const) {
+      restored = ok;
+      const adapter = new WindowsAdapter();
+      const q = [...reads];
+      vi.spyOn(adapter, 'getActiveWindow').mockImplementation(async () => (q.shift() ?? null) as never);
+      await adapter.invokeElement({ name: 'Search', processId: 42, action: 'click' });
+      expect(adapter.takeRouteNote()).toBe(note);
+    }
   });
 });

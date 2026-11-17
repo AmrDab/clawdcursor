@@ -32,7 +32,8 @@ import { waitForPaste, writeClipboardVerified, readBackTyped, setResult, setVerd
 import { sleepUnlessStopped, STOPPED_TEXT } from '../../core/control';
 import { timeWait } from '../../core/observability/steps';
 import { unguarded } from '../../platform/pointer-guard';
-import { preferControl, notSelectableReason, failReason, sameElement, inside, ensureInFront } from '../../platform/prefer-control';
+import { preferControl, notSelectableReason, failReason, sameElement, inside } from '../../platform/prefer-control';
+import { viaLadder } from '../../platform/ladder';
 import { effectLine, windowChange, type WindowRead } from '../../core/effect';
 import { missText, untrusted, targetOf, targetText } from '../../core/miss-text';
 import { sleep } from '../../sleep';
@@ -1526,12 +1527,13 @@ async function clickBoundsFallback(
   const at = await clickablePoint(ctx, b);
   if (!at) return null;
   const { x: cx, y: cy } = at;
-  // A coordinate click hits whatever is on top. When the element was looked
-  // up in a named process (not the foreground window), raise that window
-  // first so the click can't land on a window covering it.
-  if (processId !== undefined) await ctx.platform.focusWindow({ processId }).catch(() => false);
-  await ctx.platform.mouseClick(cx, cy);
+  // A coordinate click hits whatever is on top. When the element was looked up in a named process (not the window in
+  // front), the ladder delivers the click to its window (R1), or brings that window up for a moment (R2), so the click
+  // can't land on a window covering it.
+  const via = await viaLadder(ctx.platform, processId, { r1: { name, input: { click: true } }, r2: async act => { await act(() => ctx.platform.mouseClick(cx, cy)); } });
+  if (via.rung === 'R3') return null;
   await sleep(150);
+  if (via.rung === 'R1') return { success: true, text: `Clicked ${quoteScreenText(name)} via a window message (the element exposes no invoke/toggle/select pattern).`, targetLabel: name };
   return { success: true, text: `Clicked ${quoteScreenText(name)} via a11y bounds (coordinate fallback at ${cx},${cy} — element found but exposes no invoke/toggle/select pattern).`, targetLabel: name };
 }
 
@@ -1678,16 +1680,21 @@ async function typeIntoField(
 ): Promise<Retyped> {
   const target = await editableTarget(ctx, name, controlType, processId, !secureOk);
   if (!target) return { skipped: `no editable field named ${quoteScreenText(name)} is on screen${secureOk ? '' : ' (a password field is never typed into on a guess)'}` };
-  const pid = processId ?? target.el.processId;
-  if (pid !== undefined && !await ensureInFront(ctx.platform, pid)) return { skipped: 'its window would not come to the front' };
-  await ctx.platform.mouseClick(target.x, target.y);
-  await sleep(100);
-  if (!focusIsField(await ctx.platform.getFocusedElement().catch(() => null), target.el, secureOk)) return 'unfocused';
-  await ctx.platform.keyPress('mod+a');
-  if (value) await ctx.platform.typeText(value);
-  else await ctx.platform.keyPress('Delete');
-  await sleep(150);
-  return 'typed';
+  const via = await viaLadder(ctx.platform, processId ?? target.el.processId, {
+    r1: { name, input: { setText: value } },
+    r2: async act => {
+      await act(() => ctx.platform.mouseClick(target.x, target.y));
+      await sleep(100);
+      if (!focusIsField(await ctx.platform.getFocusedElement().catch(() => null), target.el, secureOk)) return 'unfocused' as const;
+      await act(() => ctx.platform.keyPress('mod+a'));
+      if (value) await act(() => ctx.platform.typeText(value));
+      else await act(() => ctx.platform.keyPress('Delete'));
+      await sleep(150);
+      return 'typed' as const;
+    },
+  });
+  if (via.rung === 'R1') return 'typed';
+  return via.rung === 'R3' ? { skipped: via.why } : via.value;
 }
 
 /** macOS: " ⚠ …" when a modal dialog of another app had the keyboard during the keystrokes just sent, else "". */
