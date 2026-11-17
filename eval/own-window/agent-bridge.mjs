@@ -27,6 +27,10 @@ http.createServer(async (req, res) => {
     if (req.url !== '/call') { res.statusCode = 404; res.end('not found'); return; }
     const { name, arguments: a } = JSON.parse(body);
     const r = await c.callTool({ name, arguments: a ?? {} }, undefined, { timeout: 60000 });
-    res.end((r.content ?? []).filter(x => x.type === 'text').map(x => x.text).join('\n'));
+    const text = (r.content ?? []).filter(x => x.type === 'text').map(x => x.text).join('\n');
+    // One line per call, for the report: did the agent see the screen as pixels (a screenshot / image) or by name?
+    const image = (r.content ?? []).some(x => x.type === 'image');
+    fs.appendFileSync(path.join(dir, 'calls.jsonl'), JSON.stringify({ t: Date.now(), tool: name, action: a?.action ?? null, image, route: (text.match(/\((R[0-3][^()\n]*|CDP page act[^()\n]*)\)/) ?? [])[1] ?? null, error: r.isError === true }) + '\n');
+    res.end(text);
   } catch (e) { res.statusCode = 500; res.end('bridge error: ' + e.message); }
 }).listen(8766, '127.0.0.1', () => fs.writeFileSync(path.join(dir, 'bridge-ready'), token, { mode: 0o600 }));
