@@ -6,7 +6,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { findRun, findSession, readRun, sessionEndedAt, sessionsDir, type SessionInfo } from './runlog';
+import { actedLine, findRun, findSession, readRun, sessionEndedAt, sessionsDir, type SessionInfo } from './runlog';
 import { claudeEvents, codexEvents, elapsed, paint, renderEvent, type Paint, type TraceEvent } from './trace';
 import type { CoreContext } from './task';
 
@@ -257,6 +257,8 @@ function showRun(id: string, ctx: CoreContext, p: Paint, out: (l: string) => voi
   out(`${p.bold('run')} ${path.basename(file, '.jsonl')} · ${head?.runner ?? '?'}${head?.model ? ` · ${head.model}` : ''} · ${head?.surface ?? ''} tools`);
   if (head?.task) out(p.dim(`task: ${head.task}`));
   if (head?.command) out(p.dim(`command: ${head.command}`));
+  const session = end?.session ? findSession(sessionsDir(ctx.dataDir), end.session) : null;
+  if (session?.calls) out(p.dim(actedLine(session.acted)));
 
   const rows: Array<{ t: number; line: string }> = [];
   const who = head?.runner === 'claude' || head?.runner === 'codex' ? head.runner : 'model';
@@ -265,7 +267,6 @@ function showRun(id: string, ctx: CoreContext, p: Paint, out: (l: string) => voi
       for (const ev of runEvents(r.src, r.data)) { const line = renderEvent(ev, p, who); if (line) rows.push({ t: Date.parse(r.t), line }); }
     } else if (r.type === 'interrupted') rows.push({ t: Date.parse(r.t), line: p.red('stopping (Ctrl-C)…') });
   }
-  const session = end?.session ? findSession(sessionsDir(ctx.dataDir), end.session) : null;
   if (session) {
     const f: Filter = { session: sessionFilter(session) };
     const logs = dayFiles(logDir(ctx), f.session!.fromMs - START_SLACK_MS)

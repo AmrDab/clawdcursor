@@ -11,7 +11,7 @@ import { ANTHROPIC_DEFAULT_MODEL, runApi } from './api';
 import { RUNNERS, apiKeyOf, readConfig, type AgentConfig, type Runner } from './config';
 import { detectClaude, detectCodex, type CliStatus } from './detect';
 import { killTree, runCli, type CliCommand } from './hosts';
-import { newRunId, openRunLog, sessionOfRun, sessionsDir, withoutImages } from './runlog';
+import { actedLine, newRunId, openRunLog, sessionOfRun, sessionsDir, withoutImages } from './runlog';
 import { claudeMcpConfig, claudeTaskCommand, codexTaskCommand, displayCommand, mcpEntry } from './runners';
 import { claudeEvents, codexEvents, elapsed, paint, renderEvent, verdictOf, type TraceEvent } from './trace';
 
@@ -170,13 +170,14 @@ export async function runTask(opts: TaskOptions, ctx: CoreContext, io: TaskIo = 
     ranCli: !!command });
   const code = interrupted ? 130 : verdict === 'PASS' ? 0 : 1;
   const session = sessionOfRun(sessionsDir(ctx.dataDir), runId, started);
-  log.write({ type: 'end', verdict, ...(claimed !== verdict ? { claimed } : {}), toolCalls, exitCode: code, agentExitCode: exitCode, ...(reason ? { reason } : {}), ...(session ? { session: session.id } : {}), ms: Date.now() - started });
+  log.write({ type: 'end', verdict, ...(claimed !== verdict ? { claimed } : {}), toolCalls, exitCode: code, agentExitCode: exitCode, ...(reason ? { reason } : {}), ...(session ? { session: session.id, acted: session.acted } : {}), ms: Date.now() - started });
 
   const tag = verdict === 'PASS' ? p.green(p.bold('PASS')) : verdict === 'FAIL' ? p.red(p.bold('FAIL')) : p.red(p.bold(interrupted ? 'STOPPED' : 'NO VERDICT'));
   const last = finalText.split('\n').map(l => l.trim()).filter(Boolean).pop() ?? '';
   out('');
   out(`${tag}  ${verdict ? last.replace(/^[\s*_`>#"'-]*(?:verdict:\s*)?(PASS|FAIL)\b[:\s-]*/i, '') : reason ?? ''}`);
   out(p.dim(`run log ${log.file}${session ? ` · clawdcursor session ${session.id}` : ''} · ${((Date.now() - started) / 1000).toFixed(1)} s · clawdcursor logs --run ${runId}`));
+  if (session?.calls) out(p.dim(actedLine(session.acted)));
   return { exitCode: code, verdict, runId, runFile: log.file, session: session?.id ?? null, finalText, ...(reason ? { reason } : {}) };
 }
 

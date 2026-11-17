@@ -4,6 +4,11 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **`clawdcursor task` prints how the run acted**, as a dim line after the run log: `how it acted: N by name or label · M by
+  coordinates · S screenshots` (`smart_click` counts as by name or label). `clawdcursor logs --run` shows it in its header,
+  and the run log's `end` line carries the same three counts.
+
 ### Fixed
 - **`accessibility read_tree` / `read_screen` on the browser clawdcursor drives over CDP points at the browser tools**
   (#235). The hint after a thin read (and after a full read of that browser) now leads with `browser page_context` /
@@ -34,6 +39,11 @@ All notable changes to Clawd Cursor will be documented in this file.
   `start` / `serve` deprecation warnings no longer say "Removed in v0.10"; both still work as aliases of `agent`.
 
 ### Changed
+- **Canvas and CAD apps are told to press labelled controls by label, not by pixel.** `read_tree` says so after an
+  opaque area, and also for a window whose toolbars are only named panes (a CAD ribbon). The server instructions and the
+  canvas hint keep the screenshot for picks inside the drawn area, and after three clicks by coordinates with none by
+  name, one note says a visible label is pressed with `smart_click`.
+- **A refused act in the wrong foreground window says to focus yours and send the same call again**, with no screenshot.
 - **The HTTP daemon answers only to `Host: 127.0.0.1:<port>` or `localhost:<port>`**; any other Host header gets 403.
   A page whose DNS name was rebound to 127.0.0.1 could load the dashboard and read the pause message. An SSH tunnel to
   the daemon must use the daemon's own port on the local end (`ssh -L 3847:127.0.0.1:3847 ...`).

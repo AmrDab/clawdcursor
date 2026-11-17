@@ -17,7 +17,7 @@ import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength } f
 import type { InvokeAction, UiElement } from '../../platform/types';
 import { ocrEngine } from '../../platform/ocr-engine';
 import { selectOption, selectedResult } from '../../platform/select-option';
-import { SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, SPARSE_NEXT_STEP, isSparseTree, CUT_VALUE_NEXT_STEP, cdpStepFor } from '../blind-hints';
+import { SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, drawnControlsLine, SPARSE_NEXT_STEP, isSparseTree, CUT_VALUE_NEXT_STEP, cdpStepFor } from '../blind-hints';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
 import { isBrowserProcess } from '../../platform/browser-config';
 import { agentBrowserConnectOptions, DEFAULT_CDP_PORT } from '../../platform/browser-config';
@@ -140,7 +140,9 @@ export function buildUnifiedTools(): UnifiedTool[] {
         const opaque = partial || (activeIsBrowser && sparse) ? null : opaqueArea(tree);
         const cdpStep = sparse || browser ? await cdpStepFor(ctx.cdp, pid ?? active?.processId) : '';
         const step = sparse ? cdpStep || nextStep : cdpStep;
-        const hint = (opaque ? `\n${opaqueAreaLine(opaque)}` : '') + (step ? `\n${step}` : '') +
+        // Not on a cut walk, whose panes may only be missing their children; a sparse tree and a browser get none (blind-hints.ts).
+        const drawn = partial ? null : drawnControlsLine(tree, browser);
+        const hint = (opaque ? `\n${opaqueAreaLine(opaque)}` : '') + (drawn ? `\n${drawn}` : '') + (step ? `\n${step}` : '') +
           (cut ? `\n${CUT_VALUE_NEXT_STEP}` : '');
         const awoke = woke ? ' (accessibility was asleep: read again after waking the app)' : '';
         const folded = fold ? `\n+ an embedded document or web view of ${content.length} elements — read_screen with offset:${own.length} lists them; copy_all_text reads its text` : '';

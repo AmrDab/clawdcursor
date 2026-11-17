@@ -373,7 +373,7 @@ accessibility {"action":"invoke","name":"Send"}
 
 **Draw on a canvas (whiteboards such as Miro, FigJam, Excalidraw, tldraw, Freeform; Paint; a CAD viewport):**
 
-The board has no names: `read_tree` shows the toolbar, and an `Opaque area` line for the board itself. Drive the toolbar by name and draw from a screenshot.
+The board has no names: `read_tree` shows the toolbar, and an `Opaque area` line for the board itself. Drive the toolbar by name and draw from a screenshot. A toolbar that `read_tree` lists only as panes (a CAD ribbon) is still pressed by its visible label with `accessibility {"action":"smart_click","target":"Extrude"}`, no screenshot; a screenshot and x,y are for points inside the drawn area.
 1. **Import before drawing.** If the app builds a diagram from text (a Mermaid or text-to-diagram dialog, or pasting a diagram's source), use it: `system clipboard_write` + paste, then check once.
 2. **Pick the tool by name** (`accessibility invoke`; `help="…"` on a `read_tree` line is the button's tooltip), then `computer wait` about 1 s: the first canvas click right after switching tools can be dropped.
 3. **One screenshot, then one batch.** Shapes first, connectors second. Rectangles, ellipses and straight lines: the shape or line tool with `drag`. Pen points: one `click` with `path`. Never click an existing pen point again, as some pen tools drop that click and the next one.

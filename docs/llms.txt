@@ -34,6 +34,7 @@ working window replaced the full-screen glow.
 SEE: `accessibility {"action":"read_tree"}` → `system {"action":"copy_all_text"}` → `system {"action":"ocr"}`.
 ACT: `accessibility {"action":"invoke","name":"Send"}` or `set_value` → `accessibility {"action":"smart_click","target":"<label>"}` → `computer {"action":"screenshot"}`, then `computer {"action":"click","x":…,"y":…}`.
 Take the next rung only when the one before found nothing. `smart_click` finds a visible label by OCR and clicks it, with no screenshot; a screenshot and a coordinate click are for a target with no name and no visible text.
+In a canvas or CAD app, the toolbars, ribbons, fields and dialogs around the drawing are pressed by their visible label with `accessibility {"action":"smart_click","target":"Extrude"}`; a screenshot and x,y are for points inside the drawn area.
 
 ## Install
 

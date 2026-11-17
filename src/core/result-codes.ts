@@ -98,7 +98,7 @@ const RULES: Rule[] = [
     hint: 'the window in front is an AI assistant, not your target; focus your target window first',
     next: { mcp: 'window {"action":"list"}' } },
   { code: 'FOREGROUND_CHANGED', outcome: 'refused', test: /foreground changed: /i,
-    hint: 'the window in front is not the one you were working in; nothing was sent',
+    hint: 'the window in front is not the one you were working in; nothing was sent: focus your window, then send the SAME call again (no screenshot needed)',
     next: { mcp: 'window {"action":"focus","processName":"<your app>"}' } },
   { code: 'DANGEROUS_KEY', outcome: 'refused', test: /dangerous key combo/i,
     hint: 'it locks the screen or ends the session, so it is never sent; every other shortcut is allowed', next: PAUSE('Please <do this step> yourself') },

@@ -452,3 +452,47 @@ describe('the first screenshot of a session that read nothing is nudged to blind
     expect(platform.writeClipboard).not.toHaveBeenCalled();
   });
 });
+
+// 2026-11-16 (CAD run: 73 coordinate clicks, ~58 on labelled buttons): after 3 coordinate clicks with none by name, one note, once per session.
+describe('coordinate clicks with none by name are nudged to smart_click, once', () => {
+  beforeEach(() => {
+    capturedHandlers.clear();
+    vi.clearAllMocks();
+    mockClientCaps.mockReturnValue(undefined);
+    mockHasConsent.mockReturnValue(true);
+  });
+  const text = (r: McpToolResult) => r.content.filter(c => c.type === 'text').map(c => (c as { text: string }).text).join('\n');
+  const NUDGE = /3 clicks by coordinates and none by name\./;
+  const ctx = () => ({ ...fakeCtx(), platform: { listWindows: vi.fn(async () => []), getActiveWindow: vi.fn(async () => null),
+    listDisplays: vi.fn(async () => []), mouseClick: vi.fn(async () => {}), findElements: vi.fn(async () => []), invokeElement: vi.fn(async () => ({ success: true })) } as any });
+  const click = (compact = true) => capturedHandlers.get(compact ? 'computer' : 'mouse_click')!(compact ? { action: 'click', x: 5, y: 5, space: 'screen' } : { x: 5, y: 5, space: 'screen' });
+
+  it('fires on the 3rd coordinate click, and not again later in the session', async () => {
+    await createMcpServer({ ctx: ctx(), compact: true });
+    const seen: boolean[] = [];
+    for (let i = 0; i < 7; i++) seen.push(NUDGE.test(text(await click())));
+    expect(seen).toEqual([false, false, true, false, false, false, false]);
+  });
+
+  it('compact and granular name smart_click in their own names', async () => {
+    await createMcpServer({ ctx: ctx(), compact: true });
+    for (let i = 0; i < 2; i++) await click();
+    expect(text(await click())).toContain('accessibility smart_click {"target":"<label>"} presses it with no screenshot');
+    capturedHandlers.clear();
+    await createMcpServer({ ctx: ctx(), compact: false });
+    for (let i = 0; i < 2; i++) await click(false);
+    const g = text(await click(false));
+    expect(g).toContain('smart_click {"target":"<label>"} presses it with no screenshot');
+    expect(g).not.toContain('accessibility smart_click');
+  });
+
+  it('a click by name in between starts the count again; screenshots and other calls do not', async () => {
+    await createMcpServer({ ctx: ctx(), compact: true });
+    await click(); await click();
+    await capturedHandlers.get('accessibility')!({ action: 'invoke', name: 'OK' });   // act-name: the count starts over
+    expect(NUDGE.test(text(await click()))).toBe(false);
+    await capturedHandlers.get('system')!({ action: 'system_time' });                 // not a name act: no reset
+    expect(NUDGE.test(text(await click()))).toBe(false);
+    expect(NUDGE.test(text(await click()))).toBe(true);
+  });
+});
