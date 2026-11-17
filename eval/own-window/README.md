@@ -74,3 +74,24 @@ which methods did. The class column is the HWND class the posts went to. The R1 
 - DPI: the script is DPI aware; target forms are not. Click coordinates are exact at 100% scale and may be off on scaled displays for unaware targets.
 - Elevated targets (UIPI) are not tested. WordPad, Explorer rename, Settings and Chrome from the plan are not covered yet.
 - Not covered: macOS and Linux (separate probes).
+
+## Live run through the real agent path (Windows): `live-windows.mjs`
+
+Plan (h) step 7, one run. Unlike the probe above (window messages sent directly), this calls the built MCP server over
+stdio, the way an agent does, and measures what the user would see: focus steals and cursor moves.
+
+```
+npm run build
+node eval/own-window/live-windows.mjs --dry-run    # prints the plan and checks; starts and sends nothing
+node eval/own-window/live-windows.mjs              # the live run, about 30 s; hands off keyboard and mouse
+```
+
+`--no-banner` starts the server without the on-screen banner, outline and ghost cursor (to compare).
+
+- Starts: the server (`dist/surface/cli.js mcp --compact`, a temp `HOME`/`USERPROFILE`, telemetry off, so your settings are untouched), a fake user window `ClawdUser` (kept in front), a new Notepad, a WinForms `ClawdTarget` (two TextBoxes named `ClawdField` / `ClawdNote`, a Button `ClawdGo`, a status label), and a 50 ms sampler of the foreground window and the real cursor.
+- Four tool calls, each addressed by `processId` to a process it started: (a) `set_value` on Notepad's `Text editor`; (b) `set_value` on `ClawdField`; (c) `invoke` on `ClawdGo`; (d) `set_value` with shifted characters on `ClawdNote`. (b) and (d) are the text paths that reach the ladder (`typeIntoField`, rung R1 `setText`); (c) reaches it through `clickBoundsFallback` when UIA gives no invoke pattern. `smart_type` does not use the ladder.
+- Effect is read from the apps (WM_GETTEXT on the edits and the label), and the `ClawdUser` text must be unchanged.
+- Before each step `ClawdUser` is put back in front and the script waits 1.5 s, so an R2 burst is allowed (it needs about 1 s of idle).
+- Output: a table (step, success, rung note, effect verified, focus steals with durations, cursor moved) and `results/live-windows-<time>.jsonl` (meta, one line per step, all samples). Steals are samples whose foreground was not `ClawdUser`; "cursor moved" is any sample differing from the cursor position before the server started.
+- Safety: never addresses a pid it did not start, never touches the user form; Notepad is skipped if it would reuse one of your processes or opens with text; everything is closed in `finally`; hard timeout 90 s.
+- An R2 burst is a deliberate focus steal and will show as one; a R0 act that takes the foreground and is given back shows as a short steal. The goal line in the plan is 0 steals and 0 cursor moves.
