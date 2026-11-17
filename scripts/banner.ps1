@@ -319,7 +319,8 @@ function Enable-Drag($c) {
     $c.Add_MouseUp({ $script:drag = $null })
 }
 
-# A brief cue when the pill appears: the outline glows amber and fades back over about 1.5 s. Once, never a loop.
+# A cue when the pill appears: the outline flashes amber three times over about 3.6 s, then stays as it was. Never a
+# loop. A single 1.5 s fade went unnoticed by the owner (2026-11-17).
 $script:edgeW = 1
 function Start-Pulse {
     $script:base = $script:edge; $script:amber = [System.Drawing.Color]::FromArgb(245, 158, 11)
@@ -328,11 +329,11 @@ function Start-Pulse {
     $script:pulse.Interval = 60
     $script:pulse.Add_Tick({
         $script:pulseN++
-        $k = [Math]::Max(0.0, 1 - $script:pulseN / 25.0)
-        $script:edgeW = if ($k -gt 0) { 3 } else { 1 }
+        $k = if ($script:pulseN -lt 60) { 0.5 * (1 - [Math]::Cos(2 * [Math]::PI * $script:pulseN / 20.0)) } else { 0.0 }
+        $script:edgeW = if ($script:pulseN -lt 60) { 4 } else { 1 }
         $script:edge = [System.Drawing.Color]::FromArgb([int]($script:base.R + ($script:amber.R - $script:base.R) * $k), [int]($script:base.G + ($script:amber.G - $script:base.G) * $k), [int]($script:base.B + ($script:amber.B - $script:base.B) * $k))
         $form.Invalidate()
-        if ($k -le 0) { $script:pulse.Stop() }
+        if ($script:pulseN -ge 60) { $script:pulse.Stop() }
     })
     $script:pulse.Start()
 }
