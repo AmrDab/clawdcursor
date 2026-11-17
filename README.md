@@ -421,7 +421,7 @@ clawdcursor task "<task>"   Developer add-on: a test agent with clawdcursor as i
 clawdcursor logs            Developer add-on: the logs, readably (-f, --session, --tool, --errors, --since, --run)
 ```
 
-`--no-banner` (or `CLAWD_NO_BANNER=1`) on `mcp` and `agent` turns the on-screen pill and outline off.
+`--no-banner` (or `CLAWD_NO_BANNER=1`) on `mcp` and `agent` turns the on-screen pill and outline off. An app that hosts clawdcursor can draw the pill in its own window: [docs/pill-host.md](docs/pill-host.md).
 
 ### Testing clawdcursor on its own
 
