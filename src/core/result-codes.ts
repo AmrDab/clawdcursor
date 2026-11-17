@@ -167,6 +167,12 @@ const RULES: Rule[] = [
     test: /Pattern not supported|element (?:cannot|can't|does not|doesn't) (?:expand|collapse|be (?:toggled|selected|set))|element does not support (?:expand|collapse|toggle|select|AXScrollToVisible)|exposes (?:no|neither) (?:EditableText|Value)|no Selection interface/i,
     hint: 'found it, but it cannot be done that way (toggled / selected / set / expanded); try invoke / expand / toggle / select, or read its state',
     next: { mcp: 'accessibility {"action":"state","name":"<name>"}' } },
+  // smart_type: the named field did not take the focus (out of view at the end of a page). Its text names the call that
+  // works, a set by name (no focus, no scrolling): that is the next step, not a re-read (Mac, 2026-11-17). Taken only from
+  // the very end of the reply, so a page title quoted earlier in it cannot pose as the call.
+  { code: 'ELEMENT_HIDDEN', outcome: 'failed', test: /nothing was typed — the focus stayed on the page/i,
+    hint: 'the field did not take the focus (out of view, or it refused it); set it by name: no focus or scrolling needed',
+    next: { mcp: t => /(accessibility \{"action":"set_value","name":"(?:[^"\\\n]|\\.)*","value":"<text>"\}) sets it without the focus\.$/.exec(t)?.[1] ?? REREAD.mcp } },
   // Found, but not on screen / the action itself failed: not "the name may differ".
   { code: 'ELEMENT_HIDDEN', outcome: 'failed', test: /the element exists but is not visible on screen/i,
     hint: 'found, but not visible on screen — scroll it into view or open its container', next: REREAD },
