@@ -322,6 +322,13 @@ describe('9. parameter descriptions per compound, and the description limit', ()
     expect(tool('browser').parameters.selector.description).toMatch(/click.*read_text/);
   });
 
+  it('pause_for_user done_when says the fields of each type and what it must not be', () => {
+    const d = String(tool('system').parameters.done_when.description);
+    for (const f of ['element_exists {name}', 'element_value_contains {name, value}', 'window_title_contains {value}', 'file_exists {path}', 'ocr_contains {value}']) expect(d).toContain(f);
+    expect(d).toMatch(/false now/);
+    expect(d).toContain("must not be text the prompt itself shows (your message, Resume / End task)");
+  });
+
   it('every compound tool description, and batch, fits in 1,024 characters', () => {
     for (const t of getCompactTools()) {
       expect(t.description.length, `${t.name} is ${t.description.length}`).toBeLessThanOrEqual(1024);

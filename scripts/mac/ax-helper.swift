@@ -1240,6 +1240,29 @@ func cmdFrontmost() -> Never {
     emit(["ok": true, "locked": locked, "frontmost": info])
 }
 
+/// The window a user SEES at a point (--x, --y: points, top-left origin, like a click). One front-to-back pass over the
+/// on-screen windows, modal and alert layers included (unlike topmostRegularApp). Skips invisible windows, clawdcursor's own,
+/// and the WindowServer's (menu bar, cursor). `window` is null when nothing is there.
+func cmdWindowAt() -> Never {
+    guard let x = Double(opts["x"] ?? ""), let y = Double(opts["y"] ?? "") else { fail("failed", "window-at: needs --x and --y") }
+    guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+        emit(["ok": true, "window": NSNull()])
+    }
+    for w in list {
+        guard let pid = w[kCGWindowOwnerPID as String] as? Int32, pid != ownPid else { continue }
+        let owner = (w[kCGWindowOwnerName as String] as? String) ?? ""
+        if owner == "Window Server" || isOwnProcessName(owner) { continue }
+        if ((w[kCGWindowAlpha as String] as? Double) ?? 1) <= 0 { continue }
+        guard let b = w[kCGWindowBounds as String] as? [String: Double],
+              let bx = b["X"], let by = b["Y"], let bw = b["Width"], let bh = b["Height"],
+              x >= bx, x < bx + bw, y >= by, y < by + bh else { continue }
+        var d: [String: Any] = ["processId": Int(pid), "processName": owner]
+        if let t = w[kCGWindowName as String] as? String, !t.isEmpty { d["title"] = t }
+        emit(["ok": true, "window": d])
+    }
+    emit(["ok": true, "window": NSNull()])
+}
+
 func cmdWindows() -> Never {
     requireUsableSession()
     let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
@@ -1672,6 +1695,7 @@ func cmdPageText() -> Never {
 
 switch command {
 case "frontmost": cmdFrontmost()
+case "window-at": cmdWindowAt()
 case "windows": cmdWindows()
 case "active": cmdActive()
 case "apps": cmdApps()
@@ -1682,5 +1706,5 @@ case "invoke": cmdInvoke()
 case "type": cmdType()
 case "focus": cmdFocus()
 case "pagetext": cmdPageText()
-default: fail("failed", "usage: ax-helper windows|active|frontmost|apps|focused|tree|find|invoke|type|focus|pagetext [options] (got \"\(command)\")")
+default: fail("failed", "usage: ax-helper windows|window-at|active|frontmost|apps|focused|tree|find|invoke|type|focus|pagetext [options] (got \"\(command)\")")
 }

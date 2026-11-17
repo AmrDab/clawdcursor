@@ -18,6 +18,31 @@ All notable changes to Clawd Cursor will be documented in this file.
   tokens only (the cost is left out, not guessed). A run that reported nothing prints no line.
 
 ### Fixed
+- **`smart_click` never clicks in another app's window.** It kept an OCR match inside the target window's rectangle only,
+  so a system dialog on top of the window (macOS "Accessibility Access") was clicked when its text matched the label.
+  The window at the click point is now asked first (macOS `ax-helper window-at`, Windows `window-at-point`): if it
+  belongs to another process than the target, nothing is clicked and the result is a refusal naming that window. Also
+  for the accessibility-bounds click, and a call without `processId` now refuses before the click instead of warning
+  after it. Where the platform cannot say (Linux), it clicks as before.
+- **No false "FOCUS NOT CONFIRMED" after a click on macOS.** The app in front changing is the click working when that app
+  owns the clicked point (it was activated by the click); the warning now appears only when it does not, and on macOS
+  it says "another app is now in front: <name>; check before typing" without the Windows foreground-lock wording.
+- **`pause_for_user` documents `done_when`.** The tool description and the parameter now list each type's fields
+  (`element_exists {name}`, `ocr_contains {value}`, ...) and say it must be false now and must not be text the pause
+  card itself shows (your message, Resume / End task).
+- **`find`, `invoke` and `smart_click` by name find controls in Electron apps on macOS.** Only `read_tree` woke an
+  Electron / Chromium app's accessibility tree, so a search by name saw a thin tree and missed. The wake is now sent
+  once per process before the first by-name search. A miss in `find` / `invoke` also says when another app's window
+  (a system dialog) is on top of the window searched, with the `processId` to read it.
+- **`CLAWD_BANNER_POS=bottom` moves the pill and the pause card to the bottom centre on macOS** (default `top`),
+  for a Mac whose notch sits under them.
+- **Dragging on macOS is a drag.** `mouse_down` then `mouse_move`, `mouse_drag_stepped` and `drag` with a `path`
+  jumped from point to point; while a button is held each move now steps at most 18 px every 10 ms, and
+  `mouse_down` waits 80 ms before the first move, as the plain `drag` always did.
+- **Typing through the clipboard no longer loses an image or a file on it (macOS).** A paste saved the clipboard as
+  text only, so non-text data on it was replaced. The pasteboard types are read first: with non-text data, printable
+  ASCII up to 1000 characters is typed as keys, anything else is refused (`CLIPBOARD_HELD`, nothing typed). A paste
+  that put the clipboard back says so: `Typed N chars (paste, clipboard restored)`.
 - **`accessibility read_tree` / `read_screen` on the browser clawdcursor drives over CDP points at the browser tools**
   (#235). The hint after a thin read (and after a full read of that browser) now leads with `browser page_context` /
   `read_text` / `click`, as `find` already did; the 1.x fix had gone into a copy of `read_tree` that no longer ran.

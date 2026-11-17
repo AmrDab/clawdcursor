@@ -17,8 +17,10 @@ import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength } f
 import type { InvokeAction, UiElement } from '../../platform/types';
 import { ocrEngine } from '../../platform/ocr-engine';
 import { selectOption, selectedResult } from '../../platform/select-option';
+import { ownsPoint } from '../click-owner';
 import { SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, drawnControlsLine, SPARSE_NEXT_STEP, isSparseTree, CUT_VALUE_NEXT_STEP, cdpStepFor } from '../blind-hints';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
+import { wakeForNameSearch, onTopOfLine } from '../name-search-help';
 import { isBrowserProcess } from '../../platform/browser-config';
 import { agentBrowserConnectOptions, DEFAULT_CDP_PORT } from '../../platform/browser-config';
 import { parseAssertions, checkAssertions, renderReport, EXPECT_SCHEMA } from '../../core/verify/assertions';
@@ -28,13 +30,13 @@ import { wrapUntrustedScreenContent, screenJson, quoteScreenText } from '../../c
 import { resolveRef } from '../../core/sense/ui-map-resolve';
 import { ensureVisible } from '../../core/sense/ui-map-visible';
 import { findActionButton, findInputField } from '../../core/sense/ui-map-find';
-import { waitForPaste, writeClipboardVerified, readBackTyped, setResult, setVerdict, fieldRead, typesAsKeys, EMPTY_AFTER_TYPING, selectAllScope, type Retyped } from '../paste-guard';
+import { pasteChoice, CLIPBOARD_HELD_REFUSAL, waitForPaste, writeClipboardVerified, readBackTyped, setResult, setVerdict, fieldRead, typesAsKeys, EMPTY_AFTER_TYPING, selectAllScope, type Retyped } from '../paste-guard';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../../core/control';
 import { timeWait } from '../../core/observability/steps';
 import { unguarded } from '../../platform/pointer-guard';
 import { preferControl, notSelectableReason, failReason, sameElement, inside, ensureInFront } from '../../platform/prefer-control';
 import { effectLine, windowChange, type WindowRead } from '../../core/effect';
-import { missText, untrusted, targetOf, targetText } from '../../core/miss-text';
+import { missText, structuredMissFields, untrusted, targetOf, targetText } from '../../core/miss-text';
 import { sleep } from '../../sleep';
 
 /** a11y_get_value returns a value whole up to this size (a long document, not a whole book). */
@@ -256,6 +258,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
         // Pure adapter-string retries → works on every OS with zero per-OS code,
         // and only the failing path pays the extra round-trips.
         const ladder: InvokeAction[] = action === 'click' ? ['click', 'select', 'toggle'] : [action];
+        await wakeForNameSearch(ctx.platform, processId);
         const { res, used } = await runActivationLadder(
           (a) => ctx.platform.invokeElement({ name, controlType, processId, action: a, value, within }), ladder);
         // Found but no pattern took: click the surfaced bounds centre (same
@@ -282,7 +285,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
                 ? `Invoked ${acted} (${used}) → value:\n${wrapUntrustedScreenContent(String((res.data as any).value ?? ''))}`
                 : `Invoked${expandReadBack(res.data) ? ' (read back ✓)' : ''} ${acted} via a11y${used !== 'click' ? ` (${used})` : ''}${expandNote(res.data)}.`
                   + (pending ? ' The action is still running — a dialog probably opened; re-read the screen before the next step.' : ''))
-            : `a11y invoke ${quoteScreenText(name)} missed — ${missText(res.data)}.`) + lateNote,
+            : `a11y invoke ${quoteScreenText(name)} missed — ${missText(res.data)}.${await onTopNote(ctx, res.data, processId)}`) + lateNote,
           targetLabel: name,
         };
       },
@@ -663,7 +666,10 @@ export function buildUnifiedTools(): UnifiedTool[] {
         await sleep(150);
         const after = await ctx.platform.getActiveWindow().catch(() => null);
         const note = warning ? ` (${warning})` : '';
-        const focusWarn = focusTheftWarning(activation, before, after);
+        // Another app in front after the click is the click WORKING when that app owns the point: ask only then.
+        const atPoint = windowChange(before, after) === 'other-app'
+          ? await ctx.platform.windowAtPoint?.(x, y).catch(() => null) : null;
+        const focusWarn = focusTheftWarning(activation, before, after, atPoint);
         return { success: true, text: `Clicked ${button} x${count} at ${coordBreadcrumb(ix, iy, x, y, space, scale, ctx)}${note}${focusWarn}${focusBreadcrumb(before, after)}` };
       },
     },
@@ -806,7 +812,13 @@ export function buildUnifiedTools(): UnifiedTool[] {
         ctx.platform.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
         const privateTyping = ctx.platform.typingIsPrivate?.() !== false;
         let how = 'keys';
-        if (typesAsKeys(body) && privateTyping) {
+        const wantKeys = typesAsKeys(body) && privateTyping;
+        // A clipboard of an image or a file cannot be put back after a paste: type the text instead, or refuse.
+        const choice = wantKeys || !body ? 'paste'
+          : pasteChoice(body, { nonTextClipboard: await ctx.platform.clipboardHoldsNonText?.().catch(() => false) ?? false, privateTyping });
+        if (choice === 'refuse') return { success: false, isError: true, text: CLIPBOARD_HELD_REFUSAL };
+        let restored = false;
+        if (wantKeys || choice === 'keys') {
           // Short plain text: real keystrokes, the user's clipboard never touched. A refusal (a system dialog owns the
           // keyboard) throws: nothing was typed, and the caller is told so.
           await ctx.platform.typeText(body);
@@ -826,6 +838,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
             await waitForPaste(async () => (await ctx.platform.getFocusedElement())?.value, body, { minMs: 150 });
             await unguarded(() => ctx.platform.writeClipboard(prior!)).catch(() => {});
             prior = null;
+            restored = true;
           } catch (err) {
             // The paste failed or was refused: what was meant to be typed must not stay on the user's clipboard.
             if (prior !== null) await unguarded(() => ctx.platform.writeClipboard(prior!)).catch(() => {});
@@ -840,7 +853,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
         // The verdict sits inside the leading "(…)", before any quoted text or window title, so content can never pose as
         // it (result-codes reads it from there).
         // Characters as a person counts them (an emoji is one), not UTF-16 units.
-        const head = `Typed ${[...text].length} chars (${how}${rb.result === 'match' ? ', read back ✓' : ''})`;
+        const head = `Typed ${[...text].length} chars (${how}${how === 'paste' && restored ? ', clipboard restored' : ''}${rb.result === 'match' ? ', read back ✓' : ''})`;
         // A password field: never echo what was typed into it.
         const shown = 'secure' in rb && rb.secure ? `${head} into a password field (not echoed)` : `${head}: "${truncate(text, 60)}"`;
         // What the field shows, as data, short: the evidence the caller needs.
@@ -1692,6 +1705,14 @@ async function typeIntoField(
   return 'typed';
 }
 
+/** The "another app's window is on top" line for a plain miss (not an ambiguous or hidden element), with its newline; else "". */
+async function onTopNote(ctx: AgentToolContext, miss: unknown, processId: number | undefined): Promise<string> {
+  const reason = structuredMissFields(miss).reason;
+  if (reason === 'ambiguous' || reason === 'hidden') return '';
+  const line = await onTopOfLine(ctx.platform, processId);
+  return line ? `\n${line}` : '';
+}
+
 /** macOS: " ⚠ …" when a modal dialog of another app had the keyboard during the keystrokes just sent, else "". */
 function inputWarningNote(ctx: AgentToolContext): string {
   const w = ctx.platform.takeInputWarning?.();
@@ -1719,6 +1740,9 @@ export function focusTheftWarning(
   activation: { activated: boolean; title?: string; processName?: string; reason?: string; action?: string } | void,
   before: WindowRead,
   after: WindowRead,
+  /** The window at the click point after the click (platform.windowAtPoint), when the platform could say. */
+  atPoint?: { processId: number; hostedProcessId?: number } | null,
+  platform: NodeJS.Platform = process.platform,
 ): string {
   // The bridge deliberately refused to raise a self/host window (agent hub,
   // clawdcursor's own console) sitting over the click point — focus was NOT
@@ -1733,7 +1757,13 @@ export function focusTheftWarning(
       + ` over this coordinate, or resize/move the covering window out of the way.`;
   }
   const activationFailed = activation && activation.activated === false;
-  if (!activationFailed && windowChange(before, after) !== 'other-app') return '';
+  // Another app is in front, and it owns the clicked point: the click activated the app it hit. That is the click working.
+  const frontOwnsPoint = !!atPoint?.processId && ownsPoint(atPoint, after?.processId, after?.hostedProcessId);
+  if (!activationFailed && (windowChange(before, after) !== 'other-app' || frontOwnsPoint)) return '';
+  if (platform === 'darwin' && !activationFailed) {
+    const name = after?.processName || after?.appName || (after?.title ? quoteScreenText(truncateTitle(after.title)) : 'an unknown app');
+    return ` ⚠ another app is now in front: ${name}; check before typing.`;
+  }
   const landed = after?.title ? quoteScreenText(truncateTitle(after.title)) : 'an unknown window';
   return ` ⚠ FOCUS NOT CONFIRMED — the click may have landed on ${landed} instead of your target`
     + ` (the OS kept another window in front, or the point is over a different window). DO NOT type next:`

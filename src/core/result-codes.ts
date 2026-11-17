@@ -97,9 +97,16 @@ const RULES: Rule[] = [
   { code: 'FOREGROUND_CHANGED', outcome: 'refused', test: /an AI assistant — nothing was sent|the app this agent runs in \(.*\) — nothing was sent/i,
     hint: 'the window in front is an AI assistant, not your target; focus your target window first',
     next: { mcp: 'window {"action":"list"}' } },
+  // smart_click: the point is in another app's window, such as a system dialog on top of the target (tools/click-owner.ts).
+  { code: 'FOREGROUND_CHANGED', outcome: 'refused', test: /which is on top of .* — nothing was clicked/i,
+    hint: 'a window of another app is on top of the target at that point, so nothing was clicked; bring the target to the front or close that window',
+    next: { mcp: 'window {"action":"list"}' } },
   { code: 'FOREGROUND_CHANGED', outcome: 'refused', test: /foreground changed: /i,
     hint: 'the window in front is not the one you were working in; nothing was sent: focus your window, then send the SAME call again (no screenshot needed)',
     next: { mcp: 'window {"action":"focus","processName":"<your app>"}' } },
+  { code: 'CLIPBOARD_HELD', outcome: 'refused', test: /^refused: the clipboard holds an image, file or other non-text data/,
+    hint: 'the clipboard holds data that is not text and pasting would overwrite it; nothing was typed',
+    next: PAUSE('Copy or clear the clipboard, or allow overwriting it, then click Resume') },
   { code: 'DANGEROUS_KEY', outcome: 'refused', test: /dangerous key combo/i,
     hint: 'it locks the screen or ends the session, so it is never sent; every other shortcut is allowed', next: PAUSE('Please <do this step> yourself') },
   // The browser tool's only match was in an iframe from another site (an ad, a widget): never acted in unless named (cdp-driver.ts).
@@ -267,7 +274,7 @@ export function classifyResult(text: string, isError: boolean, acting: boolean, 
   // `expect`'s verdict is appended at the very end; `verify` starts its reply; a typing read-back sits in the leading
   // "Typed N chars (…)" before any quoted text; a toggle / select / set writes `Toggled|Selected|Set (read back ✓)` before the
   // quoted element name, which is screen text.
-  if (/ — verified \d+ check\(s\)$/.test(text) || /^VERIFIED:/.test(text) || /^Typed \d+ chars \((?:keys|paste), read back ✓\)/.test(text)
+  if (/ — verified \d+ check\(s\)$/.test(text) || /^VERIFIED:/.test(text) || /^Typed \d+ chars \((?:keys|paste)(?:, clipboard restored)?, read back ✓\)/.test(text)
     || /^(?:Toggled|Selected|Set) \(read back ✓\) "/.test(text)
     || /^Invoked \(read back ✓\) (?:\[[^\]]{1,40}\] )?"/.test(text)) {
     return { outcome: 'confirmed' };

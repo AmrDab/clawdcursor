@@ -220,3 +220,63 @@ describe('the reply names the element acted on, and a partial match is listed, n
     expect(targetOf({ name: 'x', match: 'fuzzy' })).toBeUndefined();
   });
 });
+
+describe('smart_click never clicks in another app', () => {
+  const realPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  beforeEach(() => Object.defineProperty(process, 'platform', { ...realPlatform, value: 'win32' }));
+  afterEach(() => Object.defineProperty(process, 'platform', realPlatform));
+
+  const DIALOG = { processId: 777, title: 'Accessibility Access', processName: 'UserNotificationCenter' };
+  function ctxAt(windowAtPoint: ((x: number, y: number) => Promise<unknown>) | undefined, activeBounds = { x: 2790, y: -1086, width: 1932, height: 1092 }) {
+    const mouseClick = vi.fn(async () => {});
+    const a11y = {
+      getActiveWindow: vi.fn(async () => ({ processId: 3648, processName: 'ugraf', title: 'Designcenter Modeling', bounds: activeBounds })),
+      getWindows: vi.fn(async () => []),
+      invokeElement: vi.fn(async () => ({ success: false, action: 'click', error: 'not found' })),
+      findElement: vi.fn(async () => []),
+      invalidateCache: vi.fn(),
+    };
+    const platform = { getActiveWindow: async () => null, ...(windowAtPoint ? { windowAtPoint: vi.fn(windowAtPoint) } : {}) };
+    const ctx = { ensureInitialized: async () => {}, a11y, desktop: { getDpiRatio: () => 2.25, mouseClick }, cdp: { isConnected: vi.fn(async () => false) }, platform, uiMaps: undefined } as never;
+    return { ctx, mouseClick, platform };
+  }
+
+  it('another pid on top of the point: nothing is clicked, a refusal that names the window, and the result code', async () => {
+    const { ctx, mouseClick, platform } = ctxAt(async () => DIALOG);
+    const r = await smartClick.handler({ target: 'New', processId: 3648, timeout: 1500 }, ctx);
+    expect(mouseClick).not.toHaveBeenCalled();
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/^refused: the point "New" matched is in "Accessibility Access" \(UserNotificationCenter, pid 777\), which is on top of .*— nothing was clicked\. Bring .* to the front or close the dialog, then try again/);
+    expect((platform as { windowAtPoint: ReturnType<typeof vi.fn> }).windowAtPoint).toHaveBeenCalledWith(2848, -1003);
+    expect(classifyResult(r.text, true, true, 'mcp')).toMatchObject({ outcome: 'refused', code: 'FOREGROUND_CHANGED' });
+  });
+
+  it('the target\'s own window at the point: clicked', async () => {
+    const { ctx, mouseClick } = ctxAt(async () => ({ processId: 3648, title: 'Designcenter Modeling', processName: 'ugraf' }));
+    await smartClick.handler({ target: 'New', processId: 3648, timeout: 1500 }, ctx);
+    expect(mouseClick).toHaveBeenCalledWith(2848, -1003);
+  });
+
+  it('unknown (null, a throw, or no windowAtPoint at all): clicked, it fails open', async () => {
+    for (const probe of [async () => null, async () => { throw new Error('boom'); }, undefined]) {
+      const { ctx, mouseClick } = ctxAt(probe);
+      await smartClick.handler({ target: 'New', processId: 3648, timeout: 1500 }, ctx);
+      expect(mouseClick).toHaveBeenCalledWith(2848, -1003);
+    }
+  });
+
+  it('no processId, the match outside the focused window and another app there: refused BEFORE the click, not warned after', async () => {
+    const { ctx, mouseClick } = ctxAt(async () => DIALOG, { x: 0, y: 0, width: 800, height: 600 });
+    const r = await smartClick.handler({ target: 'New', timeout: 1500 }, ctx);
+    expect(mouseClick).not.toHaveBeenCalled();
+    expect(r.text).toMatch(/^refused: .*pid 777\)/);
+  });
+
+  it('the a11y-bounds click is checked too', async () => {
+    const { ctx, mouseClick } = ctxAt(async () => DIALOG);
+    (ctx as any).a11y.invokeElement = vi.fn(async () => ({ success: false, clickPoint: { x: 100, y: 200 } }));
+    const r = await smartClick.handler({ target: 'New', processId: 3648, timeout: 1500 }, ctx);
+    expect(mouseClick).not.toHaveBeenCalled();
+    expect(r.text).toMatch(/^refused: the point "New" matched is in/);
+  });
+});

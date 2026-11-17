@@ -99,6 +99,25 @@ export function typesAsKeys(text: string): boolean {
   return text.length <= TYPE_KEYS_MAX && /^[\x20-\x7e]*$/.test(text);
 }
 
+/** When the clipboard holds something other than text, text of at most this many characters (about 20 s) is typed as keys. */
+export const NON_TEXT_KEYS_MAX = 1000;
+
+/**
+ * How text that is too long (or too unusual) to type as keys gets in: 'paste' (verified, then the old clipboard put back),
+ * 'keys' or 'refuse'. A clipboard holding non-text data cannot be put back, so it is never pasted over: the text is typed
+ * if that is safe (printable ASCII, no line break that would be a Return, short, and typing is private), else refused.
+ */
+export function pasteChoice(text: string, o: { nonTextClipboard: boolean; privateTyping: boolean }): 'paste' | 'keys' | 'refuse' {
+  if (!o.nonTextClipboard) return 'paste';
+  return o.privateTyping && text.length <= NON_TEXT_KEYS_MAX && /^[\x20-\x7e]*$/.test(text) ? 'keys' : 'refuse';
+}
+
+/** The refusal for a paste that would overwrite a clipboard of non-text data and cannot be typed instead. */
+export const CLIPBOARD_HELD_REFUSAL =
+  'refused: the clipboard holds an image, file or other non-text data that pasting would overwrite, and this text cannot be typed '
+  + `as keys (it has line breaks or characters beyond printable ASCII, or is over ${NON_TEXT_KEYS_MAX} characters, or typing here is not private). `
+  + 'Nothing was typed. Copy or clear the clipboard first, or ask the user to allow overwriting it.';
+
 /**
  * 'match': the field shows the text. 'suffix': it shows the text with more after it — an inline autocomplete suggestion
  * (an address bar), the case where Return would go somewhere else — or, for a replaced field, in another format.

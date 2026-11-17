@@ -1589,3 +1589,16 @@ describe('pageText: the document text with no keystrokes (copy_all_text without 
     expect(calls).toHaveLength(0);
   });
 });
+
+describe('windowAt (the window a user sees at a point)', () => {
+  it('sends the point to the helper and maps the owner', async () => {
+    const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, window: { processId: 91, processName: 'UserNotificationCenter', title: 'Accessibility Access' } }) });
+    await expect(ax.windowAt!(100.4, 200.6)).resolves.toEqual({ processId: 91, processName: 'UserNotificationCenter', title: 'Accessibility Access' });
+    expect(calls[0].args.slice(0, 5)).toEqual(['window-at', '--x', '100', '--y', '201']);
+  });
+
+  it('nothing there, or no helper: null (unknown)', async () => {
+    await expect(harness({ reply: JSON.stringify({ ok: true, window: null }) }).ax.windowAt!(1, 1)).resolves.toBeNull();
+    await expect(harness({ helper: null }).ax.windowAt!(1, 1)).resolves.toBeNull();
+  });
+});

@@ -542,6 +542,11 @@ export interface MacAx {
   /** The frontmost app per NSWorkspace, plus whether the screen is locked. */
   frontmost(): Promise<FrontmostInfo>;
   /**
+   * The window a user SEES at a screen point (points, top-left origin — what a click takes): front to back, modal and alert
+   * layers included. Null when nothing is there or the helper is not available (unknown).
+   */
+  windowAt?(x: number, y: number): Promise<{ processId: number; title?: string; processName?: string } | null>;
+  /**
    * A running app by (display) name — its pid, launch state and readable windows —
    * straight from NSWorkspace, so a launch can be confirmed without diffing the
    * (slow, fallible) window list. Null = not running. A timeout throws: the
@@ -803,6 +808,14 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       if (reply) return { locked: reply.locked === true, app: reply.frontmost ? toFrontmostApp(reply.frontmost) : null };
       // No helper: LaunchServices answers in a few ms without any permission.
       return lsappinfoFrontmost(deps.exec);
+    },
+
+    async windowAt(x: number, y: number) {
+      const reply = await viaHelper(['window-at', '--x', String(Math.round(x)), '--y', String(Math.round(y)), '--timeout-ms', String(HELPER_LIST_DEADLINE_MS)],
+        HELPER_LIST_DEADLINE_MS + HELPER_GRACE_MS, 'window lookup', { waitForBuild: false });
+      const w = reply?.window;
+      if (!w || typeof w.processId !== 'number') return null;
+      return { processId: w.processId, title: typeof w.title === 'string' ? w.title : undefined, processName: typeof w.processName === 'string' ? w.processName : undefined };
     },
 
     async focusWindow(pid: number, title?: string): Promise<FocusedWindow | null> {
