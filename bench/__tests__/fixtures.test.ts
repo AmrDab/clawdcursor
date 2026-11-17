@@ -229,6 +229,13 @@ describe('the native fixtures agree across OSes', () => {
     expect(src).toContain('"raw"');
   });
 
+  // Mac run 2026-11-17: a set_value on Email and opening Priority were scored false successes though both worked.
+  it('the macOS fixture sees a value set through accessibility and the Priority menu opening', () => {
+    expect(sources.macos).toContain('func pollFields()');
+    expect(sources.macos).toContain('NSPopUpButton.willPopUpNotification');
+    expect(sources.macos).toContain('rec.event("open", "priority")');
+  });
+
   it('the Linux fixture names its process, so no generic "python3" is allowed by the privacy guard', () => {
     expect(sources.linux).toContain('name_process("BenchFixture")');
   });

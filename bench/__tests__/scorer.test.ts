@@ -163,6 +163,7 @@ describe('expectsEffect / countFalseOk', () => {
     expect(expectsEffect(u('computer', 'type', 'act-other'))).toBe(true);
     expect(expectsEffect(u('browser', 'click', 'act-other'))).toBe(true);
     expect(expectsEffect(u('computer', 'hover', 'act-coords'))).toBe(false);
+    expect(expectsEffect(u('computer', 'mouse_move', 'act-coords'))).toBe(false);
     expect(expectsEffect(u('computer', 'wait', 'act-other'))).toBe(false);
     expect(expectsEffect(u('window', 'focus', 'act-other'))).toBe(false);
     expect(expectsEffect(u('accessibility', 'read_tree', 'blind'))).toBe(false);
