@@ -41,6 +41,9 @@ All notable changes to Clawd Cursor will be documented in this file.
   task is never declined for lack of one. The blanket "ask before email, banking, messaging or password managers" rule
   is gone (the user's request is the permission); asking first before an irreversible action the user did not ask for
   stays.
+- **The skill says what to do when a task is beyond the agent:** hand it to a stronger model from the same provider
+  (a Sonnet or Opus subagent) or raise the reasoning effort, instead of giving up or asking the user; a sign-in or
+  a step only the user can take is still `pause_for_user`. Easy desktop work can run on a cheaper subagent.
 - **The HTTP daemon answers only to `Host: 127.0.0.1:<port>` or `localhost:<port>`**; any other Host header gets 403.
   A page whose DNS name was rebound to 127.0.0.1 could load the dashboard and read the pause message. An SSH tunnel to
   the daemon must use the daemon's own port on the local end (`ssh -L 3847:127.0.0.1:3847 ...`).

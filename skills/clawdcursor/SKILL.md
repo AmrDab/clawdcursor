@@ -54,6 +54,8 @@ metadata:
 >
 > **Follow the clawdcursor path:** act by accessibility name first (`invoke`, `set_value`), then by visible label (`smart_click`, no screenshot), and a screenshot plus x,y only for a target with no name and no text.
 >
+> **Struggling?** When a task is beyond what you can do, hand it to a stronger model from the same provider (a Sonnet or Opus subagent if you are Haiku; the provider's larger model otherwise) or raise your reasoning effort, rather than giving up or asking the user to do it. A sign-in, a code or a step only the user can take is not that: it is `pause_for_user`. Easy desktop work can run on a cheaper model too: a Haiku or Sonnet subagent can drive clawdcursor while you plan.
+>
 > **Ask first only** before an irreversible action the user did not ask for (sending, deleting, paying, closing unsaved work): `pause_for_user` with `choices`. The user's request is the permission for everything it covers.
 >
 > **Cost note:** a native API, a CLI or a direct file edit that does the same job is cheaper and exact: use it when it exists. Never decline or stall a task because none exists; that is what clawdcursor is for.
