@@ -32,7 +32,11 @@ const resultsDir = path.join(here, 'results');
 const args = new Set(process.argv.slice(2));
 const DRY = args.has('--dry-run') || args.has('-DryRun');
 const BANNER = !args.has('--no-banner');
-const HARD_TIMEOUT_MS = 90_000;
+// --with-you: the owner keeps working in their own window the whole time. No window is put in front for them; a steal is
+// any sample with one of the agent's windows (or the server's) in front. The cursor is theirs to move, so it is not judged.
+const WITH_YOU = args.has('--with-you');
+const TYPE_TEXT = 'The agent is typing this in its own window while you keep working in yours.';
+const HARD_TIMEOUT_MS = WITH_YOU ? 150_000 : 90_000;
 const INTERVAL_MS = 50;
 const IDLE_WAIT_MS = 1500;      // after ClawdUser is put back in front: the plan's R2 burst waits for ~1 s of user idle
 const SETTLE_MS = 400;          // after a tool call returns: a late give-back or window move still counts as that step
@@ -191,8 +195,9 @@ function analyse(t0, t1, ref) {
     : s.pid === R.notepad?.pid ? 'Notepad' : s.pid === transport?.pid ? 'server' : `other(pid ${s.pid}, ${hex(s.fg)})`;
   const steals = [];
   let cur = null;
+  const agents = new Set([R.target.pid, R.notepad?.pid, transport?.pid].filter(Boolean));
   for (const s of w) {
-    if (s.fg !== R.user.hwnd) {
+    if (WITH_YOU ? agents.has(s.pid) : s.fg !== R.user.hwnd) {
       const name = who(s);
       if (cur && cur.who === name) { cur.last = s.t; cur.n++; }
       else { cur = { who: name, first: s.t, last: s.t, n: 1 }; steals.push(cur); }
@@ -216,15 +221,20 @@ async function run() {
   if (R.notepad) owned.add(R.notepad.pid);
   if (st.user.text !== USER_TEXT) throw new Error(`setup: ClawdUser text is "${st.user.text}"`);
 
-  const fr = await helper.send('front');
-  if (!fr.front) throw new Error('cannot make ClawdUser the foreground window (Windows foreground lock); run from an interactive session');
+  if (WITH_YOU) {
+    log('Now click into a window of your own and keep working there (typing, clicking). Starting in 8 s.');
+    await sleep(8000);
+  } else {
+    const fr = await helper.send('front');
+    if (!fr.front) throw new Error('cannot make ClawdUser the foreground window (Windows foreground lock); run from an interactive session');
+  }
   sampler = startSampler();
   await sampler.readyP;
   await sleep(400);
   const ref = samples.at(-1);   // where the cursor is before anything starts
   if (!ref) throw new Error('the sampler produced no samples');
   log(`setup ok: ClawdUser pid ${R.user.pid}, ClawdTarget pid ${R.target.pid}, Notepad ${R.notepad ? 'pid ' + R.notepad.pid : 'SKIPPED'}; cursor at ${ref.x},${ref.y}`);
-  log('Hands off the keyboard and mouse now.');
+  log(WITH_YOU ? 'Keep working in your own window.' : 'Hands off the keyboard and mouse now.');
 
   // server start (the banner / overlay appear here)
   const tStart0 = Date.now();
@@ -247,10 +257,12 @@ async function run() {
     rows.push(row);
     if (step.target === 'notepad' && !R.notepad) { Object.assign(row, { skipped: 'no usable new Notepad (see notes)' }); continue; }
     // setup, not measured: ClawdUser back in front, then idle long enough for an R2 burst to be allowed
-    const before = await helper.send('read');
-    row.userWasFront = before.fg === R.user.hwnd;
-    if (!row.userWasFront) { const f = await helper.send('front'); row.userRestoredBeforeStep = f.front; }
-    await sleep(IDLE_WAIT_MS);
+    if (!WITH_YOU) {
+      const before = await helper.send('read');
+      row.userWasFront = before.fg === R.user.hwnd;
+      if (!row.userWasFront) { const f = await helper.send('front'); row.userRestoredBeforeStep = f.front; }
+      await sleep(IDLE_WAIT_MS);
+    }
 
     const t0 = Date.now();
     let r;
@@ -270,8 +282,36 @@ async function run() {
       ...analyse(t0, tEnd, ref),
     });
   }
+  if (WITH_YOU) {
+    // (e) the agent types a sentence word by word into ClawdNote while the owner works: one set_value per word.
+    const step = { target: 'target', kind: 'set_value', name: 'ClawdNote' };
+    const row = { type: 'step', step: 'e-type-while-you-work', label: '(e) type a sentence word by word', expect: 'R1 every word' };
+    rows.push(row);
+    const words = TYPE_TEXT.split(' ');
+    const t0 = Date.now();
+    const rungs = new Map();
+    let failed = 0;
+    for (let i = 1; i <= words.length; i++) {
+      let r;
+      try { r = await callTool({ ...step, value: words.slice(0, i).join(' ') }); } catch (e) { r = { isError: true, text: 'CALL ERROR: ' + e.message }; }
+      if (r.isError) failed++;
+      const n = routeNote(r.text) || '(no route note)';
+      rungs.set(n, (rungs.get(n) ?? 0) + 1);
+      await sleep(250);
+    }
+    await sleep(SETTLE_MS);
+    const after = await helper.send('read');
+    const tEnd = Date.now();
+    const got = norm(after.f2);
+    Object.assign(row, {
+      tool: { name: 'accessibility', arguments: { action: 'set_value', name: 'ClawdNote', calls: words.length } },
+      success: failed === 0, ms: tEnd - t0, rung: [...rungs].map(([n, c]) => `${c}x ${n}`).join(' | '),
+      effectWant: TYPE_TEXT, effectGot: got.slice(0, 200), effectVerified: got === TYPE_TEXT, userTextUnchanged: after.userText === USER_TEXT,
+      ...analyse(t0, tEnd, ref),
+    });
+  }
   const tLast = Date.now();
-  rows.push({ type: 'step', step: 'all-tool-calls', label: 'all four steps together', ...analyse(tFirst, tLast, ref) });
+  rows.push({ type: 'step', step: 'all-tool-calls', label: 'all steps together', ...analyse(tFirst, tLast, ref) });
 }
 
 // ---------------------------------------------------------------- output
@@ -279,7 +319,7 @@ function table() {
   const cols = ['step', 'success', 'rung note', 'effect verified', 'focus steals', 'cursor moved'];
   const body = rows.filter(r => r.type === 'step').map(r => {
     const steals = r.steals?.length ? `${r.steals.length}: ` + r.steals.map(s => `${s.who} ${s.durMs} ms`).join(', ') : '0';
-    const cursor = r.cursorMovedSamples ? `YES (${r.cursorMovedSamples} samples, max ${r.cursorMaxDistPx} px)` : (r.samples ? 'no' : '-');
+    const cursor = WITH_YOU ? 'yours' : r.cursorMovedSamples ?`YES (${r.cursorMovedSamples} samples, max ${r.cursorMaxDistPx} px)` : (r.samples ? 'no' : '-');
     if (r.skipped) return [r.label, 'skipped', r.skipped, '-', '-', '-'];
     if (r.tool === undefined) return [r.label, '-', '-', '-', steals, cursor];
     const eff = r.effectVerified ? 'yes' : `NO (got "${r.effectGot}")`;
