@@ -81,9 +81,11 @@ This is the same ladder as Plan (f) step 4, with D3 promoted from a spike to run
   no cursor.
 - **R1, input addressed to the window (new):** keys, text and clicks delivered to the agent's window without
   focusing it. Per OS:
-  - **Windows:** WM_CHAR / WM_KEYDOWN / WM_SETTEXT and WM_LBUTTON* posted to the target HWND or child control.
+  - **Windows:** WM_CHAR / WM_SETTEXT and WM_LBUTTON* / BM_CLICK posted to the target HWND or child control.
     SendMessageTimeout where a reply matters. Classic Win32, WinForms and WPF edit controls accept these. Chromium,
-    UWP and DirectInput apps mostly ignore them.
+    UWP and DirectInput apps mostly ignore them. A posted WM_KEYDOWN does NOT update GetKeyState/GetAsyncKeyState,
+    so a shifted character or a modifier shortcut (Ctrl+S) is not satisfied by posting: text goes as WM_CHAR, and a
+    real shortcut needs an R2 burst. (Confirmed by the probe: "WM_KEY partial, no Shift".)
   - **macOS:** CGEventPostToPid for keyboard events, which most Cocoa apps accept in the background. Background mouse
     clicks are unreliable, so clicks stay on R0 (AXPress) or go to R2. AX setValue / AXSelectedText for text.
   - **Linux X11:** AT-SPI EditableText insert for text (R0). XSendEvent through `xdotool --window` for keys; many
