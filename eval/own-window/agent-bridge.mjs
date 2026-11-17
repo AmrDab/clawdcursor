@@ -2,7 +2,7 @@
 // POST /call {"name":"accessibility","arguments":{...}} -> the tool result text.  GET /tools -> names + descriptions.
 import fs from 'fs'; import path from 'path'; import http from 'http';
 const dir = process.argv[2];
-const root = new URL('../..', import.meta.url).pathname.replace(/^/([A-Za-z]:)/, '$1');
+const root = new URL('../..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const { Client } = await import(`file:///${root}/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js`);
 const { StdioClientTransport } = await import(`file:///${root}/node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js`);
 const s = JSON.parse(fs.readFileSync(path.join(dir, 'setup.json'), 'utf8'));
