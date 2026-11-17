@@ -1,4 +1,7 @@
-# Plan (h): the agent works in its own window — DRAFT, waiting for the owner's go
+# Plan (h): the agent works in its own window — GO 2026-11-16
+
+Owner 2026-11-16: "yes proceed, do all, and yes with the ghost cursor". D1 = (a): bursts are allowed when the user is
+idle, counted and shown. D2 = yes. D3 = probe now, the rest after Plan (f) steps 1–3.
 
 Owner, 2026-11-16: "the next phase of clawdcursor … still give clawdcursor's agent the capability of doing everything,
 it just doesn't have to take full control of the PC and leave me doing nothing. The agent should be able to call me if
