@@ -319,21 +319,22 @@ function Enable-Drag($c) {
     $c.Add_MouseUp({ $script:drag = $null })
 }
 
-# A cue when the pill appears: the outline flashes amber three times over about 3.6 s, then stays as it was. Never a
-# loop. A single 1.5 s fade went unnoticed by the owner (2026-11-17).
+# A cue when the pill appears: the outline is solid amber for 3 s, then fades back over 1 s. Never a loop. Timed by the
+# clock, not by ticks: this timer ticks unevenly, and a 1.5 s fade and then three short flashes both went unnoticed by
+# the owner (2026-11-17).
 $script:edgeW = 1
 function Start-Pulse {
     $script:base = $script:edge; $script:amber = [System.Drawing.Color]::FromArgb(245, 158, 11)
-    $script:pulseN = 0
+    $script:pulseAt = [Diagnostics.Stopwatch]::StartNew()
     $script:pulse = New-Object System.Windows.Forms.Timer
     $script:pulse.Interval = 60
     $script:pulse.Add_Tick({
-        $script:pulseN++
-        $k = if ($script:pulseN -lt 60) { 0.5 * (1 - [Math]::Cos(2 * [Math]::PI * $script:pulseN / 20.0)) } else { 0.0 }
-        $script:edgeW = if ($script:pulseN -lt 60) { 4 } else { 1 }
+        $ms = $script:pulseAt.ElapsedMilliseconds
+        $k = if ($ms -lt 3000) { 1.0 } else { [Math]::Max(0.0, 1 - ($ms - 3000) / 1000.0) }
+        $script:edgeW = if ($k -gt 0) { 4 } else { 1 }
         $script:edge = [System.Drawing.Color]::FromArgb([int]($script:base.R + ($script:amber.R - $script:base.R) * $k), [int]($script:base.G + ($script:amber.G - $script:base.G) * $k), [int]($script:base.B + ($script:amber.B - $script:base.B) * $k))
         $form.Invalidate()
-        if ($script:pulseN -ge 60) { $script:pulse.Stop() }
+        if ($k -le 0) { $script:pulse.Stop() }
     })
     $script:pulse.Start()
 }

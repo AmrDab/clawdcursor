@@ -377,7 +377,7 @@ describe('no full-screen glow', () => {
     expect(swift).toMatch(/line == "TARGET" \|\| line\.hasPrefix\("TARGET "\)/);
   });
 
-  it('the Windows pill stays in front, can be dragged, and flashes three times when it appears', () => {
+  it('the Windows pill stays in front, can be dragged, and shows an amber outline when it appears', () => {
     const ps = read('scripts', 'banner.ps1');
     // In front: re-asserted on the existing timers, only when a visible window is above it, never activating.
     expect(ps).toContain('SetWindowPos(Handle, (IntPtr)(-1), 0, 0, 0, 0, 0x13)');   // HWND_TOPMOST, NOACTIVATE|NOMOVE|NOSIZE
@@ -389,9 +389,9 @@ describe('no full-screen glow', () => {
     expect(ps).toContain('foreach ($c in @($form, $dot, $title, $msg)) { Enable-Drag $c }');
     expect(ps).not.toMatch(/Enable-Drag \$(stop|yes|no|send|reply)/);
     expect(ps).toContain('if ($script:userPos) { $at = Get-OnScreen $script:userPos $f }');
-    // Appearing: three amber flashes of the outline, then it stops: not a loop.
+    // Appearing: solid amber outline for 3 s, then a fade: not a loop.
     expect(ps).toContain('function Start-Pulse');
-    expect(ps).toContain('if ($script:pulseN -ge 60) { $script:pulse.Stop() }');
+    expect(ps).toContain('if ($k -le 0) { $script:pulse.Stop() }');
   });
 
   it('the Windows outline is click-through, never activates, and stays out of captures', () => {
