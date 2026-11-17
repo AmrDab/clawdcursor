@@ -421,7 +421,7 @@ clawdcursor task "<task>"   Developer add-on: a test agent with clawdcursor as i
 clawdcursor logs            Developer add-on: the logs, readably (-f, --session, --tool, --errors, --since, --run)
 ```
 
-`--no-banner` (or `CLAWD_NO_BANNER=1`) on `mcp` and `agent` turns the on-screen pill and outline off.
+`--no-banner` (or `CLAWD_NO_BANNER=1`) on `mcp` and `agent` turns the on-screen pill and outline off. On a Mac the pill and the pause card sit at the top centre, which a notch can cover: `CLAWD_BANNER_POS=bottom` puts them at the bottom centre instead (`top` is the default).
 
 ### Testing clawdcursor on its own
 
