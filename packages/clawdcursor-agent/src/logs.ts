@@ -7,7 +7,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { findRun, findSession, readRun, sessionEndedAt, sessionsDir, type SessionInfo } from './runlog';
-import { claudeEvents, codexEvents, elapsed, paint, renderEvent, type Paint, type TraceEvent } from './trace';
+import { claudeEvents, codexEvents, elapsed, paint, renderEvent, usageLine, type Paint, type TraceEvent } from './trace';
 import type { CoreContext } from './task';
 
 export interface LogsOptions { follow?: boolean; session?: string; tool?: string; errors?: boolean; since?: string; run?: string }
@@ -257,6 +257,7 @@ function showRun(id: string, ctx: CoreContext, p: Paint, out: (l: string) => voi
   out(`${p.bold('run')} ${path.basename(file, '.jsonl')} · ${head?.runner ?? '?'}${head?.model ? ` · ${head.model}` : ''} · ${head?.surface ?? ''} tools`);
   if (head?.task) out(p.dim(`task: ${head.task}`));
   if (head?.command) out(p.dim(`command: ${head.command}`));
+  if (end?.usage) out(p.dim(usageLine(end.usage)));
 
   const rows: Array<{ t: number; line: string }> = [];
   const who = head?.runner === 'claude' || head?.runner === 'codex' ? head.runner : 'model';

@@ -86,6 +86,8 @@ export interface LogCall {
 /** A call as the adapter saw the model make it: `sig` is a hash of tool + arguments (the session log has no arguments). */
 export interface CallSig { tool: string; sig: string }
 
+import type { Usage } from '../../packages/clawdcursor-agent/src/trace';
+
 export interface AgentRun {
   /** The agent's last message. */
   finalText: string;
@@ -99,4 +101,6 @@ export interface AgentRun {
   serverUnreachable?: string;
   sigs: CallSig[];
   seconds: number;
+  /** What the host reported using (tokens, and its own cost when it gives one). Absent when it reported nothing. */
+  usage?: Usage;
 }

@@ -3,7 +3,7 @@
  *   {type:"run", id, t, task, runner, model, command, coreVersion, surface}   first line
  *   {type:"event", t, src:"claude"|"codex"|"api", data}                       every event the agent printed (images left out)
  *   {type:"stderr", t, text}                                                   what it wrote to stderr
- *   {type:"end", t, verdict, exitCode, reason?, session?, ms}                 last line; `session` is the clawdcursor session id
+ *   {type:"end", t, verdict, exitCode, reason?, usage?, session?, ms}                 last line; `session` is the clawdcursor session id
  * Local only, readable by the owner only, the last 50 runs kept.
  */
 import * as fs from 'fs';

@@ -4,6 +4,12 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **`clawdcursor task` reports tokens (and cost when the runner gives it).** A run ends with one more line, for example
+  `tokens: 146 in · 24,343 out · 5,123,771 cached · $1.11`, and the same numbers are in the run log's `end` record and
+  at the top of `clawdcursor logs --run`. Claude Code reports tokens and a cost; Codex and the API runners report
+  tokens only (the cost is left out, not guessed). A run that reported nothing prints no line.
+
 ### Fixed
 - **`accessibility read_tree` / `read_screen` on the browser clawdcursor drives over CDP points at the browser tools**
   (#235). The hint after a thin read (and after a full read of that browser) now leads with `browser page_context` /
@@ -34,6 +40,10 @@ All notable changes to Clawd Cursor will be documented in this file.
   `start` / `serve` deprecation warnings no longer say "Removed in v0.10"; both still work as aliases of `agent`.
 
 ### Changed
+- **The API runner caches its prompt and defaults to Claude Haiku 5.5.** `--with anthropic` marks its system prompt, tool
+  list and newest message for the API's prompt cache, so a long run re-reads its first turns at a fraction of the
+  input price. Without `--model` (or a model set by `doctor --setup`) it now starts on the cheapest model,
+  `claude-haiku-5-5`, instead of `claude-opus-5-5`.
 - **The HTTP daemon answers only to `Host: 127.0.0.1:<port>` or `localhost:<port>`**; any other Host header gets 403.
   A page whose DNS name was rebound to 127.0.0.1 could load the dashboard and read the pause message. An SSH tunnel to
   the daemon must use the daemon's own port on the local end (`ssh -L 3847:127.0.0.1:3847 ...`).

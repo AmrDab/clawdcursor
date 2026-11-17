@@ -3,6 +3,7 @@
  * last message. No model judges anything.
  */
 import { evaluate } from './tasks';
+import { costOf } from './prices';
 import { countLoops, loopKeys } from './rules';
 import type { AgentRun, BenchOs, FixtureState, LogCall, TaskSpec } from './types';
 
@@ -58,6 +59,10 @@ export interface Score {
   /** How many runs this row stands for (--repeats), and how many of them were done. */
   runs: number; successes: number;
   seconds: number;
+  /** What the agent host reported using; null when it reported nothing. `in` is the input not read from the cache. */
+  tokens: { in: number; out: number; cacheRead: number } | null;
+  /** The run's cost: the host's own figure when it gives one, else tokens x the table in prices.ts; null when neither. */
+  usd: number | null;
   /** the watchdog rule that stopped the agent */
   killed?: string;
   /**
@@ -161,6 +166,8 @@ export function score(r: RunRecord): Score {
     loops,
     runs: 1, successes: success ? 1 : 0,
     seconds: Math.round(r.agent.seconds),
+    tokens: r.agent.usage ? { in: r.agent.usage.in, out: r.agent.usage.out, cacheRead: r.agent.usage.cacheRead ?? 0 } : null,
+    usd: r.agent.usage ? costOf(r.model, r.agent.usage) : null,
     ...(r.agent.killed ? { killed: r.agent.killed.rule } : {}),
     gate: { pass: true, failures: [] },
   };
@@ -223,6 +230,8 @@ export function aggregate(runs: Score[]): Score {
     falseDone: runs.some(r => r.falseDone),
     reloaded: runs.some(r => r.reloaded),
     loops: worst('loops'), seconds: med('seconds'),
+    tokens: runs.every(r => r.tokens) ? { in: median(runs.map(r => r.tokens!.in)), out: median(runs.map(r => r.tokens!.out)), cacheRead: median(runs.map(r => r.tokens!.cacheRead)) } : null,
+    usd: runs.every(r => r.usd !== null) ? median(runs.map(r => r.usd!)) : null,
     runs: runs.length, successes,
     gate: { pass: true, failures: [] },
   };
@@ -290,6 +299,8 @@ export function compare(now: Report, base: Baseline): Delta[] {
   });
 }
 
+const tokensCell = (s: Score) => s.tokens ? `${s.tokens.in} / ${s.tokens.out} / ${s.tokens.cacheRead}` : '-';
+const usdCell = (n: number | null) => n === null ? '-' : `$${n.toFixed(n < 0.1 ? 3 : 2)}`;
 const pct = (n: number | null) => n === null ? '-' : `${Math.round(n * 100)}%`;
 const signed = (n: number) => n > 0 ? `+${n}` : String(n);
 
@@ -311,15 +322,15 @@ export function renderMarkdown(r: Report, deltas?: Delta[]): string {
     const gated = rows.filter(s => !s.manual && !s.agentError);
     out.push(`## ${model}`, '');
     out.push(`Done ${gated.filter(s => s.success).length}/${gated.length}, calls ${sum(rows, 'calls')} (oracle ${sum(rows, 'oracleCalls')}), `
-      + `screenshots ${sum(rows, 'screenshots')} (oracle ${sum(rows, 'oracleScreenshots')}), false successes ${sum(rows, 'falseSuccesses')}, loops ${sum(rows, 'loops')}.`, '');
-    out.push('| Task | Type | Guards | Done | Calls (oracle) | Trips | Shots (oracle) | Shots / oracle | By name | By coords | False ok | Loops | Time | Gate |');
-    out.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+      + `screenshots ${sum(rows, 'screenshots')} (oracle ${sum(rows, 'oracleScreenshots')}), false successes ${sum(rows, 'falseSuccesses')}, loops ${sum(rows, 'loops')}${totalsOf(rows)}.`, '');
+    out.push('| Task | Type | Guards | Done | Calls (oracle) | Trips | Shots (oracle) | Shots / oracle | By name | By coords | False ok | Loops | Time | Tokens (in / out / cached) | $ | Gate |');
+    out.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
     for (const s of rows) {
       const done = s.agentError ? 'agent error' : s.manual ? 'manual' : s.runs > 1 ? `${s.successes}/${s.runs}` : s.success ? 'yes' : 'NO';
       const gate = s.agentError ? `- (agent error: ${s.agentError.replace(/\|/g, '/')})` : s.manual ? '-' : s.gate.pass ? 'pass' : `FAIL: ${s.gate.failures.join('; ')}`;
       out.push(`| ${s.task} | ${s.archetype} | ${s.mechanisms.join(' ')} | ${done} | ${s.calls} (${s.oracleCalls}) | ${s.roundTrips} | ${s.screenshots} (${s.oracleScreenshots}) | `
         + `${s.screenshotRatio ?? '-'} | ${pct(s.byName)} | ${pct(s.byCoords)} | ${s.falseSuccesses} | ${s.loops} | ${s.seconds}s | `
-        + `${gate}${s.killed ? ` (stopped: ${s.killed})` : ''} |`);
+        + `${tokensCell(s)} | ${usdCell(s.usd)} | ${gate}${s.killed ? ` (stopped: ${s.killed})` : ''} |`);
     }
     out.push('');
   }
@@ -336,6 +347,15 @@ export function renderMarkdown(r: Report, deltas?: Delta[]): string {
     out.push('');
   }
   return out.join('\n');
+}
+
+/** ", tokens N in / N out / N cached, $X" for the rows that reported usage; empty when none did. */
+function totalsOf(rows: Score[]): string {
+  const t = rows.filter(s => s.tokens);
+  if (!t.length) return '';
+  const n = (f: (s: Score) => number) => t.reduce((a, s) => a + f(s), 0);
+  const usd = rows.filter(s => s.usd !== null).reduce((a, s) => a + s.usd!, 0);
+  return `, tokens ${n(s => s.tokens!.in)} in / ${n(s => s.tokens!.out)} out / ${n(s => s.tokens!.cacheRead)} cached${rows.some(s => s.usd !== null) ? `, ${usdCell(usd)}` : ''}`;
 }
 
 function sum(rows: Score[], key: 'calls' | 'oracleCalls' | 'screenshots' | 'oracleScreenshots' | 'falseSuccesses' | 'loops'): number {
