@@ -76,11 +76,18 @@ describe('smart_type: did the focus stay on the page?', () => {
     expect(focusStayedOnPage({ controlType: 'WebArea', name: 'Bench Reading' }, 'Answer')).toBe('Bench Reading');
     expect(focusStayedOnPage({ controlType: 'AXWebArea', name: 'Bench Reading' }, 'Answer')).toBe('Bench Reading');
   });
+  // Mac, 2026-11-17: `focused` after the old smart_type read {"name":"Smart Type Check","controlType":"Document"}.
+  it('macOS reports the page as "Document": a page there, not elsewhere', () => {
+    expect(focusStayedOnPage({ controlType: 'Document', name: 'Smart Type Check' }, 'Answer', 'darwin')).toBe('Smart Type Check');
+    expect(focusStayedOnPage({ controlType: 'Document', name: 'Answer form' }, 'Answer', 'darwin')).toBeNull();
+    expect(focusStayedOnPage({ controlType: 'Edit', name: 'Smart Type Check' }, 'Answer', 'darwin')).toBeNull();
+  });
   it('the field, a page named like the target, a nameless page or a document: no', () => {
     expect(focusStayedOnPage({ controlType: 'TextField', name: 'Answer' }, 'Answer')).toBeNull();
     expect(focusStayedOnPage({ controlType: 'WebArea', name: 'Answer form' }, 'Answer')).toBeNull();
     expect(focusStayedOnPage({ controlType: 'WebArea', name: '' }, 'Answer')).toBeNull();
     expect(focusStayedOnPage({ controlType: 'Document', name: 'Text editor' }, 'Body')).toBeNull();
+    expect(focusStayedOnPage({ controlType: 'Document', name: 'Text editor' }, 'Body', 'win32')).toBeNull();
     expect(focusStayedOnPage(null, 'Answer')).toBeNull();
   });
 });
