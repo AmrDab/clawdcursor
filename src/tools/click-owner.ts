@@ -40,5 +40,5 @@ export async function foreignWindowRefusal(
   const target = targetName || `process ${targetPid}`;
   const what = describeWindowAt(at);
   return `refused: the point ${quoteScreenText(label)} matched is in ${what}, which is on top of ${target} — nothing was clicked. `
-    + `Bring ${target} to the front or close the dialog, then try again`;
+    + `Bring ${target} to the front (or close the window on top of it), then try again`;
 }

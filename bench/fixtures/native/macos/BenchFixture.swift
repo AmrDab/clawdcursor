@@ -102,6 +102,15 @@ final class DialogController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         content.addSubview(makeButton("OK", NSRect(x: 220, y: 16, width: 90, height: 30), self, #selector(mainOk)))
         content.addSubview(makeButton("Cancel", NSRect(x: 314, y: 16, width: 90, height: 30), self, #selector(mainCancel)))
 
+        // A value set through accessibility on a field that is not being edited changes it without controlTextDidChange
+        // (the Windows and Linux toolkits report every change). Polled, so a set_value that worked is not a false success.
+        let poll = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in self?.pollFields() }
+        RunLoop.main.add(poll, forMode: .common)
+        // A press on the pop-up button opens its menu: the press worked, though nothing is chosen yet.
+        NotificationCenter.default.addObserver(forName: NSPopUpButton.willPopUpNotification, object: priority, queue: nil) { [weak self] _ in
+            self?.rec.event("open", "priority")
+        }
+
         rec.state["name"] = ""
         rec.state["email"] = ""
         rec.state["priority"] = NSNull()
@@ -130,6 +139,13 @@ final class DialogController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         let key = field === nameField ? "name" : "email"
         rec.state[key] = field.stringValue
         rec.event("input", key)
+    }
+
+    /** A field not being edited whose value differs from the state: changed from outside (accessibility). */
+    func pollFields() {
+        for field in [nameField, emailField] where field.currentEditor() == nil {
+            if (rec.state[field === nameField ? "name" : "email"] as? String) != field.stringValue { textChanged(field) }
+        }
     }
 
     func windowDidBecomeKey(_ notification: Notification) { rec.event("focus", "window") }

@@ -279,7 +279,16 @@ describe('the watchdog rules', () => {
       expect(await d.judge(call('computer', 'wait', 'act-other'))).toBeNull();
       expect(await d.judge(call('browser', 'connect', 'act-other'))).toBeNull();
       expect(await d.judge(call('computer', 'hover', 'act-coords'))).toBeNull();
+      expect(await d.judge(call('computer', 'mouse_move', 'act-coords'))).toBeNull();
       expect(await d.judge(call('computer', 'click', 'act-coords', { ok: false, outcome: 'refused' }))).toBeNull();
+    });
+
+    // Mac run 2026-11-17: clawdcursor records no app for a release (it never refuses one), so it is judged by the focus.
+    it('a release with no app recorded passes when the focus is the fixture\'s, else stops', async () => {
+      for (const action of ['mouse_up', 'key_up']) {
+        expect(await dog().judge(call('computer', action, action === 'mouse_up' ? 'act-coords' : 'act-other'))).toBeNull();
+        expect(await dog({}, none).judge(call('computer', action, action === 'mouse_up' ? 'act-coords' : 'act-other'))).toMatchObject({ rule: 'privacy' });
+      }
     });
 
     it('an unknown acting action is not assumed harmless', async () => {
