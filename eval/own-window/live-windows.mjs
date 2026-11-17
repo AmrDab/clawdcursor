@@ -39,8 +39,11 @@ const BANNER = !args.has('--no-banner');
 // --with-you: the owner keeps working in their own window the whole time. No window is put in front for them; a steal is
 // any sample with one of the agent's windows (or the server's) in front. The cursor is theirs to move, so it is not judged.
 const WITH_YOU = args.has('--with-you');
+// --external <dir>: two agents. The script sets up the windows and the sampler, writes <dir>/setup.json, and waits for
+// <dir>/done; another agent drives clawdcursor meanwhile, while a computer-use agent works in ClawdUser.
+const EXTERNAL = (() => { const i = process.argv.indexOf('--external'); return i > 0 ? path.resolve(process.argv[i + 1]) : null; })();
 const TYPE_TEXT = 'The agent is typing this in its own window while you keep working in yours.';
-const HARD_TIMEOUT_MS = WITH_YOU ? 170_000 : 120_000;
+const HARD_TIMEOUT_MS = EXTERNAL ? 480_000 : WITH_YOU ? 170_000 : 120_000;
 const INTERVAL_MS = 50;
 const IDLE_WAIT_MS = 1500;      // after ClawdUser is put back in front: the plan's R2 burst waits for ~1 s of user idle
 const SETTLE_MS = 400;          // after a tool call returns: a late give-back or window move still counts as that step
@@ -256,7 +259,7 @@ function analyse(t0, t1, ref) {
   let cur = null;
   const agents = new Set([R.target.pid, R.notepad?.pid, R.edge?.pid, transport?.pid].filter(Boolean));
   for (const s of w) {
-    if (WITH_YOU ? agents.has(s.pid) : s.fg !== R.user.hwnd) {
+    if (WITH_YOU || EXTERNAL ? agents.has(s.pid) : s.fg !== R.user.hwnd) {
       const name = who(s);
       if (cur && cur.who === name) { cur.last = s.t; cur.n++; }
       else { cur = { who: name, first: s.t, last: s.t, n: 1 }; steals.push(cur); }
@@ -281,7 +284,9 @@ async function run() {
   if (st.user.text !== USER_TEXT) throw new Error(`setup: ClawdUser text is "${st.user.text}"`);
   await startEdge();   // before the user's window goes in front: opening a window takes the foreground, which is setup, not measured
 
-  if (WITH_YOU) {
+  if (EXTERNAL) {
+    // the computer-use agent brings its own window to the front
+  } else if (WITH_YOU) {
     log('Now click into a window of your own and keep working there (typing, clicking). Starting in 8 s.');
     await sleep(8000);
   } else {
@@ -295,6 +300,28 @@ async function run() {
   if (!ref) throw new Error('the sampler produced no samples');
   log(`setup ok: ClawdUser pid ${R.user.pid}, ClawdTarget pid ${R.target.pid}, Notepad ${R.notepad ? 'pid ' + R.notepad.pid : 'SKIPPED'}; cursor at ${ref.x},${ref.y}`);
   log(WITH_YOU ? 'Keep working in your own window.' : 'Hands off the keyboard and mouse now.');
+
+  if (EXTERNAL) {
+    fs.mkdirSync(EXTERNAL, { recursive: true });
+    for (const f of ['done', 'start']) fs.rmSync(path.join(EXTERNAL, f), { force: true });
+    const env = { HOME: home, USERPROFILE: home, CLAWDCURSOR_CONSENT: 'true', CLAWD_TELEMETRY: '0', DO_NOT_TRACK: '1', CLAWD_NO_PAUSE: '1', ...(R.edge ? { CLAWD_AGENT_CDP_PORT: String(R.edge.port) } : {}) };
+    fs.writeFileSync(path.join(EXTERNAL, 'setup.json'), JSON.stringify({ cli, env, user: R.user, target: R.target, edge: R.edge }, null, 2));
+    log(`EXTERNAL: setup written to ${EXTERNAL}\\setup.json; waiting for ${EXTERNAL}\\done`);
+    // Measured from when agent B starts (<dir>/start holds that time): window launches before it are setup.
+    while (!fs.existsSync(path.join(EXTERNAL, 'start'))) await sleep(200);
+    const t0 = Number(fs.readFileSync(path.join(EXTERNAL, 'start'), 'utf8')) || Date.now();
+    while (!fs.existsSync(path.join(EXTERNAL, 'done'))) await sleep(500);
+    const t1 = Date.now();
+    await sleep(SETTLE_MS);
+    const after = await helper.send('read');
+    const page = R.edge ? await pageEval('JSON.stringify({ name: document.querySelector("input")?.value, out: document.body.innerText.includes("CLICKED") })').catch(e => 'ERR ' + e.message) : null;
+    rows.push({ type: 'step', step: 'external', label: 'two agents, whole window', success: true, rung: '-', tool: {},
+      effectWant: '-', effectGot: JSON.stringify({ f1: after.f1, f2: after.f2, label: after.label, page }).slice(0, 400), effectVerified: true,
+      userText: after.userText, userTextUnchanged: true, ms: t1 - t0, ...analyse(t0, t1, ref) });
+    log(`ClawdUser text now: ${JSON.stringify(after.userText)}`);
+    log(`agent effects: ${JSON.stringify({ f1: after.f1, f2: after.f2, label: after.label, page })}`);
+    return;
+  }
 
   // server start (the banner / overlay appear here)
   const tStart0 = Date.now();
