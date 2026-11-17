@@ -51,6 +51,7 @@ describe.runIf(process.platform === 'win32')('the Windows drawers\' C# compiles'
     const source = csharp('banner.ps1', "-TypeDefinition @'");
     expect(source).toContain('public class NoActivateBannerForm : Form');
     expect(source).toContain('public class Orb : Control');
+    expect(source).toContain('public void KeepOnTop()');
     const r = compile(source);
     expect(r.status, r.output).toBe(0);
     expect(r.output).not.toMatch(/error|exception/i);

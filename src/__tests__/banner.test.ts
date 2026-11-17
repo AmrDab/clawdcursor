@@ -377,6 +377,23 @@ describe('no full-screen glow', () => {
     expect(swift).toMatch(/line == "TARGET" \|\| line\.hasPrefix\("TARGET "\)/);
   });
 
+  it('the Windows pill stays in front, can be dragged, and pulses once when it appears', () => {
+    const ps = read('scripts', 'banner.ps1');
+    // In front: re-asserted on the existing timers, only when a visible window is above it, never activating.
+    expect(ps).toContain('SetWindowPos(Handle, (IntPtr)(-1), 0, 0, 0, 0, 0x13)');   // HWND_TOPMOST, NOACTIVATE|NOMOVE|NOSIZE
+    expect(ps).toContain('if (IsWindowVisible(w))');
+    expect((ps.match(/\$form\.KeepOnTop\(\)/g) ?? []).length).toBe(2);   // the running and the paused timer
+    // Dragging: by hand with the mouse, on the body only; the position is kept, on screen, instead of top-centre.
+    expect(ps).toContain('function Enable-Drag(');
+    expect(ps).toContain('foreach ($c in @($form, $dot, $brand, $activity, $elapsed)) { Enable-Drag $c }');
+    expect(ps).toContain('foreach ($c in @($form, $dot, $title, $msg)) { Enable-Drag $c }');
+    expect(ps).not.toMatch(/Enable-Drag \$(stop|yes|no|send|reply)/);
+    expect(ps).toContain('if ($script:userPos) { $at = Get-OnScreen $script:userPos $f }');
+    // Appearing: one fade of the outline, not a loop.
+    expect(ps).toContain('function Start-Pulse');
+    expect(ps).toContain('if ($k -le 0) { $script:pulse.Stop() }');
+  });
+
   it('the Windows outline is click-through, never activates, and stays out of captures', () => {
     const ps = read('scripts', 'window-outline.ps1');
     for (const style of ['0x00080000', '0x00000020', '0x08000000', '0x00000080']) expect(ps).toContain(style);

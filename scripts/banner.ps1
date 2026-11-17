@@ -63,6 +63,17 @@ public class NoActivateBannerForm : Form {
     [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hWnd, int nIndex);
     [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
     [DllImport("user32.dll")] static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint affinity);
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hWnd, uint cmd);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+    // Another topmost window (or one shown later) can cover the pill: when any visible window is above it, put it back on
+    // top - never activating it (SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE), so focus and the reply box are untouched.
+    public void KeepOnTop() {
+        if (!IsHandleCreated || !Visible) return;
+        for (IntPtr w = GetWindow(Handle, 3); w != IntPtr.Zero; w = GetWindow(w, 3)) {   // GW_HWNDPREV
+            if (IsWindowVisible(w)) { SetWindowPos(Handle, (IntPtr)(-1), 0, 0, 0, 0, 0x13); return; }   // HWND_TOPMOST
+        }
+    }
     // The pill is for the person at the screen, never part of what the agent sees: WDA_EXCLUDEFROMCAPTURE (0x11) leaves
     // it out of every screenshot and OCR capture (Windows 10 2004+; older Windows ignores it). It sat over the app's own
     // toolbar in captures and hid it.
@@ -270,6 +281,11 @@ function Set-Round($c, [int]$r) { $c.Region = New-Object System.Drawing.Region((
 # Top-center of the monitor the foreground window is on (where the agent is working; the primary when there is
 # none), 8px below the edge; rounded corners and a thin outline.
 $script:radius = 18
+$script:userPos = $null   # where the user dragged the pill to; it stays there for the life of this process
+function Get-OnScreen($p, $f) {
+    $wa = [System.Windows.Forms.Screen]::FromRectangle((New-Object System.Drawing.Rectangle($p, $f.Size))).WorkingArea
+    New-Object System.Drawing.Point([Math]::Max($wa.X, [Math]::Min($p.X, $wa.Right - $f.Width)), [Math]::Max($wa.Y, [Math]::Min($p.Y, $wa.Bottom - $f.Height)))
+}
 function Set-PillShape($f, [int]$r) {
     $script:radius = $r
     $fg = [NoActivateBannerForm]::GetForegroundWindow()
@@ -277,6 +293,7 @@ function Set-PillShape($f, [int]$r) {
               else { [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea }
     $at = New-Object System.Drawing.Point(
         [int]($screen.X + ($screen.Width - $f.Width) / 2), [int]($screen.Y + 8))
+    if ($script:userPos) { $at = Get-OnScreen $script:userPos $f }
     if ($f.Location -ne $at) { $f.Location = $at }
     # A new outline only for a new size: this runs on every tick of the clock, and cutting the window's shape again
     # and painting the whole pill each second cost more than everything else the pill does.
@@ -287,10 +304,42 @@ function Set-PillShape($f, [int]$r) {
         $f.Invalidate()
     }
 }
+# Dragging: the pill's body (the form and its plain labels, never a button or the reply box) moves it. Done by hand with
+# the mouse (a control keeps the mouse until release), so the window is never activated.
+$script:drag = $null
+function Enable-Drag($c) {
+    $c.Add_MouseDown({ param($s, $e) if ($e.Button -eq 'Left') { $script:drag = [System.Windows.Forms.Cursor]::Position; $script:dragFrom = $form.Location } })
+    $c.Add_MouseMove({
+        if ($script:drag) {
+            $p = [System.Windows.Forms.Cursor]::Position
+            $script:userPos = Get-OnScreen (New-Object System.Drawing.Point(($script:dragFrom.X + $p.X - $script:drag.X), ($script:dragFrom.Y + $p.Y - $script:drag.Y))) $form
+            $form.Location = $script:userPos
+        }
+    })
+    $c.Add_MouseUp({ $script:drag = $null })
+}
+
+# A brief cue when the pill appears: the outline glows amber and fades back over about 1.5 s. Once, never a loop.
+$script:edgeW = 1
+function Start-Pulse {
+    $script:base = $script:edge; $script:amber = [System.Drawing.Color]::FromArgb(245, 158, 11)
+    $script:pulseN = 0
+    $script:pulse = New-Object System.Windows.Forms.Timer
+    $script:pulse.Interval = 60
+    $script:pulse.Add_Tick({
+        $script:pulseN++
+        $k = [Math]::Max(0.0, 1 - $script:pulseN / 25.0)
+        $script:edgeW = if ($k -gt 0) { 3 } else { 1 }
+        $script:edge = [System.Drawing.Color]::FromArgb([int]($script:base.R + ($script:amber.R - $script:base.R) * $k), [int]($script:base.G + ($script:amber.G - $script:base.G) * $k), [int]($script:base.B + ($script:amber.B - $script:base.B) * $k))
+        $form.Invalidate()
+        if ($k -le 0) { $script:pulse.Stop() }
+    })
+    $script:pulse.Start()
+}
 $form.Add_Paint({
     param($s, $e)
     $e.Graphics.SmoothingMode = 'AntiAlias'
-    $pen = New-Object System.Drawing.Pen($script:edge, 1)
+    $pen = New-Object System.Drawing.Pen($script:edge, $script:edgeW)
     $e.Graphics.DrawPath($pen, (New-RoundPath ($form.Width - 1) ($form.Height - 1) $script:radius))
     $pen.Dispose()
 })
@@ -513,6 +562,7 @@ if ($env:CLAWD_BANNER_MODE -eq 'paused') {
         $script:bright = -not $script:bright
         if ($script:bright) { $dot.ForeColor = $blue }
         else                { $dot.ForeColor = [System.Drawing.Color]::FromArgb(25, 55, 110) }
+        $form.KeepOnTop()
     })
     $timer.Start()
 
@@ -522,7 +572,8 @@ if ($env:CLAWD_BANNER_MODE -eq 'paused') {
         $form.Add_Shown({ try { [System.Media.SystemSounds]::Asterisk.Play() } catch { } })
     }
 
-    $form.Add_Shown({ $form.StartStdinCommands() })
+    foreach ($c in @($form, $dot, $title, $msg)) { Enable-Drag $c }
+    $form.Add_Shown({ $form.StartStdinCommands(); Start-Pulse })
     [System.Windows.Forms.Application]::Run($form)
     exit 0
 }
@@ -585,6 +636,7 @@ $timer.Add_Tick({
     $s = [int]$clock.Elapsed.TotalSeconds
     $t = '{0}:{1:00}' -f [int][Math]::Floor($s / 60), ($s % 60)
     if ($elapsed.Text -ne $t) { $elapsed.Text = $t; Update-Layout }
+    $form.KeepOnTop()
 })
 $timer.Start()
 
@@ -593,5 +645,6 @@ $stop.Add_Click($stopHandler)
 $form.Add_MouseDoubleClick($stopHandler)
 foreach ($c in @($dot, $brand, $activity, $elapsed)) { $c.Add_MouseDoubleClick($stopHandler) }
 
-$form.Add_Shown({ $form.StartStdinCommands() })
+foreach ($c in @($form, $dot, $brand, $activity, $elapsed)) { Enable-Drag $c }
+$form.Add_Shown({ $form.StartStdinCommands(); Start-Pulse })
 [System.Windows.Forms.Application]::Run($form)
