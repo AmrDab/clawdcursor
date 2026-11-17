@@ -115,6 +115,28 @@ let acted: Foreground | undefined;
  */
 let working: Foreground | undefined;
 /**
+ * The agent's windows (Plan (h)): the ones it opened, focused, worked in, or acted in by name or process. The lease above is
+ * the one in front; input may also go to any other window in this set, and to no window outside it. The most recent few.
+ */
+const agentSet: Foreground[] = [];
+const AGENT_WINDOWS_MAX = 8;
+function remember(f: Foreground): void {
+  const at = agentSet.findIndex(w => sameTarget(w, f));
+  const old = at >= 0 ? agentSet.splice(at, 1)[0] : undefined;
+  agentSet.push({ ...f, handle: f.handle ?? old?.handle });
+  if (agentSet.length > AGENT_WINDOWS_MAX) agentSet.shift();
+}
+/** The windows the agent has opened or worked in, oldest first. */
+export function agentWindows(): readonly { processId: number; processName: string; appName?: string; handle?: number | string }[] {
+  return agentSet.map(({ processId, processName, appName, handle }) => ({ processId, processName, appName, handle }));
+}
+/** Is this window (by handle, or by process) one of the agent's? */
+export function isAgentWindow(q: { handle?: number | string; processId?: number }): boolean {
+  return agentSet.some(w => (q.handle !== undefined && w.handle !== undefined && Number(w.handle) === Number(q.handle))
+    || (q.processId !== undefined && (w.processId === q.processId || w.hostedProcessId === q.processId)));
+}
+
+/**
  * How long after the agent's own focus-moving input a new window in front is still its doing (a launch, a dialog, an
  * activation that lags). Past it, a change is the user's. The issue's switch came during a 30 s wait.
  */
@@ -122,7 +144,7 @@ const OWN_MOVE_MS = 5_000;
 /** How long the next input waits for a window the agent just focused to come to the front. */
 const FOCUS_ARRIVAL_MS = 1_000;
 
-function resetBinding(): void { lease = undefined; acted = undefined; working = undefined; pending = null; movedAt = 0; leaseExplicit = false; openedName = null; }
+function resetBinding(): void { lease = undefined; acted = undefined; working = undefined; pending = null; movedAt = 0; leaseExplicit = false; openedName = null; agentSet.length = 0; }
 
 const platformForeground = async (): Promise<Foreground | null> => {
   const { getPlatform } = await import('../platform');
@@ -131,7 +153,7 @@ const platformForeground = async (): Promise<Foreground | null> => {
 };
 // Off under the test runner unless a test sets a reader: a unit test must not start the real platform to ask.
 let readForeground: () => Promise<Foreground | null> = process.env.VITEST ? async () => null : platformForeground;
-type ListedWindow = { processId: number; processName: string; appName?: string; hostedProcessId?: number; hostedProcessName?: string; hostedAppName?: string };
+type ListedWindow = { processId: number; handle?: number | string; processName: string; appName?: string; hostedProcessId?: number; hostedProcessName?: string; hostedAppName?: string };
 let readWindows: () => Promise<ListedWindow[]> = process.env.VITEST ? async () => [] : async () => {
   const { getPlatform } = await import('../platform');
   return (await getPlatform()).listWindows();
@@ -218,7 +240,7 @@ async function before(): Promise<void> {
     }
     pending = null;
     explicit = true;
-  } else if (lease && !sameTarget(lease, now) && !ownMove) {
+  } else if (lease && !sameTarget(lease, now) && !ownMove && !agentSet.some(w => sameTarget(w, now))) {
     throw new Error(
       `foreground changed: you were working in ${name(lease)}, but ${name(now)} is in front now — the user may have switched. ` +
       'Nothing was sent. If you meant to work there, focus it with window {"action":"focus"} first; otherwise focus your own window again.');
@@ -231,6 +253,7 @@ async function before(): Promise<void> {
   lease = at;
   acted = at;
   working = at;
+  remember(at);
 }
 
 const AI_HOST_REFUSAL = (n: string, kind: 'list' | 'ancestor') =>
@@ -286,11 +309,13 @@ async function byName(processId?: number): Promise<void> {
   const at: Foreground = { ...now, actPid: await verifiedPid(now, decided) };
   acted = at;
   working = at;
+  // Named by process: the agent's own choice of window. With none given it is just the window in front, nobody's but the user's.
+  if (processId !== undefined) remember(at);
 }
 
 /** App names by process id: a process keeps its name, so the window list is read once per process. */
 // shortcut: a pid the OS reuses for another app keeps the old name; key by pid + start time if that ever shows up in a log.
-const pidNames = new Map<number, { processName: string; appName?: string }>();
+const pidNames = new Map<number, { processName: string; appName?: string; handle?: number | string }>();
 
 /**
  * An act that went to a process, not to the window in front — a by-name act on a background window, a page act over CDP
@@ -304,12 +329,13 @@ async function byProcess(pid: number | null | undefined): Promise<void> {
     const w = (await readWindows().catch(() => [])).find(w => w.processId === pid || w.hostedProcessId === pid);
     if (w) {
       n = w.hostedProcessId === pid
-        ? { processName: w.hostedProcessName || w.processName, appName: w.hostedAppName || w.appName }
-        : { processName: w.processName, appName: w.appName };
+        ? { processName: w.hostedProcessName || w.processName, appName: w.hostedAppName || w.appName, handle: w.handle }
+        : { processName: w.processName, appName: w.appName, handle: w.handle };
       pidNames.set(pid, n);
     }
   }
   acted = { processId: pid, processName: n?.processName || `pid ${pid}`, appName: n?.appName, actPid: pid };
+  remember({ ...acted, handle: n?.handle });
 }
 
 /**
@@ -347,7 +373,7 @@ async function arrived(): Promise<void> {
   for (let tries = FOCUS_ARRIVAL_MS / 100; ; tries--) {
     const now = await readForeground().catch(() => null);
     if (!now) return;
-    if (mine(now)) { working = now; return; }
+    if (mine(now)) { working = now; remember(now); return; }
     if (tries <= 0 || pending !== q) return;
     await new Promise(r => setTimeout(r, 100));
   }

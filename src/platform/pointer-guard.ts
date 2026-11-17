@@ -59,6 +59,15 @@ let onAgentInput: ((method: string) => void) | null = null;
 export function setOnAgentInput(f: ((method: string) => void) | null): void {
   onAgentInput = f;
 }
+/** Told where an agent act that passed the guard happens on screen (a click, a scroll, an element acted on by name): the ghost cursor is drawn there. */
+let onAgentPoint: ((x: number, y: number) => void) | null = null;
+export function setOnAgentPoint(f: ((x: number, y: number) => void) | null): void {
+  onAgentPoint = f;
+}
+const pointAt = (x: unknown, y: unknown) => {
+  if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return;
+  try { onAgentPoint?.(Math.round(x), Math.round(y)); } catch { /* cosmetic */ }
+};
 /** Told before every agent act, as the pill is: what was read from the screen before it is stale (ocr-engine.ts). */
 const actListeners: Array<() => void> = [];
 export function onAgentAct(f: () => void): void {
@@ -179,6 +188,7 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
       await confirmCheck(m, args, target);
       await g.before();
       announce(m);
+      if (m.startsWith('mouse') && m !== 'mouseMoveRelative') pointAt(args[0], args[1]);
       const r = await f(...args);
       g.done(movesFocus(m, args));
       return r;
@@ -191,7 +201,10 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
       if (q.action === 'get-value') g.stopCheck(); else { g.stopCheck(); await confirmCheck('invokeElement', args, target); await g.byName(q.processId); }
       announce('invokeElement');
     }
-    return f(...args);
+    const r = await f(...args) as { success?: boolean; bounds?: { x: number; y: number; width: number; height: number } } | undefined;
+    const b = r?.bounds;
+    if (!nested && q.action !== 'get-value' && r?.success !== false && b && b.width > 0 && b.height > 0) pointAt(b.x + b.width / 2, b.y + b.height / 2);
+    return r;
   });
   // A release (mouseUp) is never refused; the window-checked pointer input is wrapped above.
   const stopOnly = [...STOP_METHODS, ...pointerMethods(target).filter(m => m !== 'mouseUp' && !INPUT_METHODS.includes(m))];

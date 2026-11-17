@@ -379,14 +379,14 @@ describe('no full-screen glow', () => {
 
   it('the Windows outline is click-through, never activates, and stays out of captures', () => {
     const ps = read('scripts', 'window-outline.ps1');
-    for (const style of ['0x00080000', '0x00000020', '0x08000000', '0x00000080', '0x00000008']) expect(ps).toContain(style);
+    for (const style of ['0x00080000', '0x00000020', '0x08000000', '0x00000080']) expect(ps).toContain(style);
     expect(ps).toContain('SetWindowDisplayAffinity(Handle, 0x11)');
     // Where the frame is, and where the border goes, are physical pixels on every monitor (per-monitor-v2).
     expect(ps).toContain('SetThreadDpiAwarenessContext([IntPtr](-4))');
     // Re-placed only when it moved or is no longer above its window (walking up the z-order), never on every poll.
     expect(ps).toContain('if (placed && !moved) return;');
     // TARGET and HIDE act on receipt, not on the next poll: a capture follows HIDE after 90 ms.
-    expect(ps).toContain('BeginInvoke((Action)Follow)');
+    expect(ps).toContain('BeginInvoke((Action)FollowAll)');
     // A byte-order mark in front of the first line (a .NET parent) does not lose the command.
     expect(ps).toContain('p[0].EndsWith("TARGET")');
     expect(ps).toContain('p[0].EndsWith("HIDE")');
@@ -411,7 +411,35 @@ describe('no full-screen glow', () => {
   it('the Windows outline goes round no window that Windows does not show, even the one in front', () => {
     const ps = read('scripts', 'window-outline.ps1');
     expect(ps).toContain('static extern bool IsWindowVisible(IntPtr hWnd);');
-    expect(ps).toMatch(/GetForegroundWindow\(\) == t && !IsIconic\(t\) && IsWindowVisible\(t\)/);
+    expect(ps).toMatch(/!IsIconic\(t\)\s+&& IsWindowVisible\(t\)/);
     expect(ps).toContain('(DwmGetWindowAttribute(t, 14, out cloaked, 4) != 0 || cloaked == 0)');   // DWMWA_CLOAKED
+  });
+
+  // Plan (h): an agent window has its border while it is visible, in front or not, without drawing over the user's window.
+  it('the Windows outline is not topmost: it sits directly above its window, and shows while that window is not in front', () => {
+    const ps = read('scripts', 'window-outline.ps1');
+    expect(ps).not.toContain('GetForegroundWindow');
+    expect(ps).not.toContain('ExStyle |= 0x00000008');
+    expect(ps).toContain('IntPtr above = GetWindow(target, 3); // GW_HWNDPREV');
+    expect(ps).toContain('SetWindowPos(Handle, above, ');
+    expect(ps).not.toContain('new IntPtr(-1)');
+  });
+
+  it('with several agent windows the outline is sent them all, the working one first (Windows)', async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    let fg: { processId: number; processName: string; handle: number } = { processId: 100, processName: 'msedge', handle: 0x5a0 };
+    __setForegroundReaderForTests(async () => fg);
+    try {
+      controlBanner.pin();
+      const d = guardInputMethods({ async keyPress(_k: string) {}, async focusWindow(_q: unknown) { fg = { processId: 300, processName: 'notepad', handle: 0x7b2 }; return true; } });
+      await d.keyPress('a');
+      await d.focusWindow({ processId: 300 });
+      await d.keyPress('b');
+      expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300 1440 100']);
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+      __setForegroundReaderForTests(null);
+    }
   });
 });
