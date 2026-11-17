@@ -16,6 +16,9 @@ All notable changes to Clawd Cursor will be documented in this file.
   `tokens: 146 in · 24,343 out · 5,123,771 cached · $1.11`, and the same numbers are in the run log's `end` record and
   at the top of `clawdcursor logs --run`. Claude Code reports tokens and a cost; Codex and the API runners report
   tokens only (the cost is left out, not guessed). A run that reported nothing prints no line.
+  screenshot), as `smart_click` does, instead of failing; it says so in the result. The same when every element it
+  matched only contains the name ("New to NX?" for "New"). Not with `within`. An ambiguous invoke's next step names the
+  element (controlType, within) instead of a coordinate click.
 
 ### Fixed
 - **`smart_click` never clicks in another app's window.** It kept an OCR match inside the target window's rectangle only,
