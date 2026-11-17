@@ -5,6 +5,11 @@ All notable changes to Clawd Cursor will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **OCR works on a Mac where node has no Screen Recording permission.** OCR grabbed the screen with nut-js inside node,
+  so it failed with "Failed to capture screen" while `computer screenshot` worked: screenshots go through the bundled
+  screenshot helper, which holds its own grant. OCR (`system ocr`, `smart_click` / `smart_read` by visible text, and an
+  `invoke` that falls back to the visible label) now captures through the helper too, and uses nut-js only when no helper
+  is built.
 - **`accessibility read_tree` / `read_screen` on the browser clawdcursor drives over CDP points at the browser tools**
   (#235). The hint after a thin read (and after a full read of that browser) now leads with `browser page_context` /
   `read_text` / `click`, as `find` already did; the 1.x fix had gone into a copy of `read_tree` that no longer ran.
