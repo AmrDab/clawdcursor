@@ -61,7 +61,7 @@ describe('ocr with processId', () => {
     expect(engine.recognizeRegion).not.toHaveBeenCalled();
     expect(focusWindow).not.toHaveBeenCalled();
     expect(r.isError).toBeFalsy();
-    expect(r.text).toMatch(/^OCR of the window of process 4242 at \(100,200\) 1440x540, drawn by itself \(windows on top of it are not in the read\): 1 words/);
+    expect(r.text).toMatch(/^OCR of the window of process 4242 at \(100,200\) 1440x540, drawn by itself \(windows on top of it are not in the read\): 1 rows \(1 words\)/);
     // The text's centre (330,100) in the image, at 640/1440 image pixels per screen pixel, from the window's corner.
     expect(r.text).toContain('@843,425 "QUOKKA"');
     expect(r.text).toContain('focus this window first (window {"action":"focus","processId":4242})');
