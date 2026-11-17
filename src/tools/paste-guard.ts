@@ -68,9 +68,13 @@ export async function waitForPaste(
   await sleep(minMs);
   let first: string | undefined;
   let changed = false;
+  // Reads tried. "Nothing changed" needs two: on a loaded machine the first sleep can outlast the blind wait, and one
+  // read alone cannot see a change (it gave up on a field that was still filling, after a single read).
+  let reads = 0;
   for (;;) {
     const left = maxMs - (Date.now() - t0);
     if (left <= 0) return;
+    reads++;
     let v: string | null | undefined = null;
     try { v = await Promise.race([readFocusedValue(), sleep(left).then(() => null)]); } catch { /* unreadable */ }
     if (typeof v === 'string') {
@@ -79,7 +83,7 @@ export async function waitForPaste(
       if (first === undefined) first = norm;
       else if (norm !== first) changed = true;
     }
-    if (!changed && Date.now() - t0 >= blindMs) return;
+    if (!changed && reads >= 2 && Date.now() - t0 >= blindMs) return;
     await sleep(stepMs);
   }
 }
