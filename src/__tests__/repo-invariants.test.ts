@@ -207,13 +207,12 @@ describe('files that must (not) be there', () => {
     expect(links.filter(l => !fs.existsSync(path.join(ROOT, l)))).toEqual([]);
   });
 
-  // Foreground mode (owner, 2026-11-17) is the full-screen glow, on Windows; macOS and Linux still have the window frame alone.
-  it('the full-screen glow is the Windows foreground-mode drawer: banner.ts spawns it, the macOS and Linux drawers have none', () => {
+  // Foreground mode (owner, 2026-11-17) is the full-screen glow, on Windows and macOS; Linux still has the window frame alone.
+  it('the full-screen glow is the foreground-mode drawer on Windows and macOS: banner.ts spawns both, Linux has none', () => {
     expect(fs.existsSync(path.join(ROOT, 'scripts', 'edge-glow.ps1'))).toBe(true);
     expect(read('src', 'core', 'banner.ts')).toContain("'edge-glow.ps1'");
-    for (const src of [read('scripts', 'mac', 'overlay.swift'), read('scripts', 'linux', 'overlay.py')]) {
-      expect(src).not.toMatch(/edge-glow|['"]glow['"]|CLAWD_NO_GLOW/);
-    }
+    expect(read('scripts', 'mac', 'overlay.swift')).toContain('func glow()');
+    expect(read('scripts', 'linux', 'overlay.py')).not.toMatch(/edge-glow|['"]glow['"]|CLAWD_NO_GLOW/);
   });
 
   // The orb is a port of Thinking Orbs (libraries.dev, MIT): its notice goes with it. The outline is 2.0.0's again, so

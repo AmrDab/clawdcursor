@@ -9,7 +9,7 @@
  *     On Windows every agent window (control.ts agentWindows) has one while it is
  *     visible, in front or not. Spawned/killed in lockstep with the pill;
  *     `TARGET <handle> <pid>` on its stdin names the window, a bare `TARGET` none.
- *   - the glow (Windows): a click-through amber glow along every screen edge, the FOREGROUND mode of the indicator: up only
+ *   - the glow (Windows, macOS): a click-through amber glow along every screen edge, the FOREGROUND mode of the indicator: up only
  *     while the agent's input goes to the foreground (a guarded keyboard/mouse method, an R2 burst: foreground()) and for
  *     ~1.5 s after; `ON` / `OFF` on its stdin. Background acts (by name, window messages, page acts) get the outline alone.
  * All exit by themselves when their stdin closes: a host that hard-kills this
@@ -17,7 +17,7 @@
  *
  * One contract, three drawers (same modes, same stdout lines):
  *   - Windows: scripts/banner.ps1 + scripts/window-outline.ps1 + scripts/edge-glow.ps1 (WinForms)
- *   - macOS:   scripts/mac/overlay.swift, compiled once into ~/.clawdcursor/bin
+ *   - macOS:   scripts/mac/overlay.swift (pill / outline / glow), compiled once into ~/.clawdcursor/bin
  *   - Linux:   scripts/linux/overlay.py (GTK 3; X11, or Wayland via XWayland)
  * Where the drawer can't run (no swiftc, no python3-gi, no display) the overlay
  * is unavailable: nothing is drawn and pauses fall back to failing fast.
@@ -301,9 +301,10 @@ class ControlBanner {
   };
 
   private glowSpawner: Spawner = () => {
-    if (process.platform !== 'win32') throw new Error('the full-screen glow is Windows-only');
-    const script = path.join(getPackageRoot(), 'scripts', 'edge-glow.ps1');
     const stdio: ['pipe', 'pipe', 'ignore'] = ['pipe', 'pipe', 'ignore']; // stdin: ON / OFF / HIDE, and its EOF ends the glow
+    if (process.platform === 'darwin') return spawn(macOverlayBinary.cached(macScript())!, ['glow'], { stdio });
+    if (process.platform !== 'win32') throw new Error('the full-screen glow is Windows and macOS only');
+    const script = path.join(getPackageRoot(), 'scripts', 'edge-glow.ps1');
     return spawn(powershellExe(), psArgs(script, glowFlags(this.child?.pid)),
       psOpts({ stdio, windowsHide: true }));
   };
@@ -338,7 +339,9 @@ class ControlBanner {
     if (w && isOwnUiPid(w.processId)) return;   // the pill and the other overlays are never framed
     this.working = w;
     // Windows draws one border per window: the working one, then the agent's other windows that have a handle.
-    const others = process.platform === 'win32' && w
+    // Every OS gets the same multi-window line. Windows and macOS draw a border per window; the Linux drawer reads the
+    // first pair and ignores the rest (one outline there), so it degrades without breaking.
+    const others = w
       ? agentWindows().filter(a => Number(a.handle) && !isOwnUiPid(a.processId) && Number(a.handle) !== Number(w.handle)).map(a => ` ${Number(a.handle)} ${a.processId}`).join('')
       : '';
     const line = w ? `TARGET ${Number(w.handle) || 0} ${w.processId}${others}` : 'TARGET';
@@ -390,9 +393,9 @@ class ControlBanner {
     else this.bursts = Math.max(0, this.bursts - 1);
   }
 
-  /** The ghost cursor: the outline draws a small pointer here (screen pixels, Windows) for about a second and a half. */
+  /** The ghost cursor: the outline draws a small pointer here (screen pixels, Windows; points, top-left origin, macOS) for about a second and a half. */
   ghost(x: number, y: number): void {
-    if (process.platform === 'win32') send(this.outlineChild, `GHOST ${x} ${y}`);
+    if (process.platform === 'win32' || process.platform === 'darwin') send(this.outlineChild, `GHOST ${x} ${y}`);
   }
 
   private activity = '';

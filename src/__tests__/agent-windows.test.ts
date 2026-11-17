@@ -85,9 +85,10 @@ describe('clawdcursor\'s own windows are never the agent\'s', () => {
     expect(isAgentWindow({ handle: 0x9f0 })).toBe(false);
   });
 
-  it('an act by name on the overlay\'s own process, or a focus of it, is not remembered either', async () => {
+  it('an act by name on the overlay\'s own process is refused, and a focus of it is not remembered', async () => {
     const d = desktop();
-    await d.invokeElement({ name: 'Stop', processId: 777 });
+    // The overlay's own pid is refused outright (own-ui-guard): never read, never acted on.
+    await expect(d.invokeElement({ name: 'Stop', processId: 777 })).rejects.toThrow(/own on-screen control/);
     await d.focusWindow(PILL);
     await d.invokeElement({ name: 'x', processId: 100 });
     expect(agentWindows().map(w => w.processId)).toEqual([100]);

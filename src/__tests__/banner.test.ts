@@ -448,41 +448,42 @@ describe('the full-screen glow is the foreground-mode drawer only', () => {
     expect(glow).toContain('bool want = on && ');
     expect(read('scripts', 'window-outline.ps1')).not.toMatch(/AllScreens|PrimaryScreen|\.Bounds\b/);
     const swift = read('scripts', 'mac', 'overlay.swift');
-    expect(swift.slice(swift.indexOf('func windowOutline()'))).not.toMatch(/screen\.frame|NSScreen\.screens/);
+    expect(swift.slice(swift.indexOf('func windowOutline()'), swift.indexOf('// The ghost cursor'))).not.toMatch(/screen\.frame|NSScreen\.screens/);
     const py = read('scripts', 'linux', 'overlay.py');
     const start = py.indexOf('def run_outline(');
     expect(py.slice(start, py.indexOf('\ndef ', start + 1))).not.toMatch(/get_monitor|get_n_monitors/);
   });
 
-  it('the Windows pill draws the mascot (a blink every 4-6 s, nothing else); the macOS orb is still where the OS is set to reduce motion (#392)', () => {
+  it('both pills draw the mascot (a blink every 4-6 s), not the orb', () => {
     const pill = read('scripts', 'banner.ps1');
     expect(pill).toContain('public class Mascot : Control');
     expect(pill).toContain('rng.Next(4000, 6001)');
     expect(pill).not.toContain('class Orb');
     const swift = read('scripts', 'mac', 'overlay.swift');
-    expect(swift).toContain('if window == nil || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return }');
+    expect(swift).toContain('final class MascotView: NSView');
+    expect(swift).toContain('Double.random(in: 4...6)');
+    expect(swift).not.toContain('OrbView');
   });
 
   it('the macOS outline is the 2.0 border: 3 pt inside the agent\'s window, amber (blue when paused), still, click-through, under the pill', () => {
     const swift = read('scripts', 'mac', 'overlay.swift');
-    const outline = swift.slice(swift.indexOf('func windowOutline()'));
-    expect(outline).toContain('view.layer?.borderColor = hexColor(option("--color", "#f59e0b")).cgColor');
+    const outline = swift.slice(swift.indexOf('func makeOutlineWindow()'), swift.indexOf('// The ghost cursor'));
+    expect(outline).toContain('view.layer?.borderColor = hexColor(outlineColor).cgColor');
     expect(outline).toContain('view.layer?.borderWidth = 3');
     expect(outline).toContain('win.ignoresMouseEvents = true');
-    expect(outline).toContain('win.level = .floating');
+    expect(outline).toContain('win.level = .normal');   // ordered just above the agent's window, not above the user's
     expect(outline).toContain('win.sharingType = .none');
     expect(swift).toContain('panel.level = .screenSaver');
     // Drawn once: no beam layers and nothing animated.
     expect(outline).not.toMatch(/CAShapeLayer|CAGradientLayer|CABasicAnimation|CAKeyframeAnimation|lineDashPhase/);
   });
 
-  it('the macOS outline goes only round a window of the app in front that is on screen and can be seen', () => {
+  it('the macOS outline goes only round a window that is on screen and can be seen', () => {
     const swift = read('scripts', 'mac', 'overlay.swift');
-    const find = swift.slice(swift.indexOf('func targetFrame()'), swift.indexOf('func windowOutline()'));
-    expect(find).toContain('NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(targetPid)');
+    const find = swift.slice(swift.indexOf('func seenFrame('), swift.indexOf('func makeOutlineWindow()'));
     expect(find).toContain('CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)');
     expect(find).toContain('((w[kCGWindowAlpha as String] as? Double) ?? 1) > 0.01');
-    expect(find).toContain('rect.width >= 40, rect.height >= 40 else { continue }');
+    expect(find).toContain('rect.width >= 40, rect.height >= 40');
     // No stand-in: with no such window nothing is drawn (the pill alone shows control).
     expect(find).not.toMatch(/mouseLocation|visibleFrame|pointerScreen/);
     expect(swift).toMatch(/line == "TARGET" \|\| line\.hasPrefix\("TARGET "\)/);
