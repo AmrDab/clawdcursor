@@ -1161,6 +1161,13 @@ function Cmd-RestoreForeground {
     return @{ success = $ok; restored = $ok }
 }
 
+# ── Command: get-idle ─────────────────────────────────────────────────────────
+# GetLastInputInfo: the tick of the last input of ANY kind (this process's synthetic input too) and the ms since it.
+function Cmd-GetIdle {
+    $i = [ClawdMsg]::Idle()
+    return @{ success = $true; tick = $i[0]; idleMs = $i[1] }
+}
+
 # ── Command: deliver-to-window (rung R1) ──────────────────────────────────────
 # Text, a whole value or a click for a control of a BACKGROUND window, by window messages: no focus, no cursor.
 # Native Win32 / WinForms / WPF-hosted edits and buttons take them; Chromium and Electron ignore them (CDP is their route).
@@ -2285,6 +2292,7 @@ while ($true) {
             "focus-window"          { Cmd-FocusWindow $cmd }
             "restore-foreground"    { Cmd-RestoreForeground $cmd }
             "deliver-to-window"     { Cmd-DeliverToWindow $cmd }
+            "get-idle"              { Cmd-GetIdle }
             "find-element"          { Cmd-FindElement $cmd }
             "invoke-element"        { Cmd-InvokeElement $cmd }
             "scroll-into-view"      { Cmd-ScrollIntoView $cmd }

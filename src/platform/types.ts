@@ -324,6 +324,10 @@ export interface PlatformAdapter {
    * target fails as `uipi`, never retried.
    */
   deliverToWindow?(target: DeliverTarget, input: DeliverInput): Promise<DeliverResult>;
+  /** Optional (Windows): when the last input of any kind happened (`tick`, ours too) and how long ago (`idleMs`); null when unreadable. */
+  userIdle?(): Promise<{ tick: number; idleMs: number } | null>;
+  /** Optional (Windows): the real cursor's position, physical pixels. */
+  cursorPos?(): Promise<{ x: number; y: number } | null>;
   /** Optional (Windows): put window `handle` back in front, verified (the foreground-lock workaround). */
   restoreForeground?(handle: number): Promise<boolean>;
   /**

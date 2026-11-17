@@ -41,3 +41,10 @@ describe.runIf(process.platform === 'win32')('ps-bridge restore-foreground (run 
     expect(r.noHandle.reply.success).toBe(false);
   });
 });
+
+describe.runIf(process.platform === 'win32')('ps-bridge get-idle (run for real, fake ClawdMsg)', () => {
+  it('answers the tick of the last input and the idle time', () => {
+    const [out] = runPsJson(['Cmd-GetIdle'], '', ['[ClawdMsg]::LastInputTick = 777; [ClawdMsg]::IdleMs = 1234\nConvertTo-Json -InputObject (Cmd-GetIdle) -Compress']);
+    expect(out).toEqual({ success: true, tick: 777, idleMs: 1234 });
+  });
+});

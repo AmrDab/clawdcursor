@@ -822,6 +822,16 @@ export class WindowsAdapter implements PlatformAdapter {
     }
   }
 
+  async userIdle(): Promise<{ tick: number; idleMs: number } | null> {
+    const r = await psRunner.run({ cmd: 'get-idle' }).catch(() => null) as { success?: boolean; tick?: number; idleMs?: number } | null;
+    return r?.success && Number.isFinite(r.tick) && Number.isFinite(r.idleMs) ? { tick: r.tick!, idleMs: r.idleMs! } : null;
+  }
+
+  async cursorPos(): Promise<{ x: number; y: number } | null> {
+    const r = await psRunner.run({ cmd: 'get-cursor' }).catch(() => null) as { success?: boolean; x?: number; y?: number } | null;
+    return r?.success && Number.isFinite(r.x) && Number.isFinite(r.y) ? { x: r.x!, y: r.y! } : null;
+  }
+
   /** Put window `handle` back in front, verified (ps-bridge `restore-foreground`: the foreground-lock workaround). */
   async restoreForeground(handle: number): Promise<boolean> {
     const r = await psRunner.run({ cmd: 'restore-foreground', handle }) as { restored?: boolean } | null;
