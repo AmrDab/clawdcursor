@@ -402,6 +402,25 @@ describe('the indicator has two modes', () => {
     expect(states(glows[0])).toEqual(['ON', 'ON', 'OFF']);
   });
 
+  it('a paused burst turns the glow off at once (no tail), keeps the pill, and resume turns it back on', () => {
+    controlBanner.pin();
+    controlBanner.setActivity('Typing in Edge');
+    controlBanner.burstEvent('start');
+    controlBanner.burstEvent('pause');
+    expect(states(glows[0])).toEqual(['ON', 'OFF']);
+    expect(controlBanner.isVisible()).toBe(true);
+    expect(spawned[0].written).toContain('ACTIVITY Paused — your turn');
+    controlBanner.burstEvent('resume');
+    expect(states(glows[0])).toEqual(['ON', 'OFF', 'ON']);
+    expect(spawned[0].written.at(-1)).toBe('ACTIVITY Typing in Edge');
+    vi.advanceTimersByTime(10 * TAIL);
+    expect(states(glows[0])).toEqual(['ON', 'OFF', 'ON']);   // up for the rest of the burst
+    controlBanner.burstEvent('pause');
+    controlBanner.burstEvent('end');   // given up while paused: the glow is already down, nothing flashes
+    vi.advanceTimersByTime(10 * TAIL);
+    expect(states(glows[0])).toEqual(['ON', 'OFF', 'ON', 'OFF']);
+  });
+
   it('the glow rides the pill: killed with it, never spawned in the paused form, spawned again after it', () => {
     controlBanner.pin();
     controlBanner.showPaused({ id: 1, message: 'Sign in', since: 0 }, () => {});

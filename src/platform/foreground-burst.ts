@@ -1,7 +1,8 @@
 /**
  * Rung R2 of the own-window ladder: a short foreground burst, only when R0 and R1 cannot do the step. Waits until the user
  * has been idle, saves their foreground window and cursor, focuses the target, runs the acts, puts both back. The user
- * always wins: input of theirs mid-burst ends it, and their window is then left alone.
+ * always wins: input of theirs mid-burst PAUSES it (their window and cursor come back at once, the step stops), and once they
+ * have been idle again the step is run again from the start with the target re-focused. Never fought for the foreground.
  */
 import type { WindowInfo } from './types';
 import { unguarded } from './pointer-guard';
@@ -17,32 +18,42 @@ export interface BurstPlatform {
 }
 export type BurstTarget = { processId?: number; handle?: number; processName?: string; title?: string };
 
-/** How long the user must have been idle, how long to wait for that, and how often to look. Tests shorten the last two. */
-export const burstTiming = { idleMs: 1000, maxWaitMs: 5000, pollMs: 200 };
+/**
+ * How long the user must have been idle, how long to wait for that, and how often to look. Tests shorten the last two.
+ * `resumeIdleMs`: how long the user must be idle before a paused burst resumes; `pauseMaxMs`: the most time one burst may spend paused for the user in all; `maxResumes`: the most times it resumes.
+ */
+export const burstTiming = { idleMs: 1000, maxWaitMs: 5000, pollMs: 200, resumeIdleMs: 4000, pauseMaxMs: 90_000, maxResumes: 3 };
 
 let bursts = 0;
 /** Foreground bursts run since the task began (the pill / status shows it). */
 export const burstCount = (): number => bursts;
 export const resetBurstCount = (): void => { bursts = 0; };
 
-/** Told when a burst starts (true) and ends (false): the on-screen indicator goes full-screen for its length (banner.ts). */
-let onBurst: ((start: boolean) => void) | null = null;
-export function setOnBurst(f: ((start: boolean) => void) | null): void { onBurst = f; }
-const announce = (start: boolean) => { try { onBurst?.(start); } catch { /* cosmetic */ } };
+/** Told when a burst starts, pauses for the user, resumes, and ends: the indicator goes full-screen for its length (banner.ts). */
+export type BurstEvent = 'start' | 'pause' | 'resume' | 'end';
+let onBurst: ((e: BurstEvent) => void) | null = null;
+export function setOnBurst(f: ((e: BurstEvent) => void) | null): void { onBurst = f; }
+const announce = (e: BurstEvent) => { try { onBurst?.(e); } catch { /* cosmetic */ } };
 
 export interface Burst {
   /**
-   * Run one of the burst's own inputs (every input of the burst goes through here: one that does not reads as the user's). Skipped (`done: false`, and the burst ends as yielded) when the user has typed, moved
-   * the mouse or switched windows since the last act: GetLastInputInfo counts our synthetic input too, so the baseline is
-   * taken again right after each act of ours.
+   * Run one of the burst's own inputs (every input of the burst goes through here: one that does not reads as the user's).
+   * Skipped (`done: false`) when the user has typed, moved the mouse or switched windows since the last act: GetLastInputInfo
+   * counts our synthetic input too, so the baseline is taken again right after each act of ours. The caller then returns
+   * at once; the burst pauses for the user and calls `fn` AGAIN once they are idle, so `fn` must be safe to run again
+   * from the start (whole-value, idempotent steps).
    */
   act<R>(f: () => Promise<R>): Promise<{ done: true; value: R } | { done: false }>;
 }
 export type BurstResult<T> =
   /** restored: the user's window and cursor are verified back (false when they took over, `yielded`). */
   | { ran: true; value: T; yielded: boolean; restored: boolean }
-  /** user-busy: never idle in time; no-focus: the target did not come to the front. Either way: R3, pause_for_user. */
-  | { ran: false; reason: 'user-busy' | 'no-focus' };
+  /**
+   * user-busy: never idle in time; no-focus: the target did not come to the front; paused-out: paused for the user, who did
+   * not settle within the budget; target-changed: paused, and the target window is gone or no longer the same one. Either
+   * way: R3, pause_for_user, and the user's window and cursor are theirs.
+   */
+  | { ran: false; reason: 'user-busy' | 'no-focus' | 'paused-out' | 'target-changed' };
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const same = (w: WindowInfo | null, t: BurstTarget) =>
@@ -68,32 +79,84 @@ export async function withForegroundBurst<T>(p: BurstPlatform, target: BurstTarg
     return { ran: false, reason: 'no-focus' };
   }
   bursts++;
-  announce(true);
+  announce('start');
+  const targetHandle = now?.handle ? Number(now.handle) : undefined;
 
   let base = (await p.userIdle().catch(() => null))?.tick;
   let yielded = false;
+  let skipped = false; // an act was refused: the step did not finish
+  let ownCursor = cursor;
   const userActed = async () => {
     const now = (await p.userIdle().catch(() => null))?.tick;
     return (base !== undefined && now !== undefined && now !== base) || !same(await p.getActiveWindow().catch(() => null), target);
   };
   const burst: Burst = {
     async act(f) {
-      if (yielded || await userActed()) { yielded = true; return { done: false }; }
+      if (skipped) return { done: false };
+      if (yielded || await userActed()) {
+        yielded = skipped = true;
+        announce('pause');
+        // Their input must land where they expect: their window goes back if ours is still in front, and the mouse if it is
+        // still where our last act left it (a moved mouse is theirs).
+        if (same(await p.getActiveWindow().catch(() => null), target)) {
+          if (before?.handle) await p.restoreForeground(Number(before.handle)).catch(() => false);
+          const c = await p.cursorPos().catch(() => null);
+          if (cursor && c && ownCursor && c.x === ownCursor.x && c.y === ownCursor.y) await unguarded(() => p.mouseMove(cursor.x, cursor.y)).catch(() => undefined);
+        }
+        return { done: false };
+      }
       const value = await f();
       base = (await p.userIdle().catch(() => null))?.tick;
+      ownCursor = await p.cursorPos().catch(() => null);
       return { done: true, value };
     },
   };
+  /** Paused: wait for the user to be idle again within the budget, then re-focus the same target. Null: resumed; else why not. */
+  let pausedMs = 0;
+  let resumes = 0;
+  const settle = async (): Promise<'paused-out' | 'target-changed' | null> => {
+    const t0 = Date.now();
+    for (; ;) {
+      const idle = await p.userIdle().catch(() => null);
+      if (idle && idle.idleMs >= burstTiming.resumeIdleMs) break;
+      if (!idle || pausedMs + Date.now() + burstTiming.pollMs - t0 > burstTiming.pauseMaxMs) return 'paused-out';
+      await sleep(burstTiming.pollMs);
+    }
+    pausedMs += Date.now() - t0;
+    if (++resumes > burstTiming.maxResumes) return 'paused-out';
+    const usersNow = await p.getActiveWindow().catch(() => null);
+    const focused = await p.focusWindow(target).catch(() => false);
+    const w = await p.getActiveWindow().catch(() => null);
+    if (!focused || !same(w, target) || (targetHandle !== undefined && Number(w?.handle) !== targetHandle)) {
+      // Gone or another window: whatever came up, the user's window goes back.
+      if (usersNow?.handle && w && w.handle !== usersNow.handle) await p.restoreForeground(Number(usersNow.handle)).catch(() => false);
+      return 'target-changed';
+    }
+    return null;
+  };
   let value: T;
   let restored = false;
-  try { value = await fn(burst); } finally {
+  let gaveUp: 'paused-out' | 'target-changed' | null = null;
+  try {
+    for (; ;) {
+      value = await fn(burst);
+      if (!skipped) break;
+      gaveUp = await settle();
+      if (gaveUp) break;
+      base = (await p.userIdle().catch(() => null))?.tick;
+      ownCursor = await p.cursorPos().catch(() => null);
+      skipped = yielded = false;
+      announce('resume');
+    }
+  } finally {
     if (!yielded) yielded = await userActed();
     // Not when the user took over: their window and mouse are theirs.
     if (!yielded) {
       restored = !before?.handle || await p.restoreForeground(Number(before.handle)).catch(() => false);
       if (cursor) await unguarded(() => p.mouseMove(cursor.x, cursor.y)).catch(() => { restored = false; });
     }
-    announce(false);
+    announce('end');
   }
-  return { ran: true, value, yielded, restored };
+  if (gaveUp) return { ran: false, reason: gaveUp };
+  return { ran: true, value: value!, yielded, restored };
 }

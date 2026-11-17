@@ -54,13 +54,16 @@ import type { PauseAnswer, PauseInfo } from './pause-gate';
 import { publishOverlayState, foreignOverlayState } from './overlay-state';
 import { agentWindows, isStopped, workingIn, workingWindow } from './control';
 import { appLabel } from './app-label';
-import { burstCount, resetBurstCount, setOnBurst } from '../platform/foreground-burst';
+import { burstCount, resetBurstCount, setOnBurst, type BurstEvent } from '../platform/foreground-burst';
 
 const IDLE_HIDE_MS = 30_000;
 /** How long the pill stays hidden around an agent's click, and how long to wait for it to be gone before clicking. */
 const DODGE_MS = 1_500;
 const DODGE_SETTLE_MS = 90;
 const PAUSED_OUTLINE = '#3b82f6'; // blue — "your turn"
+/** What the pill says while an R2 burst is paused for the user. */
+const PAUSED_LABEL = 'Paused — your turn';
+
 /** How long the full-screen glow stays up after the last foreground input, or after a foreground burst ends. */
 const FOREGROUND_TAIL_MS = 1_500;
 
@@ -297,6 +300,32 @@ class ControlBanner {
     if (this.bursts > 0) return;
     this.glowTail = setTimeout(() => { this.glowTail = null; send(this.glowChild, 'OFF'); }, FOREGROUND_TAIL_MS);
     this.glowTail.unref?.();
+  }
+
+  private burstPaused = false;
+  private activityBeforePause = '';
+
+  /**
+   * An R2 burst's life as the indicator shows it. pause (the user interfered): the glow goes OFF now, no tail, the pill stays
+   * and says so; resume: the glow and the pill's label come back; end after a pause: the glow is already down.
+   */
+  burstEvent(e: BurstEvent): void {
+    if (e === 'start' || (e === 'end' && !this.burstPaused)) return this.foreground(e === 'start');
+    if (e === 'pause') {
+      this.burstPaused = true;
+      if (this.glowTail) clearTimeout(this.glowTail);
+      this.glowTail = null;
+      send(this.glowChild, 'OFF');
+      this.activityBeforePause = this.activity;
+      this.activity = PAUSED_LABEL;
+      if (!this.paused) send(this.child, `ACTIVITY ${PAUSED_LABEL}`);
+      return;
+    }
+    this.burstPaused = false;
+    this.activity = this.activityBeforePause;
+    if (!this.paused) send(this.child, `ACTIVITY ${this.activity || 'Working'}`);
+    if (e === 'resume') this.foreground(); // glow back on (bursts > 0, so no tail)
+    else this.bursts = Math.max(0, this.bursts - 1);
   }
 
   /** The ghost cursor: the outline draws a small pointer here (screen pixels, Windows) for about a second and a half. */
@@ -617,6 +646,7 @@ class ControlBanner {
     this.holds = 0;
     this.idleWhileHeld = false;
     this.bursts = 0;
+    this.burstPaused = false;
   }
 }
 
@@ -636,6 +666,6 @@ setOnAgentInput(method => {
   if (GUARDED_METHODS[method]?.kind === 'input') controlBanner.foreground();
 });
 // ...and every R2 burst, for its whole length.
-setOnBurst(start => controlBanner.foreground(start));
+setOnBurst(e => controlBanner.burstEvent(e));
 // Captures: the overlay is never in one — it excludes itself where the OS can, and steps aside where it cannot.
 setBeforeCapture(() => controlBanner.beforeCapture());

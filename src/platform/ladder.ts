@@ -54,8 +54,12 @@ export async function viaLadder<T>(
     try { return { value: await step.r2(act) }; } catch (e) { if (e instanceof Yielded) return null; throw e; }
   });
   if (!burst.ran) {
-    const why = burst.reason === 'user-busy' ? 'the user is at the keyboard' : 'its window would not come to the front';
-    note(`R3: ${why}, so nothing was done; ${ASK}`);
+    const paused = burst.reason === 'paused-out' || burst.reason === 'target-changed';
+    const why = burst.reason === 'user-busy' ? 'the user is at the keyboard'
+      : burst.reason === 'paused-out' ? 'the step was paused for the user, who kept using the computer'
+      : burst.reason === 'target-changed' ? 'the step was paused for the user and its window was gone or changed when they were done'
+      : 'its window would not come to the front';
+    note(`R3: ${why}, so ${paused ? 'it was given up and their window left alone' : 'nothing was done'}; ${ASK}`);
     return { rung: 'R3', why: `${why}; ${ASK}` };
   }
   if (!burst.value) {

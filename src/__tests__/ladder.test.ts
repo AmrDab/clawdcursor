@@ -81,11 +81,12 @@ describe('viaLadder, Windows', () => {
     expect(notes[0]).toMatch(/^R3: .*pause_for_user/);
   });
 
-  it('the user acts mid-burst: R3, and their window is left alone', async () => {
+  it('the user acts mid-burst and never settles: paused, then R3, and their window is left alone', async () => {
     const { s, log, notes, platform } = windows();
-    const r = await viaLadder(platform, 42, { r2: async act => { await act(async () => { log.push('first'); }); s.tick += 500; await act(async () => { log.push('second'); }); return 'x'; } });
+    burstTiming.pauseMaxMs = 60;
+    const r = await viaLadder(platform, 42, { r2: async act => { await act(async () => { log.push('first'); }); s.tick += 500; s.idleMs = 10; await act(async () => { log.push('second'); }); return 'x'; } });
     expect(r.rung).toBe('R3');
-    expect(log).toEqual(['focus', 'first']);
+    expect(log).toEqual(['focus', 'first', 'restore 500', 'cursor']);
     expect(notes[0]).toMatch(/^R3: .*pause_for_user/);
   });
 
