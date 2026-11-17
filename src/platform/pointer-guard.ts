@@ -188,7 +188,7 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
       await confirmCheck(m, args, target);
       await g.before();
       announce(m);
-      if (m.startsWith('mouse')) pointAt(args[0], args[1]);
+      if (m.startsWith('mouse') && m !== 'mouseMoveRelative') pointAt(args[0], args[1]);
       const r = await f(...args);
       g.done(movesFocus(m, args));
       return r;
