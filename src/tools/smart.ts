@@ -292,9 +292,9 @@ export function getSmartTools(): ToolDefinition[] {
         // The window an OCR match must fall in: the caller's process when one is
         // named (live macOS: processId=Calculator, yet the menu-bar clock was
         // clicked), else the focused window.
-        let scopeWin: { bounds?: { x: number; y: number; width: number; height: number } } | null = activeWin;
+        let scopeWin: { title?: string; processName?: string; bounds?: { x: number; y: number; width: number; height: number } } | null = activeWin;
         if (processId && activeWin?.processId !== processId) {
-          const wins: Array<{ processId: number; isMinimized?: boolean; bounds: { x: number; y: number; width: number; height: number } }> =
+          const wins: Array<{ processId: number; title?: string; processName?: string; isMinimized?: boolean; bounds: { x: number; y: number; width: number; height: number } }> =
             await Promise.resolve(ctx.a11y.getWindows?.(true)).catch(() => []) ?? [];
           scopeWin = wins
             .filter(w => w.processId === processId && !w.isMinimized && w.bounds?.width > 0 && w.bounds?.height > 0)
@@ -304,8 +304,10 @@ export function getSmartTools(): ToolDefinition[] {
         let ocrRefused = false;
         // A click point in another app's window (a system dialog on top of the target) is refused, not clicked.
         const clickTargetPid = processId || activeWin?.processId;
-        const clickTargetName = activeWin && activeWin.processId === clickTargetPid
-          ? (activeWin.title ? `${quoteScreenText(activeWin.title)} (${activeWin.processName || 'process ' + clickTargetPid})` : activeWin.processName)
+        // The focused window when it is the target, else the caller's window found above.
+        const targetWin = activeWin && activeWin.processId === clickTargetPid ? activeWin : processId ? scopeWin : null;
+        const clickTargetName = targetWin
+          ? (targetWin.title ? `${quoteScreenText(targetWin.title)} (${targetWin.processName || 'process ' + clickTargetPid})` : targetWin.processName)
           : undefined;
         const foreignRefusal = (x: number, y: number, label: string) =>
           foreignWindowRefusal(ctx.platform, x, y, clickTargetPid, label, clickTargetName);

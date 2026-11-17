@@ -32,6 +32,11 @@ describe('clipboardInfoHoldsNonText (osascript clipboard info)', () => {
     ['{{«class furl», 40}, {«class utf8», 40}}', true],
     ['{{«class RTFD», 900}, {«class RTF », 100}}', true],
     ['{{PDF picture, 2000}}', true],
+    // What osascript really prints (Mac check 2026-11-17): a flat list, no braces.
+    ['«class PNGf», 116278, «class AVIF», 6905, «class 8BPS», 1176926, GIF picture, 23460, «class jp2 », 1126402, JPEG picture, 140932, TIFF picture, 4198020, «class BMPf», 4198470, «class TPIC», 23006', true],
+    ['«class utf8», 0, «class ut16», 2, string, 0, Unicode text, 0', false],
+    ['«class furl», 40, «class utf8», 40', true],
+    ['«class RTF », 1200, «class utf8», 10, «class ut16», 22, string, 10, scrap styles, 22, Unicode text, 20, styled Clipboard text, 22', false],
     ['', false],
     ['missing value', false],
   ])('%s → %s', (info, expected) => {

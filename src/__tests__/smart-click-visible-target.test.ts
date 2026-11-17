@@ -279,4 +279,15 @@ describe('smart_click never clicks in another app', () => {
     expect(mouseClick).not.toHaveBeenCalled();
     expect(r.text).toMatch(/^refused: the point "New" matched is in/);
   });
+
+  // Mac check 2026-11-17: with another app focused the refusal said "on top of process 39639".
+  it('the target is not the focused window: the refusal names it by title and app', async () => {
+    const { ctx, mouseClick } = ctxAt(async () => DIALOG);
+    (ctx as any).a11y.getActiveWindow = vi.fn(async () => ({ processId: 1, processName: 'TextEdit', title: 'Untitled', bounds: { x: 0, y: 0, width: 800, height: 600 } }));
+    (ctx as any).a11y.getWindows = vi.fn(async () => [{ processId: 3648, processName: 'ugraf', title: 'Designcenter Modeling', isMinimized: false, bounds: { x: 2790, y: -1086, width: 1932, height: 1092 } }]);
+    (ctx as any).a11y.invokeElement = vi.fn(async () => ({ success: false, clickPoint: { x: 100, y: 200 } }));
+    const r = await smartClick.handler({ target: 'New', processId: 3648, timeout: 1500 }, ctx);
+    expect(mouseClick).not.toHaveBeenCalled();
+    expect(r.text).toMatch(/which is on top of "Designcenter Modeling" \(ugraf\) — nothing was clicked/);
+  });
 });

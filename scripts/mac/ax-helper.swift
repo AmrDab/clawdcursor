@@ -1240,27 +1240,26 @@ func cmdFrontmost() -> Never {
     emit(["ok": true, "locked": locked, "frontmost": info])
 }
 
-/// The window a user SEES at a point (--x, --y: points, top-left origin, like a click). One front-to-back pass over the
-/// on-screen windows, modal and alert layers included (unlike topmostRegularApp). Skips invisible windows, clawdcursor's own,
-/// and the WindowServer's (menu bar, cursor). `window` is null when nothing is there.
+/// The window a click at a point would reach (--x, --y: points, top-left origin, like a click), modal and alert windows
+/// included. Asked of the system-wide accessibility element, which hit-tests the way a click is routed: a click-through
+/// overlay is not "on top". The first CGWindowList window containing the point was the Dock's full-screen window (layer
+/// 20) for every point, or a writing assistant's overlay (Mac check 2026-11-17). `window` is null when it cannot be told
+/// (no answer, no Accessibility permission) or the point is on clawdcursor's own window: callers then go ahead.
 func cmdWindowAt() -> Never {
     guard let x = Double(opts["x"] ?? ""), let y = Double(opts["y"] ?? "") else { fail("failed", "window-at: needs --x and --y") }
-    guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+    var hit: AXUIElement?
+    var pid: pid_t = 0
+    guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(x), Float(y), &hit) == .success,
+          let el = hit, AXUIElementGetPid(el, &pid) == .success, pid > 0, pid != ownPid else {
         emit(["ok": true, "window": NSNull()])
     }
-    for w in list {
-        guard let pid = w[kCGWindowOwnerPID as String] as? Int32, pid != ownPid else { continue }
-        let owner = (w[kCGWindowOwnerName as String] as? String) ?? ""
-        if owner == "Window Server" || isOwnProcessName(owner) { continue }
-        if ((w[kCGWindowAlpha as String] as? Double) ?? 1) <= 0 { continue }
-        guard let b = w[kCGWindowBounds as String] as? [String: Double],
-              let bx = b["X"], let by = b["Y"], let bw = b["Width"], let bh = b["Height"],
-              x >= bx, x < bx + bw, y >= by, y < by + bh else { continue }
-        var d: [String: Any] = ["processId": Int(pid), "processName": owner]
-        if let t = w[kCGWindowName as String] as? String, !t.isEmpty { d["title"] = t }
-        emit(["ok": true, "window": d])
-    }
-    emit(["ok": true, "window": NSNull()])
+    let owner = NSRunningApplication(processIdentifier: pid)?.localizedName ?? ""
+    if isOwnProcessName(owner) { emit(["ok": true, "window": NSNull()]) }
+    var d: [String: Any] = ["processId": Int(pid), "processName": owner]
+    // The title of the window the hit element is in (or the window itself).
+    let win: CFTypeRef? = str(copyAttr(el, "AXRole").value) == "AXWindow" ? (el as CFTypeRef) : copyAttr(el, "AXWindow").value
+    if let w = win, isElement(w), let t = str(copyAttr(w as! AXUIElement, "AXTitle").value), !t.isEmpty { d["title"] = t }
+    emit(["ok": true, "window": d])
 }
 
 func cmdWindows() -> Never {
