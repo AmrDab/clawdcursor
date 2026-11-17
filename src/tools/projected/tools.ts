@@ -29,7 +29,9 @@ import { renderUIMap } from '../../core/sense/ui-map-render';
 import { wrapUntrustedScreenContent, screenJson, quoteScreenText } from '../../core/untrusted-screen-content';
 import { resolveRef } from '../../core/sense/ui-map-resolve';
 import { ensureVisible } from '../../core/sense/ui-map-visible';
-import { findActionButton, findInputField } from '../../core/sense/ui-map-find';
+import { findActionButton, findInputField, type FindResult } from '../../core/sense/ui-map-find';
+import { inferCapabilities } from '../../core/sense/ui-map-normalize';
+import type { UIMap, UIElement } from '../../core/sense/ui-map-types';
 import { pasteChoice, CLIPBOARD_HELD_REFUSAL, waitForPaste, writeClipboardVerified, readBackTyped, setResult, setVerdict, fieldRead, typesAsKeys, EMPTY_AFTER_TYPING, selectAllScope, type Retyped } from '../paste-guard';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../../core/control';
 import { timeWait } from '../../core/observability/steps';
@@ -55,6 +57,26 @@ async function finderMap(ctx: AgentToolContext, rawMaxCost: unknown) {
   const map = await compileUIMap(defaultCompileDeps(ctx.platform, now, id), { max_cost: requested });
   holder.put(map, now, requested);
   return map;
+}
+
+/**
+ * No match on screen, but one scrolled out of view: name it, with the by-name call that reaches it. Out of view it has no
+ * place to click and no element_id, yet set_value and invoke by name work on it. Mac bench 2026-11-17 (web-long-read): the
+ * Answer field and Submit button at the end of a long page were out of view, find_field / find_button said "none" with no
+ * candidates, and four calls went into finding them.
+ */
+function withOffscreenMatch(
+  r: FindResult, map: UIMap, query: string,
+  find: (els: UIElement[], snapshotId: string, q: string) => FindResult,
+  next: (name: string) => string,
+): FindResult | (FindResult & { offscreen: { name: string; role: string }; next: string }) {
+  if (r.status !== 'none' || !map.offscreen?.length) return r;
+  // ui-map.ts strips their capabilities (nothing to click); the finders rank only clickable / editable elements.
+  const off = map.offscreen.map(e => ({ ...e, ...inferCapabilities({ role: e.role, source: 'a11y', enabled: e.state?.enabled !== false }) }));
+  const hit = find(off, map.snapshot_id, query);
+  if (hit.status !== 'ok') return r;
+  const name = off.find(e => e.id === hit.best.element_id)?.text ?? hit.best.label;
+  return { ...r, reason: `${r.reason}; one is scrolled out of view`, offscreen: { name, role: hit.best.role }, next: next(name) };
 }
 
 /** read_screen folds an embedded document of more elements than this into one line while it lists the app's own controls (#383). */
@@ -1276,7 +1298,9 @@ export function buildUnifiedTools(): UnifiedTool[] {
       async execute(args, ctx) {
         const map = await finderMap(ctx, args.max_cost);
         if (!map) return { success: false, text: 'find_action_button: no UIMap holder on this context.' };
-        const r = findActionButton(map.elements, map.snapshot_id, String(args.intent ?? ''));
+        const intent = String(args.intent ?? '');
+        const r = withOffscreenMatch(findActionButton(map.elements, map.snapshot_id, intent), map, intent, findActionButton,
+          name => `accessibility {"action":"invoke","name":${JSON.stringify(name)}} (works out of view, no scrolling)`);
         return { success: r.status === 'ok', text: screenJson(r) };
       },
     },
@@ -1292,7 +1316,9 @@ export function buildUnifiedTools(): UnifiedTool[] {
       async execute(args, ctx) {
         const map = await finderMap(ctx, args.max_cost);
         if (!map) return { success: false, text: 'find_input_field: no UIMap holder on this context.' };
-        const r = findInputField(map.elements, map.snapshot_id, String(args.purpose ?? ''));
+        const purpose = String(args.purpose ?? '');
+        const r = withOffscreenMatch(findInputField(map.elements, map.snapshot_id, purpose), map, purpose, findInputField,
+          name => `accessibility {"action":"set_value","name":${JSON.stringify(name)},"value":"<text>"} (works out of view, no scrolling)`);
         return { success: r.status === 'ok', text: screenJson(r) };
       },
     },

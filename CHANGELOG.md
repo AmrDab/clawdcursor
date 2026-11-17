@@ -5,6 +5,14 @@ All notable changes to Clawd Cursor will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **A field or button scrolled out of view at the end of a long page (macOS).** Chrome gives such an element a frame of
+  height 0 at the window's bottom edge, and three tools mishandled it (Mac benchmark, `web-long-read`):
+  - `find` listed that frame as a position. It now says `(offscreen)`, as on Windows and Linux, and `smart_click` no
+    longer clicks the window's edge for it.
+  - `find_field` / `find_button` answered `none` with no candidates. A match out of view is now named, with the call that
+    reaches it by name, `set_value` or `invoke`, which work without scrolling.
+  - `smart_type` focused the field by name, the page kept the focus, and the reply said the text went into the field.
+    When the page keeps the focus, nothing is typed, and the reply points to `set_value` by name.
 - **`smart_click` never clicks in another app's window.** It kept an OCR match inside the target window's rectangle only,
   so a system dialog on top of the window (macOS "Accessibility Access") was clicked when its text matched the label.
   The window at the click point is now asked first (macOS `ax-helper window-at`, an accessibility hit test that skips
