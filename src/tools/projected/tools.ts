@@ -1551,7 +1551,9 @@ async function clickBoundsFallback(
   // A coordinate click hits whatever is on top. When the element was looked up in a named process (not the window in
   // front), the ladder delivers the click to its window (R1), or brings that window up for a moment (R2), so the click
   // can't land on a window covering it.
-  const via = await viaLadder(ctx.platform, processId, { r1: { name, input: { click: true } }, r2: async act => { await act(() => ctx.platform.mouseClick(cx, cy)); } });
+  // replay:false — this is a fixed-coordinate click (cx,cy resolved before the burst); if the user interrupts and scrolls,
+  // re-clicking the old point could hit the wrong thing, so an interruption goes to R3 rather than replay.
+  const via = await viaLadder(ctx.platform, processId, { r1: { name, input: { click: true } }, r2: async act => { await act(() => ctx.platform.mouseClick(cx, cy)); } }, { replay: false });
   if (via.rung === 'R3') return null;
   await sleep(150);
   if (via.rung === 'R1') return { success: true, text: `Clicked ${quoteScreenText(name)} via a window message (the element exposes no invoke/toggle/select pattern).`, targetLabel: name };

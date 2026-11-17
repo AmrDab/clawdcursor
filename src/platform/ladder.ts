@@ -32,6 +32,7 @@ const canBurst = (p: LadderPlatform): p is LadderPlatform & BurstPlatform =>
 export async function viaLadder<T>(
   platform: LadderPlatform, pid: number | undefined,
   step: { r1?: { name?: string; input: DeliverInput }; r2: (act: Act) => Promise<T> },
+  opts: { replay?: boolean } = {},
 ): Promise<LadderResult<T>> {
   if (pid === undefined) return { rung: 'R2', value: await step.r2(direct) };
   if (!canBurst(platform)) {
@@ -52,12 +53,13 @@ export async function viaLadder<T>(
   const burst = await withForegroundBurst(platform, { processId: pid }, async b => {
     const act: Act = async f => { const a = await b.act(f); if (!a.done) throw new Yielded(); return a.value; };
     try { return { value: await step.r2(act) }; } catch (e) { if (e instanceof Yielded) return null; throw e; }
-  });
+  }, opts);
   if (!burst.ran) {
-    const paused = burst.reason === 'paused-out' || burst.reason === 'target-changed';
+    const paused = burst.reason === 'paused-out' || burst.reason === 'target-changed' || burst.reason === 'no-replay';
     const why = burst.reason === 'user-busy' ? 'the user is at the keyboard'
       : burst.reason === 'paused-out' ? 'the step was paused for the user, who kept using the computer'
       : burst.reason === 'target-changed' ? 'the step was paused for the user and its window was gone or changed when they were done'
+      : burst.reason === 'no-replay' ? 'the step was paused for the user, and a click by position is not safe to repeat once they have moved things'
       : 'its window would not come to the front';
     note(`R3: ${why}, so ${paused ? 'it was given up and their window left alone' : 'nothing was done'}; ${ASK}`);
     return { rung: 'R3', why: `${why}; ${ASK}` };

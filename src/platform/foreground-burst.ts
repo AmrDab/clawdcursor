@@ -50,17 +50,22 @@ export type BurstResult<T> =
   | { ran: true; value: T; yielded: boolean; restored: boolean }
   /**
    * user-busy: never idle in time; no-focus: the target did not come to the front; paused-out: paused for the user, who did
-   * not settle within the budget; target-changed: paused, and the target window is gone or no longer the same one. Either
+   * not settle within the budget; target-changed: paused, and the target window is gone or no longer the same one;
+   * no-replay: paused during a step that is not safe to run again (a fixed-coordinate click), so it is not redone. Either
    * way: R3, pause_for_user, and the user's window and cursor are theirs.
    */
-  | { ran: false; reason: 'user-busy' | 'no-focus' | 'paused-out' | 'target-changed' };
+  | { ran: false; reason: 'user-busy' | 'no-focus' | 'paused-out' | 'target-changed' | 'no-replay' };
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const same = (w: WindowInfo | null, t: BurstTarget) =>
   !!w && ((t.handle !== undefined && Number(w.handle) === t.handle) || (t.processId !== undefined && (w.processId === t.processId || w.hostedProcessId === t.processId)));
 
-export async function withForegroundBurst<T>(p: BurstPlatform, target: BurstTarget, fn: (b: Burst) => Promise<T>): Promise<BurstResult<T>> {
-  const before = await p.getActiveWindow().catch(() => null);
+export async function withForegroundBurst<T>(p: BurstPlatform, target: BurstTarget, fn: (b: Burst) => Promise<T>, opts: { replay?: boolean } = {}): Promise<BurstResult<T>> {
+  // replay (default true): the step is whole-value and safe to run again from the start on resume. A step that is NOT —
+  // a fixed-coordinate click, whose coordinates may be stale after the user scrolled — passes false: an interruption
+  // goes straight to R3 instead of re-clicking a point that no longer means what it did.
+  const replay = opts.replay !== false;
+  let before = await p.getActiveWindow().catch(() => null);
   // The user is already in the agent's window: nothing to take, nothing to give back.
   if (same(before, target)) return { ran: true, value: await fn({ act: async f => ({ done: true, value: await f() }) }), yielded: false, restored: false };
 
@@ -70,7 +75,7 @@ export async function withForegroundBurst<T>(p: BurstPlatform, target: BurstTarg
     if (!idle || Date.now() + burstTiming.pollMs > until) return { ran: false, reason: 'user-busy' };
     await sleep(burstTiming.pollMs);
   }
-  const cursor = await p.cursorPos().catch(() => null);
+  let cursor = await p.cursorPos().catch(() => null);
   const focused = await p.focusWindow(target);
   const now = await p.getActiveWindow().catch(() => null);
   if (!focused || !same(now, target)) {
@@ -101,7 +106,8 @@ export async function withForegroundBurst<T>(p: BurstPlatform, target: BurstTarg
         if (same(await p.getActiveWindow().catch(() => null), target)) {
           if (before?.handle) await p.restoreForeground(Number(before.handle)).catch(() => false);
           const c = await p.cursorPos().catch(() => null);
-          if (cursor && c && ownCursor && c.x === ownCursor.x && c.y === ownCursor.y) await unguarded(() => p.mouseMove(cursor.x, cursor.y)).catch(() => undefined);
+          const back = cursor;   // a const for the closure: `cursor` is reassigned on resume
+          if (back && c && ownCursor && c.x === ownCursor.x && c.y === ownCursor.y) await unguarded(() => p.mouseMove(back.x, back.y)).catch(() => undefined);
         }
         return { done: false };
       }
@@ -125,6 +131,7 @@ export async function withForegroundBurst<T>(p: BurstPlatform, target: BurstTarg
     pausedMs += Date.now() - t0;
     if (++resumes > burstTiming.maxResumes) return 'paused-out';
     const usersNow = await p.getActiveWindow().catch(() => null);
+    const cursorNow = await p.cursorPos().catch(() => null);
     const focused = await p.focusWindow(target).catch(() => false);
     const w = await p.getActiveWindow().catch(() => null);
     if (!focused || !same(w, target) || (targetHandle !== undefined && Number(w?.handle) !== targetHandle)) {
@@ -132,15 +139,21 @@ export async function withForegroundBurst<T>(p: BurstPlatform, target: BurstTarg
       if (usersNow?.handle && w && w.handle !== usersNow.handle) await p.restoreForeground(Number(usersNow.handle)).catch(() => false);
       return 'target-changed';
     }
+    // The user may have moved to another window during the pause: restore to where they WERE at this resume, not to the
+    // window and cursor from the first burst start.
+    before = usersNow;
+    cursor = cursorNow;
     return null;
   };
   let value: T;
   let restored = false;
-  let gaveUp: 'paused-out' | 'target-changed' | null = null;
+  let gaveUp: 'paused-out' | 'target-changed' | 'no-replay' | null = null;
   try {
     for (; ;) {
       value = await fn(burst);
       if (!skipped) break;
+      // A step that is not safe to run again (a fixed-coordinate click) is not redone: the user already has their window.
+      if (!replay) { gaveUp = 'no-replay'; break; }
       gaveUp = await settle();
       if (gaveUp) break;
       base = (await p.userIdle().catch(() => null))?.tick;
@@ -153,7 +166,8 @@ export async function withForegroundBurst<T>(p: BurstPlatform, target: BurstTarg
     // Not when the user took over: their window and mouse are theirs.
     if (!yielded) {
       restored = !before?.handle || await p.restoreForeground(Number(before.handle)).catch(() => false);
-      if (cursor) await unguarded(() => p.mouseMove(cursor.x, cursor.y)).catch(() => { restored = false; });
+      const c = cursor;   // a const for the closure: `cursor` is reassigned on resume
+      if (c) await unguarded(() => p.mouseMove(c.x, c.y)).catch(() => { restored = false; });
     }
     announce('end');
   }

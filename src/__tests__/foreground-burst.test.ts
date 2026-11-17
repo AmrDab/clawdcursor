@@ -178,6 +178,30 @@ describe('withForegroundBurst', () => {
       expect(runs).toBe(1);
       expect(s.fg).toBe(USER);   // whatever came up, the user's window is back
     });
+
+    it('a step that is not safe to replay (replay:false) is NOT re-run when the user interferes: R3', async () => {
+      const { s, log, platform } = fake();
+      let clicks = 0;
+      // one fixed-coordinate act; the user has already acted before it runs, so it is skipped and never redone
+      const step = async (b: Burst) => { s.tick += 99; s.idleMs = 10; return (await b.act(async () => { clicks++; })).done; };
+      const r = await withForegroundBurst(platform, { processId: 42 }, step, { replay: false });
+      expect(r).toEqual({ ran: false, reason: 'no-replay' });
+      expect(clicks).toBe(0);                         // the stale click never fired
+      expect(log.filter(l => l === 'focus 42')).toHaveLength(1);   // never re-focused to retry
+    });
+
+    it('after the user moves to another window during the pause, the final restore goes to THAT window, not the first', async () => {
+      const { s, log, platform } = fake();
+      const field = { v: '' };
+      const run = withForegroundBurst(platform, { processId: 42 },
+        stepOf(s, field, () => { s.fg = { processId: 77, handle: 700 }; s.tick += 99; s.idleMs = 10; }));
+      await new Promise(r => setTimeout(r, 60));
+      s.idleMs = 5000;   // the user is now idle, sitting in window 700
+      expect(await run).toMatchObject({ ran: true, value: true });
+      expect(field.v).toBe('Ada');
+      expect(log).toContain('restore 700');       // restored to where the user actually was at resume
+      expect(log).not.toContain('restore 500');   // never flung back to the first window
+    });
   });
 
   it('a target that does not come to the front is not a burst; the user\'s window was never left', async () => {
