@@ -50,6 +50,15 @@ describe('wakeForNameSearch', () => {
     await wakeForNameSearch({ getActiveWindow: async () => NOTCHO as never }, 11, 'linux');
     expect(wake.calls).toEqual([]);
   });
+
+  // macOS CI 2026-11-17: a platform without getActiveWindow made every find throw on the Mac runners.
+  it('never fails the search: no getActiveWindow, or a throwing one, is no wake and no error', async () => {
+    await expect(wakeForNameSearch({} as never, undefined, 'darwin')).resolves.toBeUndefined();
+    await expect(wakeForNameSearch(undefined, undefined, 'darwin')).resolves.toBeUndefined();
+    await expect(wakeForNameSearch({ getActiveWindow: () => { throw new Error('no bridge'); } } as never, undefined, 'darwin'))
+      .resolves.toBeUndefined();
+    expect(wake.calls).toEqual([]);
+  });
 });
 
 describe('onTopOfLine', () => {
