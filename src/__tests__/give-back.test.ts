@@ -17,10 +17,12 @@ vi.mock('sharp', () => ({ default: vi.fn() }));
 
 const runCalls: Array<Record<string, unknown>> = [];
 let restored = true;
+let deliver: Record<string, unknown> = { success: false, reason: 'no-control' };
 vi.mock('../platform/ps-runner', () => ({
   psRunner: {
     run: (p: Record<string, unknown>) => {
       runCalls.push(p);
+      if (p.cmd === 'deliver-to-window') return Promise.resolve(deliver);
       return Promise.resolve(p.cmd === 'restore-foreground' ? { success: restored, restored } : { success: true });
     },
     start: vi.fn(), stop: vi.fn(),
@@ -38,11 +40,29 @@ describe('by-name act gives the user\'s window back', () => {
   beforeEach(() => {
     runCalls.length = 0;
     restored = true;
+    deliver = { success: false, reason: 'no-control' };
     adapter = new WindowsAdapter();
     fgReads = [];
     vi.spyOn(adapter, 'getActiveWindow').mockImplementation(async () => (fgReads.shift() ?? null) as never);
   });
   const restores = () => runCalls.filter(c => c.cmd === 'restore-foreground');
+
+  it('a native control takes a window message first: no by-name act, no foreground change (live 2026-11-17)', async () => {
+    deliver = { success: true, verified: true, method: 'WM_SETTEXT' };
+    const set = await adapter.invokeElement({ name: 'Search', processId: 42, action: 'set-value', value: 'x' });
+    deliver = { success: true, verified: false, method: 'BM_CLICK' };
+    const click = await adapter.invokeElement({ name: 'Go', processId: 42, action: 'click' });
+    expect(set.success && click.success).toBe(true);
+    expect(runCalls.map(c => c.cmd)).toEqual(['deliver-to-window', 'deliver-to-window']);
+    expect(runCalls[0]).toMatchObject({ processId: 42, name: 'Search', setText: 'x' });
+  });
+
+  it('an unverified text delivery falls back to the by-name act', async () => {
+    deliver = { success: true, verified: false };
+    fgReads = [USER, USER];
+    await adapter.invokeElement({ name: 'Search', processId: 42, action: 'set-value', value: 'x' });
+    expect(runCalls.map(c => c.cmd)).toEqual(['deliver-to-window', 'invoke-element']);
+  });
 
   it('the act took the foreground: restores the window that was in front, and says so', async () => {
     fgReads = [USER, TARGET];

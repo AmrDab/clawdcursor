@@ -59,10 +59,11 @@ describe('WindowsAdapter.invokeElement — pattern miss surfaces bounds', () => 
   });
 
   it('normalizes a prefixed controlType to the bare name the bridge can match', async () => {
-    reply = () => ({ success: true });
+    // No native button to post to (R1 misses), so the by-name act runs.
+    reply = p => (p.cmd === 'deliver-to-window' ? { success: false, reason: 'no-control' } : { success: true });
     await adapter.invokeElement({ name: 'Save', controlType: 'ControlType.Button', processId: 1 });
-    expect(runCalls[0].cmd).toBe('invoke-element');
-    expect(runCalls[0].controlType).toBe('Button');
+    const invoke = runCalls.find(c => c.cmd === 'invoke-element')!;
+    expect(invoke.controlType).toBe('Button');
   });
 
   it('fails closed on a controlType the bridge cannot honor (parity with findElements)', async () => {

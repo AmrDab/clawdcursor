@@ -892,6 +892,18 @@ export class WindowsAdapter implements PlatformAdapter {
     try {
       // An act (not a read) on a process that is not in front may take the foreground: the user's window is put back.
       const acts = query.action !== 'get-value';
+      // R1 first: a by-name act took the foreground for ~100 ms even with give-back (live 2026-11-17); a window message to
+      // a native edit or button does not. It refuses the window in front, Chromium and password fields: then R0 below.
+      const action = query.action ?? 'click';
+      // Only for the roles R1 finds (an edit, a button): a menu item named like a button must not get the button's click.
+      const r1Role = action === 'click' ? 'Button' : 'Edit';
+      if (query.name && (!ct || ct === r1Role) && (action === 'click' || (action === 'set-value' && query.value !== undefined))) {
+        const r1 = await this.deliverToWindow({ processId, name: query.name }, action === 'click' ? { click: true } : { setText: query.value! });
+        if (r1.success && (r1.verified || action === 'click')) {
+          this.noteRoute('R1 window message, focus not moved');
+          return { success: true };
+        }
+      }
       const { result, gaveBack, focus } = await withGiveBack(this, acts ? processId : undefined, () => psRunner.run({
         cmd: 'invoke-element',
         processId,
