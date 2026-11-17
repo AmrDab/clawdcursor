@@ -21,10 +21,13 @@ export async function wakeForNameSearch(
   os: NodeJS.Platform = process.platform,
 ): Promise<void> {
   if (os !== 'darwin') return;
-  const target = pid ?? (await platform?.getActiveWindow().catch(() => null))?.processId;
-  if (!target || woken.has(target)) return;
-  woken.add(target);
-  await wakeAccessibility(target, os);
+  // Best effort: a wake must never fail the search it helps (a platform without getActiveWindow, a helper error).
+  try {
+    const target = pid ?? (await platform?.getActiveWindow?.())?.processId;
+    if (!target || woken.has(target)) return;
+    woken.add(target);
+    await wakeAccessibility(target, os);
+  } catch { /* the search goes ahead unwoken */ }
 }
 
 /**
