@@ -34,6 +34,7 @@ import { WindowsAdapter } from '../platform/windows';
 import { MacOSAdapter } from '../platform/macos';
 import { createMacAx } from '../platform/mac-ax';
 import type { WindowCapture } from '../platform/types';
+import { classifyResult } from '../core/result-codes';
 
 const ocr = () => getOcrTools()[0];
 const QUOKKA = { text: 'QUOKKA', x: 230, y: 80, width: 200, height: 40, line: 0 };
@@ -82,7 +83,9 @@ describe('ocr with processId', () => {
   it('no window on screen (none, or minimized): an error, nothing read', async () => {
     const r = await ocr().handler({ processId: 7 }, ctx({ captureWindowOf: async () => null }));
     expect(r.isError).toBe(true);
-    expect(r.text).toMatch(/Process 7 has no window on screen to read \(none open, or minimized\), so nothing was read/);
+    expect(r.text).toMatch(/No window for that process on screen \(process 7: none open, or minimized\), so nothing was read/);
+    // Mac, 2026-11-17: it read as UNKNOWN with "read the screen"; a missing window is NOT_FOUND, and the next call lists them.
+    expect(classifyResult(r.text!, true, false)).toMatchObject({ outcome: 'failed', code: 'NOT_FOUND', next: 'window {"action":"list"}' });
     expect(engine.recognizeImage).not.toHaveBeenCalled();
   });
 

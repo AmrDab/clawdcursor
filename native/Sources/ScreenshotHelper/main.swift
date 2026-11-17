@@ -137,6 +137,10 @@ func captureWindowSCK(windowId: CGWindowID, outputPath: String) -> Bool {
 // MARK: - macOS 12-13 path (CGWindowListCreateImage, silent on those versions)
 
 func captureWindow(windowId: CGWindowID, outputPath: String) -> Bool {
+    // A single-window capture needs the window server connection AppKit opens: without it this process aborted with
+    // "Assertion failed: (did_initialize), function CGS_REQUIRE_INIT" (Mac, 2026-11-17). Prohibited: no Dock icon, and
+    // it is never activated.
+    NSApplication.shared.setActivationPolicy(.prohibited)
 #if canImport(ScreenCaptureKit)
     if #available(macOS 14.0, *) {
         return captureWindowSCK(windowId: windowId, outputPath: outputPath)

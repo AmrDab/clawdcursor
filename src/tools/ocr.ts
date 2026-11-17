@@ -64,7 +64,8 @@ async function readWindowOf(
     if (err instanceof ScreenRecordingDeniedError) throw err;
     return { text: `Could not read the window of process ${pid} by itself (${err instanceof Error ? err.message : String(err)}), so nothing was read. To read it: ${focusThen}.`, isError: true };
   }
-  if (!cap) return { text: `Process ${pid} has no window on screen to read (none open, or minimized), so nothing was read.`, isError: true };
+  // Worded as the NOT_FOUND window rule reads it (result-codes.ts): its next call lists the windows.
+  if (!cap) return { text: `No window for that process on screen (process ${pid}: none open, or minimized), so nothing was read.`, isError: true };
 
   const result = await engine.recognizeImage(cap.png);
   const b = cap.bounds;
