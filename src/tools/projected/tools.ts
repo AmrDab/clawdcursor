@@ -661,7 +661,10 @@ export function buildUnifiedTools(): UnifiedTool[] {
         await sleep(150);
         const after = await ctx.platform.getActiveWindow().catch(() => null);
         const note = warning ? ` (${warning})` : '';
-        const focusWarn = focusTheftWarning(activation, before, after);
+        // Another app in front after the click is the click WORKING when that app owns the point: ask only then.
+        const atPoint = windowChange(before, after) === 'other-app'
+          ? await ctx.platform.windowAtPoint?.(x, y).catch(() => null) : null;
+        const focusWarn = focusTheftWarning(activation, before, after, atPoint);
         return { success: true, text: `Clicked ${button} x${count} at ${coordBreadcrumb(ix, iy, x, y, space, scale, ctx)}${note}${focusWarn}${focusBreadcrumb(before, after)}` };
       },
     },
@@ -1717,6 +1720,9 @@ export function focusTheftWarning(
   activation: { activated: boolean; title?: string; processName?: string; reason?: string; action?: string } | void,
   before: WindowRead,
   after: WindowRead,
+  /** The window at the click point after the click (platform.windowAtPoint), when the platform could say. */
+  atPoint?: { processId?: number } | null,
+  platform: NodeJS.Platform = process.platform,
 ): string {
   // The bridge deliberately refused to raise a self/host window (agent hub,
   // clawdcursor's own console) sitting over the click point — focus was NOT
@@ -1731,7 +1737,13 @@ export function focusTheftWarning(
       + ` over this coordinate, or resize/move the covering window out of the way.`;
   }
   const activationFailed = activation && activation.activated === false;
-  if (!activationFailed && windowChange(before, after) !== 'other-app') return '';
+  // Another app is in front, and it owns the clicked point: the click activated the app it hit. That is the click working.
+  const frontOwnsPoint = !!atPoint?.processId && atPoint.processId === (after?.hostedProcessId ?? after?.processId);
+  if (!activationFailed && (windowChange(before, after) !== 'other-app' || frontOwnsPoint)) return '';
+  if (platform === 'darwin' && !activationFailed) {
+    const name = after?.processName || after?.appName || (after?.title ? quoteScreenText(truncateTitle(after.title)) : 'an unknown app');
+    return ` ⚠ another app is now in front: ${name}; check before typing.`;
+  }
   const landed = after?.title ? quoteScreenText(truncateTitle(after.title)) : 'an unknown window';
   return ` ⚠ FOCUS NOT CONFIRMED — the click may have landed on ${landed} instead of your target`
     + ` (the OS kept another window in front, or the point is over a different window). DO NOT type next:`
