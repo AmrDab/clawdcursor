@@ -30,7 +30,8 @@
 //                  0 for the process's frontmost window; a bare "TARGET": none). Each
 //                  border follows its window and sits just above it in the stacking
 //                  order, so a window in front of the agent's still covers it. Also
-//                  "GHOST <x> <y>": the mascot drawn as a ghost cursor at that screen
+//                  "GHOST <x> <y>": the agent's cursor (a retro pixel arrow, never the
+//                  user's) drawn as a ghost cursor at that screen
 //                  point (top-left origin, tip at the point) for 1.5 s; a bare "GHOST"
 //                  hides it. Never moves the real cursor.
 //   overlay glow   the foreground-mode indicator: a click-through amber glow along
@@ -38,7 +39,7 @@
 //                  "HIDE <ms>". Never takes focus and is never part of a capture.
 //                  Adapted from the glow proven live in PR #448.
 //
-// The pill's orb (removed: the mascot replaced it) was a port of Thinking Orbs by Jakub Antalik (libraries.dev, github.com/Jakubantalik/Libraries.dev,
+// The pill's orb is a port of Thinking Orbs by Jakub Antalik (libraries.dev, github.com/Jakubantalik/Libraries.dev,
 // packages/thinking-orbs), MIT License,
 // Copyright (c) 2026 Jakub Antalik. The licence notice in full is at the top of scripts/banner.ps1, the Windows pill.
 //
@@ -230,31 +231,74 @@ func giveFocusBack() {
     handBack(to: prev)
 }
 
-// The mascot: a retro arrow cursor with two glowing eyes, one pixel grid shared with the Windows drawers
-// (scripts/mascot.json: K rim, B body, E eye; the tip is the hotspot, 0,0).
-// MASCOT-BEGIN open
-let mascotOpen: [String] = [
-    "K..........",
-    "KK.........",
-    "KBK........",
-    "KBBK.......",
-    "KBBBK......",
-    "KBBBBK.....",
-    "KBEBEBK....",
-    "KBEBEBBK...",
-    "KBEBEBBBK..",
-    "KBBBBBBBBK.",
-    "KBBBBBKKKKK",
-    "KBBKBBK....",
-    "KBK.KBBK...",
-    "KK..KBBK...",
-    "K....KBBK..",
-    ".....KBBK..",
-    "......KK...",
-]
-// MASCOT-END
-// MASCOT-BEGIN blink
-let mascotBlink: [String] = [
+/// Thinking Orbs' default state, "working", at its 20 pt size: particles running on tilted orbits around a slowly
+/// turning dotted sphere, in amber ink (the library's tint) on the dark pill. The numbers are the library's (spec/orbs-spec.json,
+/// src/engine/orbits.ts and core.ts); the Windows pill (scripts/banner.ps1, class Orb) lists them.
+final class OrbView: NSView {
+    let started = Date()
+    var redraw: Timer?
+    override var isFlipped: Bool { true }   // y grows downward, as on the canvas the numbers are for
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        redraw?.invalidate()
+        redraw = nil
+        // With Reduce Motion on: the one still frame (t = .6).
+        if window == nil || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return }
+        // About 10 frames a second, as on Windows (#414: 30 cost 3.7% of a core); a particle moves two or three points a frame.
+        redraw = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.needsDisplay = true }
+    }
+
+    /// Deterministic hash in [0, 1) (core.ts hashD).
+    func hash(_ a: Double, _ b: Double) -> Double {
+        let h = sin(a * 12.9898 + b * 78.233) * 43758.5453
+        return h - floor(h)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let box = 20.0, speed = 3.9, sized = 2.4
+        let t = redraw == nil ? 0.6 : Date().timeIntervalSince(started) * speed
+        let centre = box / 2, radius = centre * 0.82, scale = pow(box / 300, 0.6)
+        // The shared spin and tilt (core.ts makeProj).
+        let yaw = t * 0.12, st = sin(0.3), ct = cos(0.3), sy = sin(yaw), cy = cos(yaw)
+        var dots: [(x: Double, y: Double, z: Double, r: Double, ink: Double, alpha: Double)] = []
+        for orbit in 0..<3 {
+            let h1 = hash(Double(orbit), 1.7), h2 = hash(Double(orbit), 5.2), h3 = hash(Double(orbit), 8.9)
+            let ro = radius * (0.45 + 0.52 * h1), th = h1 * 2 * Double.pi, phi = acos(2 * h2 - 1)
+            // The orbit's plane: u and v at right angles to its normal.
+            let nx = sin(phi) * cos(th), ny = cos(phi), nz = sin(phi) * sin(th)
+            var ux = -ny, uy = nx
+            let ul = max(1e-6, (ux * ux + uy * uy).squareRoot())
+            ux /= ul
+            uy /= ul
+            let vx = -nz * uy, vy = nz * ux, vz = nx * uy - ny * ux
+            let turn = (0.25 + 0.55 * h3) * (h3 > 0.5 ? 1 : -1)
+            for k in 0..<13 {
+                let ghost = k < 10   // ten dots along the path, then three particles
+                let a = ghost ? Double(k) * 2 * Double.pi / 10 : t * turn + Double(k - 10) * 2 * Double.pi / 3 + h2 * 6
+                let x = (ux * cos(a) + vx * sin(a)) * ro, y = (uy * cos(a) + vy * sin(a)) * ro, z = vz * sin(a) * ro
+                let x1 = x * cy + z * sy, z1 = -x * sy + z * cy, y1 = y * ct - z1 * st, z2 = y * st + z1 * ct
+                let depth = (z2 / ro + 1) / 2
+                dots.append((x: centre + x1, y: centre - y1, z: z2,
+                             r: max(0.3, (ghost ? 0.9 * sized : (1.2 + 1.6 * depth) * sized) * scale),
+                             ink: ghost ? 0.72 : 0.3 - 0.22 * depth,
+                             alpha: ghost ? 0.5 * (0.4 + 0.6 * depth) : 1))
+            }
+        }
+        // Far to near; on a dark ground the tint (amber, #f59e0b) fades toward black with the ink (core.ts inkColor).
+        for d in dots.sorted(by: { $0.z < $1.z }) {
+            let ink = CGFloat(1 - min(1, max(0, d.ink)))
+            ctx.setFillColor(red: 245 / 255 * ink, green: 158 / 255 * ink, blue: 11 / 255 * ink, alpha: CGFloat(d.alpha))
+            ctx.fillEllipse(in: CGRect(x: d.x - d.r, y: d.y - d.r, width: 2 * d.r, height: 2 * d.r))
+        }
+    }
+}
+
+// The agent's ghost cursor: a retro pixel arrow, so it never looks like the user's cursor. One grid shared with the
+// Windows drawer (scripts/agent-cursor.json: K rim, B body; the tip is the hotspot, 0,0).
+// AGENT-CURSOR-BEGIN
+let agentCursor: [String] = [
     "K..........",
     "KK.........",
     "KBK........",
@@ -263,7 +307,7 @@ let mascotBlink: [String] = [
     "KBBBBK.....",
     "KBBBBBK....",
     "KBBBBBBK...",
-    "KBEBEBBBK..",
+    "KBBBBBBBK..",
     "KBBBBBBBBK.",
     "KBBBBBKKKKK",
     "KBBKBBK....",
@@ -273,56 +317,27 @@ let mascotBlink: [String] = [
     ".....KBBK..",
     "......KK...",
 ]
-// MASCOT-END
+// AGENT-CURSOR-END
 
-/// The mascot as crisp filled squares (no interpolation), the eyes with a soft glow. `cell` is points per grid square.
-/// The pill's left edge (it blinks: the blink frame for ~150 ms every 4 to 6 s) and the ghost cursor (which does not).
-final class MascotView: NSView {
+/// The agent cursor as crisp filled squares (no interpolation). `cell` is points per grid square.
+final class CursorView: NSView {
     let cell: CGFloat
-    var blinking = false { didSet { needsDisplay = true } }
-    var blinks = false
     override var isFlipped: Bool { true }   // row 0 is the top, the tip (0,0) the top-left corner
 
     init(cell: CGFloat) {
         self.cell = cell
-        super.init(frame: NSRect(x: 0, y: 0, width: CGFloat(mascotOpen[0].count) * cell, height: CGFloat(mascotOpen.count) * cell))
+        super.init(frame: NSRect(x: 0, y: 0, width: CGFloat(agentCursor[0].count) * cell, height: CGFloat(agentCursor.count) * cell))
     }
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func startBlinking() {
-        blinks = true
-        scheduleBlink()
-    }
-
-    func scheduleBlink() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 4...6)) { [weak self] in
-            guard let self = self, self.blinks else { return }
-            self.blinking = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-                self?.blinking = false
-                self?.scheduleBlink()
-            }
-        }
-    }
-
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        let rows = blinking ? mascotBlink : mascotOpen
         ctx.setShouldAntialias(false)   // squares on the pixel grid, no soft edges
-        func square(_ r: Int, _ c: Int) -> CGRect {
-            return CGRect(x: CGFloat(c) * cell, y: CGFloat(r) * cell, width: cell, height: cell)
-        }
-        // Rim and body first, then the eyes over them with a glow.
-        for (r, row) in rows.enumerated() {
-            for (c, ch) in row.enumerated() where ch == "K" || ch == "B" {
+        for (r, row) in agentCursor.enumerated() {
+            for (c, ch) in row.enumerated() where ch != "." {
                 ctx.setFillColor((ch == "K" ? hexColor("#C9DDF2") : hexColor("#1B2232")).cgColor)
-                ctx.fill(square(r, c))
+                ctx.fill(CGRect(x: CGFloat(c) * cell, y: CGFloat(r) * cell, width: cell, height: cell))
             }
-        }
-        ctx.setShadow(offset: .zero, blur: cell * 2.5, color: hexColor("#5FD8F0", alpha: 0.9).cgColor)
-        ctx.setFillColor(hexColor("#E9FCFF").cgColor)
-        for (r, row) in rows.enumerated() {
-            for (c, ch) in row.enumerated() where ch == "E" { ctx.fill(square(r, c)) }
         }
     }
 }
@@ -386,11 +401,9 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         return b
     }
 
-    /// The running pill's mascot, on the left in place of the orb; 2 pt squares make it 22 x 34 pt.
-    func makeMascot() -> MascotView {
-        let m = MascotView(cell: 2)
-        m.startBlinking()
-        return m
+    /// The running pill's orb (#392), in place of the blinking dot: Thinking Orbs' "working" state (OrbView).
+    func makeOrb() -> NSView {
+        return OrbView(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
     }
 
     // The running pill: [orb] ClawdCursor  <activity>  m:ss  [Stop]
@@ -731,7 +744,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             clock.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
             let stop = makeButton("Stop", "BANNER_STOP", frame: NSRect(x: 0, y: 7, width: 52, height: 24),
                                   color: rgb(64, 30, 33), textColor: rgb(252, 165, 165), fontSize: 11, radius: 6)
-            let orb = makeMascot()
+            let orb = makeOrb()
             let rowViews: [NSView] = [orb, brand, activity, clock, stop]
             rowViews.forEach { content.addSubview($0) }
             runDot = orb
@@ -881,15 +894,15 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         }
     }
 
-    // The ghost cursor: the mascot where the agent's pointer would be, about 1.5 s after the last GHOST. Click-through,
+    // The ghost cursor: a retro pixel arrow where the agent's pointer would be, about 1.5 s after the last GHOST. Click-through,
     // never in a capture, and the real cursor is never moved.
     var ghostWindow: NSWindow?
     var ghostUntil = Date.distantPast
 
-    /// `point`: screen coordinates, origin at the top-left of the primary display, the tip of the mascot at the point.
+    /// `point`: screen coordinates, origin at the top-left of the primary display, the tip of the arrow at the point.
     func showGhost(_ point: CGPoint?) {
         guard let p = point, let primary = NSScreen.screens.first else { ghostUntil = .distantPast; updateGhost(); return }
-        let m = ghostWindow?.contentView as? MascotView ?? MascotView(cell: 2)
+        let m = ghostWindow?.contentView as? CursorView ?? CursorView(cell: 2)
         if ghostWindow == nil {
             let win = NSWindow(contentRect: m.frame, styleMask: .borderless, backing: .buffered, defer: false)
             win.isOpaque = false

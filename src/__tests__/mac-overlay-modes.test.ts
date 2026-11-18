@@ -34,20 +34,19 @@ describe('macOS overlay: pill, outline, glow', () => {
     expect(ghost).toContain('addingTimeInterval(1.5)');
   });
 
-  it('the pill drags by its body, stays .screenSaver, and wears the mascot', () => {
+  it('the pill drags by its body, stays .screenSaver, and keeps the orb', () => {
     expect(swift).toContain('override func mouseDragged');
     expect(swift).toContain('panel.level = .screenSaver');
-    expect(swift).toContain('makeMascot()');
-    expect(swift).not.toContain('OrbView');
+    expect(swift).toContain('let orb = makeOrb()');
+    expect(swift).toContain('final class OrbView: NSView');
   });
 
-  it('embeds both mascot frames between markers, matching scripts/mascot.json', () => {
-    const art = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts', 'mascot.json'), 'utf8'));
-    for (const frame of ['open', 'blink']) {
-      const m = swift.match(new RegExp(String.raw`// MASCOT-BEGIN ${frame}\n([\s\S]*?)// MASCOT-END`));
-      expect(m).not.toBeNull();
-      expect([...m![1].matchAll(/"([^"]+)"/g)].map(x => x[1])).toEqual(art[frame]);
-    }
+  it('the ghost draws the agent cursor (no eyes), the grid between markers matching scripts/agent-cursor.json', () => {
+    const art = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts', 'agent-cursor.json'), 'utf8'));
+    const m = swift.match(/\/\/ AGENT-CURSOR-BEGIN\n([\s\S]*?)\/\/ AGENT-CURSOR-END/);
+    expect(m).not.toBeNull();
+    expect([...m![1].matchAll(/"([^"]+)"/g)].map(x => x[1])).toEqual(art.rows);
+    expect(swift.slice(swift.indexOf('func showGhost'), swift.indexOf('func updateGhost'))).toContain('CursorView(cell: 2)');
   });
 
   it('banner.ts spawns the glow, and sends the ghost and the multi-target line, on darwin too', () => {

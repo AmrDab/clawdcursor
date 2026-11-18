@@ -90,7 +90,7 @@ describe('the ghost cursor', () => {
     expect(ghosts()).toEqual([]);
   });
 
-  it('the Windows drawer: the mascot as the pointer, click-through, no-activate, kept out of captures, just above the agent window', () => {
+  it('the Windows drawer: a retro pixel arrow as the pointer, click-through, no-activate, kept out of captures, just above the agent window', () => {
     const ps = readFileSync(join(__dirname, '..', '..', 'scripts', 'window-outline.ps1'), 'utf8');
     expect(ps).toContain('public class GhostCursor : OverlayForm');
     expect(ps).toContain('p[0].EndsWith("GHOST")');

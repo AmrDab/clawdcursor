@@ -454,15 +454,19 @@ describe('the full-screen glow is the foreground-mode drawer only', () => {
     expect(py.slice(start, py.indexOf('\ndef ', start + 1))).not.toMatch(/get_monitor|get_n_monitors/);
   });
 
-  it('both pills draw the mascot (a blink every 4-6 s), not the orb', () => {
-    const pill = read('scripts', 'banner.ps1');
-    expect(pill).toContain('public class Mascot : Control');
-    expect(pill).toContain('rng.Next(4000, 6001)');
-    expect(pill).not.toContain('class Orb');
+  it('the pill\'s orb is still where the OS is set to reduce motion (#392)', () => {
+    expect(read('scripts', 'banner.ps1')).toContain('if (SystemParametersInfo(0x1042, 0, out animate, 0) && !animate) return;');
     const swift = read('scripts', 'mac', 'overlay.swift');
-    expect(swift).toContain('final class MascotView: NSView');
-    expect(swift).toContain('Double.random(in: 4...6)');
-    expect(swift).not.toContain('OrbView');
+    expect(swift).toContain('if window == nil || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return }');
+  });
+
+  it('both pills keep the orb: no mascot in the pill (owner, 2026-11-18)', () => {
+    const pill = read('scripts', 'banner.ps1');
+    expect(pill).toContain('public class Orb : Control');
+    expect(pill).not.toMatch(/class Mascot|MASCOT/);
+    const swift = read('scripts', 'mac', 'overlay.swift');
+    expect(swift).toContain('let orb = makeOrb()');
+    expect(swift).not.toMatch(/MascotView|makeMascot|MASCOT/);
   });
 
   it('the macOS outline is the 2.0 border: 3 pt inside the agent\'s window, amber (blue when paused), still, click-through, under the pill', () => {

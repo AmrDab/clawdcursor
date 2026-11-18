@@ -1,4 +1,4 @@
-# clawdcursor — own-window + indicator + mascot: Windows test report
+# clawdcursor — own-window + indicator: Windows test report
 
 **Branch:** `feat/own-window` · **PR:** AmrDab/clawdcursor #453 · **Date:** 2026-11-17
 **Build:** `npm run build` ✓ · **Typecheck/lint:** ✓ · **Full suite:** 3903 passed, 0 failed, 80 skipped (`vitest --project unit --project system`)
@@ -42,8 +42,8 @@ accessibility invoke     image=False  route=CDP page act, focus not moved
 ### 4. Foreground burst pauses for the user (resume threshold 4 s)
 On user interference mid-burst: user's window + cursor returned at once, glow off, pill stays "Paused — your turn"; after 4 s idle it re-focuses, glow back on, re-applies the whole change from a clean state; if it can't re-establish safely → asks the user. Two correctness fixes from the security review applied (no stale-coordinate replay; restore to where the user actually was at resume). Covered by unit tests.
 
-### 5. Mascot
-Retro arrow cursor with two glowing capsule eyes (Notcho-inspired), one pixel grid in `scripts/mascot.json`, rendered identically by the pill and the ghost cursor; blink frame every 4–6 s. A parity test checks both drawers embed the exact grid.
+### 5. Agent cursor (updated 2026-11-18, owner's call)
+The pill keeps its original orb (the mascot was removed). The ghost cursor that shows where the agent acts is a retro pixel arrow with **no eyes** — dark body, light rim — so it never looks like the user's own cursor. One grid in `scripts/agent-cursor.json`, drawn by the Windows ghost (`window-outline.ps1`) and the macOS ghost (`overlay.swift`); a parity test checks both embed the exact grid.
 
 ## Known limits (honest)
 - Pill pixel art is slightly soft at 225 % DPI (powershell.exe is DPI-unaware); ghost cursor is crisp.

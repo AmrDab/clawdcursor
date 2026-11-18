@@ -7,7 +7,7 @@
 #   TARGET <hwnd> <pid> [<hwnd> <pid> ...]   the windows to outline (the pid is for the macOS drawer; ignored here)
 #   TARGET                no window: draw nothing
 #   HIDE <ms>             step aside for a screen capture (only sent after OUTLINE_CAPTURABLE)
-#   GHOST <x> <y>         draw the agent's pointer (the mascot) at this screen point, if it is inside one of the outlined windows
+#   GHOST <x> <y>         draw the agent's pointer (a retro pixel arrow) at this screen point, if it is inside one of the outlined windows
 #   GHOST                 hide it (it hides by itself 1.5 s after the last GHOST)
 # The ghost pointer is only drawn: it never moves or touches the real cursor. Like a border it is click-through, never
 # takes focus, is kept out of captures, and sits in the z-order directly above the window it is in.
@@ -186,14 +186,15 @@ public class WindowOutline : OverlayForm {
     }
 }
 
-// The agent's pointer: the clawdcursor mascot (scripts/mascot.json), drawn as squares, its tip where it acts. Shown for 1.5 s
-// after each GHOST, only inside an outlined window, directly above that window in the z-order. It is never the real cursor.
+// The agent's pointer: a retro pixel arrow (scripts/agent-cursor.json), drawn as squares, its tip where it acts, so it never
+// looks like the user's cursor. Shown for 1.5 s after each GHOST, only inside an outlined window, directly above that window
+// in the z-order. It is never the real cursor.
 public class GhostCursor : OverlayForm {
     [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
     [DllImport("user32.dll")] static extern IntPtr MonitorFromPoint(POINT pt, int flags);
     [DllImport("shcore.dll")] static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint x, out uint y);
-    public static string[] Rows;   // the open frame, set by the script
-    static readonly Color K = Color.FromArgb(0xC9, 0xDD, 0xF2), B = Color.FromArgb(0x1B, 0x22, 0x32), E = Color.FromArgb(0xE9, 0xFC, 0xFF);
+    public static string[] Rows;   // the grid, set by the script
+    static readonly Color K = Color.FromArgb(0xC9, 0xDD, 0xF2), B = Color.FromArgb(0x1B, 0x22, 0x32);
     int x, y, lx, ly, cell;
     long until;   // DateTime ticks (UTC) it is shown until
     bool shown;
@@ -205,7 +206,7 @@ public class GhostCursor : OverlayForm {
         BackColor = B;
     }
 
-    // Cell size in physical px: 1.3 x the monitor's scale (1 at 100%, 3 at 225%), so the 17-row mascot is 17 / 51 px tall.
+    // Cell size in physical px: 1.3 x the monitor's scale (1 at 100%, 3 at 225%), so the 17-row arrow is 17 / 51 px tall.
     void SetCell(int c) {
         cell = c;
         var shape = new System.Drawing.Drawing2D.GraphicsPath(System.Drawing.Drawing2D.FillMode.Winding);
@@ -217,7 +218,7 @@ public class GhostCursor : OverlayForm {
         for (int r = 0; r < Rows.Length; r++) for (int q = 0; q < Rows[r].Length; q++) {
             char ch = Rows[r][q];
             if (ch == '.') continue;
-            using (var br = new SolidBrush(ch == 'K' ? K : ch == 'E' ? E : B)) e.Graphics.FillRectangle(br, q * cell, r * cell, cell, cell);
+            using (var br = new SolidBrush(ch == 'K' ? K : B)) e.Graphics.FillRectangle(br, q * cell, r * cell, cell, cell);
         }
     }
 
@@ -347,30 +348,9 @@ try {
 # Per-monitor-v2, like ps-bridge.ps1: the frame bounds and this window's position are PHYSICAL pixels on every monitor.
 [void][OverlayForm]::SetThreadDpiAwarenessContext([IntPtr](-4))
 
-# The art is scripts/mascot.json, embedded here (a test checks it matches). The pointer draws the open frame.
-# MASCOT-BEGIN open
-$mascotOpen = @(
-'K..........',
-'KK.........',
-'KBK........',
-'KBBK.......',
-'KBBBK......',
-'KBBBBK.....',
-'KBEBEBK....',
-'KBEBEBBK...',
-'KBEBEBBBK..',
-'KBBBBBBBBK.',
-'KBBBBBKKKKK',
-'KBBKBBK....',
-'KBK.KBBK...',
-'KK..KBBK...',
-'K....KBBK..',
-'.....KBBK..',
-'......KK...'
-)
-# MASCOT-END
-# MASCOT-BEGIN blink
-$mascotBlink = @(
+# The pointer's grid is scripts/agent-cursor.json, embedded here (a test checks it matches).
+# AGENT-CURSOR-BEGIN
+$agentCursor = @(
 'K..........',
 'KK.........',
 'KBK........',
@@ -379,7 +359,7 @@ $mascotBlink = @(
 'KBBBBK.....',
 'KBBBBBK....',
 'KBBBBBBK...',
-'KBEBEBBBK..',
+'KBBBBBBBK..',
 'KBBBBBBBBK.',
 'KBBBBBKKKKK',
 'KBBKBBK....',
@@ -389,8 +369,8 @@ $mascotBlink = @(
 '.....KBBK..',
 '......KK...'
 )
-# MASCOT-END
-[GhostCursor]::Rows = [string[]]$mascotOpen
+# AGENT-CURSOR-END
+[GhostCursor]::Rows = [string[]]$agentCursor
 
 $hex = $Color.TrimStart('#')
 [OutlineHost]::Start([Convert]::ToInt32($hex.Substring(0,2),16), [Convert]::ToInt32($hex.Substring(2,2),16), [Convert]::ToInt32($hex.Substring(4,2),16), $Thickness)

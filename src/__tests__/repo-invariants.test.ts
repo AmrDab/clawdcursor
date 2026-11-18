@@ -217,13 +217,15 @@ describe('files that must (not) be there', () => {
 
   // The orb is a port of Thinking Orbs (libraries.dev, MIT): its notice goes with it. The outline is 2.0.0's again, so
   // nothing of Border Beam is left to credit.
-  it('the macOS orb\'s licence notice stays in banner.ps1 (#392)', () => {
+  it('the orb carries the library\'s licence notice (#392)', () => {
     const pill = read('scripts', 'banner.ps1');
     expect(pill).toContain('Thinking Orbs - MIT License - Copyright (c) 2026 Jakub Antalik');
     expect(pill).toContain('The above copyright notice and this permission notice shall be included in all copies or substantial portions of');
+    expect(pill).toContain('MIT License, Copyright (c) 2026 Jakub');
     const swift = read('scripts', 'mac', 'overlay.swift');
     expect(swift).toContain('MIT License,\n// Copyright (c) 2026 Jakub Antalik');
-    // The macOS port points at the notice where it is.
+    // Both ports point at the notice where it is.
+    expect(pill).toContain('the notice is in full at the top of this file');
     expect(swift).toContain('The licence notice in full is at the top of scripts/banner.ps1');
     for (const src of [pill, swift, read('scripts', 'window-outline.ps1'), read('scripts', 'linux', 'overlay.py')]) {
       expect(src).not.toMatch(/Border Beam|border-beam/);
