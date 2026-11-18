@@ -6,7 +6,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { imageCost, imageScale } from '../platform/coord-scale';
-import { opaqueArea, opaqueAreaLine, shownHelp } from '../tools/blind-hints';
+import { drawnControlsLine, opaqueArea, opaqueAreaLine, shownHelp, SPARSE_NEXT_STEP } from '../tools/blind-hints';
+import { toCompactNames } from '../tools/compact';
 import { buildUnifiedTools } from '../tools/projected/tools';
 import { stopControl, __setControlDirForTests } from '../core/control';
 import type { UiElement } from '../platform/types';
@@ -90,6 +91,47 @@ describe('tooltips on element lines (#359)', () => {
     const platform = { getUiTree: vi.fn(async () => tree), getActiveWindow: vi.fn(async () => null), listWindows: vi.fn(async () => []) };
     const r = await t.execute({}, { platform, screen: {} } as any);
     expect(r.text).toContain('[Button] "B0" @0,0 40×40 help="Insert a sticky note"');
+  });
+});
+
+// Live 2026-11-16, Designcenter (NX): ~35 named Panes and the title-bar buttons. Not sparse (5+ named), so nothing said to press by label.
+describe('a window that names things but has nothing to press', () => {
+  const panes = ['Top DockBar', 'Quick Access Toolbar', 'Home', 'Construction', 'Base', 'Synchronous Modeling', 'Selection', 'Status Bar', 'Part Navigator']
+    .map((n, i) => el(n, 'Pane', i * 100, 40, 90, 30));
+  const chrome = [el('Designcenter Modeling', 'TitleBar', 0, 0, 1000, 30), el('System Menu Bar', 'MenuBar', 0, 0, 40, 30), el('System', 'MenuItem', 0, 0, 30, 30),
+    el('Minimize', 'Button', 900, 0, 30, 30), el('Restore', 'Button', 930, 0, 30, 30), el('Close', 'Button', 960, 0, 30, 30)];
+  const cad = [el('Designcenter Modeling', 'Window', 0, 0, 1000, 800), ...panes, ...chrome];
+
+  it('fires on the CAD tree, with the smart_click advice', () => {
+    expect(drawnControlsLine(cad)).toBe('→ Nothing here to press by name: this window lists only panes and its title-bar buttons, so its toolbars and panels are drawn by the app. ' +
+      'Press what you can see by its label: smart_click {"target":"<label>"} reads the screen itself, no screenshot. A screenshot and x,y only for a point with no label.');
+  });
+
+  it('not when a dialog is open (its buttons are in the tree), a tree is sparse, it is a browser, or there are few panes', () => {
+    expect(drawnControlsLine([...cad, el('OK', 'Button', 400, 500, 80, 30)])).toBeNull();
+    expect(drawnControlsLine([...cad, el('Name', 'Edit', 400, 400, 80, 30)])).toBeNull();
+    expect(drawnControlsLine([el('App', 'Window', 0, 0, 1000, 800), ...panes.slice(0, 3)])).toBeNull();
+    expect(drawnControlsLine(cad, true)).toBeNull();
+    const labels = ['A', 'B', 'C', 'D', 'E'].map(n => el(n, 'Text', 0, 0, 10, 10));
+    expect(drawnControlsLine([el('App', 'Window', 0, 0, 1000, 800), ...labels, ...panes.slice(0, 2)])).toBeNull();   // not sparse, nothing to press, but under 3 panes
+  });
+
+  it('read_tree adds it after the opaque line, and not to a window with something to press', async () => {
+    const t = buildUnifiedTools().find(x => x.name === 'read_screen')!;
+    const run = async (tree: UiElement[]) => (await t.execute({}, { platform: { getUiTree: vi.fn(async () => tree), getActiveWindow: vi.fn(async () => null), listWindows: vi.fn(async () => []) }, screen: {} } as any)).text;
+    expect(await run(cad)).toContain('\n→ Nothing here to press by name');
+    expect(await run([...cad, el('OK', 'Button', 400, 500, 80, 30)])).not.toContain('Nothing here to press by name');
+  });
+});
+
+describe('the opaque-area line points at labels outside the area', () => {
+  const o = { bounds: { x: 0, y: 100, width: 1000, height: 700 }, share: 0.875 };
+  it('says so, and on the compact surface names the real call like SPARSE_NEXT_STEP', () => {
+    const line = opaqueAreaLine(o);
+    expect(line).toContain('nothing inside has a name — a canvas, board or drawn view. Inside it, work from one screenshot: send all the strokes in ONE batch, then look again only at the area that changed. ' +
+      'Outside it, a button or field with a visible label is pressed with smart_click {"target":"<label>"}, no screenshot.');
+    expect(toCompactNames(line, 'accessibility')).toContain('pressed with accessibility {"action":"smart_click","target":"<label>"}, no screenshot.');
+    expect(toCompactNames(SPARSE_NEXT_STEP, 'accessibility')).toContain('accessibility {"action":"smart_click","target":"<label>"}');
   });
 });
 

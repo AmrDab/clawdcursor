@@ -105,7 +105,16 @@ describe('evaluate', () => {
     [{ all: [{ path: 'submitted.name', equals: 'Ada' }, { path: 'submitted.qty', equals: 8 }] }, false],
     [{ any: [{ path: 'submitted.name', equals: 'Bob' }, { path: 'submitted.qty', equals: 7 }] }, true],
     [{ not: { path: 'submitted.name', equals: 'Ada' } }, false],
+    // By value, not by key order: the macOS fixture writes a Swift dictionary in any order.
+    [{ path: 'submitted', equals: { qty: 7, name: 'Ada' } }, true],
+    [{ path: 'submitted', notEquals: { qty: 7, name: 'Ada' } }, false],
+    [{ path: 'submitted', equals: { qty: 8, name: 'Ada' } }, false],
   ])('%j is %s', (p, want) => expect(evaluate(p as never, fx)).toBe(want));
+
+  it('sameMembers compares objects by value too', () => {
+    const rows = { state: { rows: [{ a: 1, b: { c: 2, d: 3 } }, { e: 4 }] }, events: [] };
+    expect(evaluate({ path: 'rows', sameMembers: [{ e: 4 }, { b: { d: 3, c: 2 }, a: 1 }] } as never, rows)).toBe(true);
+  });
 
   it('is false on empty state', () => {
     expect(evaluate({ path: 'submitted.name', equals: 'Ada' }, { state: {}, events: [] })).toBe(false);

@@ -163,6 +163,7 @@ describe('expectsEffect / countFalseOk', () => {
     expect(expectsEffect(u('computer', 'type', 'act-other'))).toBe(true);
     expect(expectsEffect(u('browser', 'click', 'act-other'))).toBe(true);
     expect(expectsEffect(u('computer', 'hover', 'act-coords'))).toBe(false);
+    expect(expectsEffect(u('computer', 'mouse_move', 'act-coords'))).toBe(false);
     expect(expectsEffect(u('computer', 'wait', 'act-other'))).toBe(false);
     expect(expectsEffect(u('window', 'focus', 'act-other'))).toBe(false);
     expect(expectsEffect(u('accessibility', 'read_tree', 'blind'))).toBe(false);
@@ -192,7 +193,7 @@ describe('expectsEffect / countFalseOk', () => {
 describe('gateOf', () => {
   const base: Omit<Score, 'gate'> = { task: 't', model: 'm', archetype: 'web-form', mechanisms: ['M1'], manual: false, success: true,
     calls: 6, oracleCalls: 4, screenshots: 1, oracleScreenshots: 0, screenshotRatio: null, actName: 1, actCoords: 0, byName: 1, byCoords: 0,
-    roundTrips: 6, errors: 0, falseSuccesses: 0, falseOk: 0, falseDone: false, reloaded: false, loops: 0, seconds: 1, runs: 1, successes: 1 };
+    roundTrips: 6, errors: 0, falseSuccesses: 0, falseOk: 0, falseDone: false, reloaded: false, loops: 0, seconds: 1, runs: 1, successes: 1, tokens: null, usd: null };
 
   it('passes at the thresholds: calls = 1.5 x oracle, screenshots = oracle + 1', () => {
     expect(gateOf(base)).toEqual({ pass: true, failures: [] });
@@ -240,7 +241,7 @@ describe('report, baseline, comparison', () => {
     const md = renderMarkdown(report, compare(report, toBaseline(report)));
     expect(md).toContain('Gate: **PASS** (1/1 rows pass)');
     expect(md).toContain('## claude-code:sonnet');
-    expect(md).toContain('| web-sample | web-form | M1 | yes | 4 (4) | 4 | 0 (0) | - | 100% | 0% | 0 | 0 | 12s | pass |');
+    expect(md).toContain('| web-sample | web-form | M1 | yes | 4 (4) | 4 | 0 (0) | - | 100% | 0% | 0 | 0 | 12s | - | - | pass |');
     expect(md).toContain('- textedit-type-lines: macos only');
     expect(md).toContain('| web-sample | claude-code:sonnet | same | true | 0 | 0 | 0 | 0 |');
   });
@@ -453,5 +454,40 @@ describe('"could not reach clawdcursor" is a clawdcursor failure, never an agent
     const r = unreachable();
     r.task = { ...task, manualVerify: true, success: undefined };
     expect(score(r).gate.pass).toBe(false);
+  });
+});
+
+describe('tokens and cost', () => {
+  const meta = { date: 'd', os: 'windows' as const, clawdcursor: '2', models: ['claude-code:sonnet', 'claude-code:haiku'], skipped: [] };
+  const withUsage = (model: string, usage: AgentRun['usage']): RunRecord => ({ ...cleanRun(), model, agent: agent({ usage }) });
+
+  it('a row has none when the host reported none', () => {
+    expect(score(cleanRun())).toMatchObject({ tokens: null, usd: null });
+  });
+
+  it('prices tokens from the bench table: Sonnet 5.5 $2 in / $10 out / $0.10 cached per million', () => {
+    const s = score(withUsage('claude-code:sonnet', { in: 1_000_000, out: 100_000, cacheRead: 5_000_000 }));
+    expect(s.tokens).toEqual({ in: 1_000_000, out: 100_000, cacheRead: 5_000_000 });
+    expect(s.usd).toBeCloseTo(2 + 1 + 0.5, 6);
+    expect(score(withUsage('claude-code:haiku', { in: 1_000_000, out: 1_000_000 })).usd).toBeCloseTo(0.6, 6);
+    expect(score(withUsage('claude-code:opus', { in: 1_000_000, out: 1_000_000 })).usd).toBeCloseTo(24, 6);
+  });
+
+  it('uses the runner\'s own cost when it gives one, and none for an unpriced model', () => {
+    expect(score(withUsage('claude-code:sonnet', { in: 10, out: 10, usd: 1.25 })).usd).toBe(1.25);
+    expect(score(withUsage('codex:gpt-5', { in: 10, out: 10 }))).toMatchObject({ usd: null, tokens: { in: 10, out: 10, cacheRead: 0 } });
+  });
+
+  it('shows tokens and $ in the row and the model summary', () => {
+    const rows = [score(withUsage('claude-code:sonnet', { in: 1000, out: 200, cacheRead: 3000, usd: 0.5 })), score(cleanRun())];
+    const md = renderMarkdown(buildReport(meta, rows));
+    expect(md).toContain('| Tokens (in / out / cached) | $ |');
+    expect(md).toContain('| 1000 / 200 / 3000 | $0.50 |');
+    expect(md).toContain('tokens 1000 in / 200 out / 3000 cached, $0.50.');
+  });
+
+  it('takes the median over repeats', () => {
+    const run = (n: number) => score(withUsage('claude-code:sonnet', { in: n, out: n, cacheRead: n, usd: n }));
+    expect(aggregate([run(1), run(5), run(3)])).toMatchObject({ tokens: { in: 3, out: 3, cacheRead: 3 }, usd: 3 });
   });
 });

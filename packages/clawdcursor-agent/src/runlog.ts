@@ -3,7 +3,7 @@
  *   {type:"run", id, t, task, runner, model, command, coreVersion, surface}   first line
  *   {type:"event", t, src:"claude"|"codex"|"api", data}                       every event the agent printed (images left out)
  *   {type:"stderr", t, text}                                                   what it wrote to stderr
- *   {type:"end", t, verdict, exitCode, reason?, session?, ms}                 last line; `session` is the clawdcursor session id
+ *   {type:"end", t, verdict, exitCode, reason?, usage?, session?, ms}                 last line; `session` is the clawdcursor session id
  * Local only, readable by the owner only, the last 50 runs kept.
  */
 import * as fs from 'fs';
@@ -74,8 +74,17 @@ export function findRun(dataDir: string, idOrLast: string): string | null {
   return hit ? path.join(dir, hit) : null;
 }
 
-/** `calls`: the calls the server recorded (one line each, a batch included). */
-export interface SessionInfo { id: string; file: string; pid: number | null; started: string | null; ended: string | null; run?: string; calls: number }
+/**
+ * `calls`: the calls the server recorded (one line each, a batch included). `acted`: how the run acted, a batch counted by its
+ * steps like bench/lib/scorer.ts does: `name` = by accessibility name or visible label (smart_click included), `coords` = by x,y, `shots` = screenshots.
+ */
+export interface Acted { name: number; coords: number; shots: number }
+export interface SessionInfo { id: string; file: string; pid: number | null; started: string | null; ended: string | null; run?: string; calls: number; acted: Acted }
+
+/** The `how it acted` line. The classes are the session log's own (src/surface/session-log.ts), written on every call and step. */
+export function actedLine(a: Acted): string {
+  return `how it acted: ${a.name} by name or label · ${a.coords} by coordinates · ${a.shots} screenshots`;
+}
 
 function readSessionFile(file: string): SessionInfo | null {
   let lines: string[];
@@ -85,15 +94,20 @@ function readSessionFile(file: string): SessionInfo | null {
   let ended: string | null = null;
   let sawEnd = false;
   let calls = 0;
+  const acted: Acted = { name: 0, coords: 0, shots: 0 };
+  const tally = (cls: unknown) => { if (cls === 'act-name') acted.name++; else if (cls === 'act-coords') acted.coords++; else if (cls === 'vision') acted.shots++; };
   for (const l of lines) {
     try {
       const o = JSON.parse(l);
       if (o.type === 'end' && !sawEnd) { ended = o.t ?? null; sawEnd = true; }
-      else if (o.type === undefined && typeof o.tool === 'string') calls++;
+      else if (o.type === undefined && typeof o.tool === 'string') {
+        calls++;
+        if (Array.isArray(o.steps) && o.steps.length) o.steps.forEach((s: any) => tally(s?.cls)); else tally(o.cls);
+      }
     } catch { /* skip */ }
   }
   return { id: path.basename(file, '.jsonl'), file, pid: Number.isInteger(header.pid) ? header.pid : null, started: header.started ?? null, ended,
-    ...(typeof header.run === 'string' ? { run: header.run } : {}), calls };
+    ...(typeof header.run === 'string' ? { run: header.run } : {}), calls, acted };
 }
 
 function sessionFiles(dir: string): string[] {

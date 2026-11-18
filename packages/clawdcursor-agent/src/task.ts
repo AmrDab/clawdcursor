@@ -11,9 +11,9 @@ import { ANTHROPIC_DEFAULT_MODEL, runApi } from './api';
 import { RUNNERS, apiKeyOf, readConfig, type AgentConfig, type Runner } from './config';
 import { detectClaude, detectCodex, type CliStatus } from './detect';
 import { killTree, runCli, type CliCommand } from './hosts';
-import { newRunId, openRunLog, sessionOfRun, sessionsDir, withoutImages } from './runlog';
+import { actedLine, newRunId, openRunLog, sessionOfRun, sessionsDir, withoutImages } from './runlog';
 import { claudeMcpConfig, claudeTaskCommand, codexTaskCommand, displayCommand, mcpEntry } from './runners';
-import { claudeEvents, codexEvents, elapsed, paint, renderEvent, verdictOf, type TraceEvent } from './trace';
+import { claudeEvents, codexEvents, elapsed, addUsage, paint, renderEvent, usageLine, verdictOf, type TraceEvent, type Usage } from './trace';
 
 /** What clawdcursor core hands its add-ons. */
 export interface CoreContext {
@@ -84,11 +84,13 @@ export async function runTask(opts: TaskOptions, ctx: CoreContext, io: TaskIo = 
   let lastText = '';
   let lastError = '';
   let toolCalls = 0;
+  let usage: Usage | null = null;
   const show = (ev: TraceEvent) => {
     if (ev.kind === 'start') serverState = ev.server;
     if (ev.kind === 'text') lastText = ev.text;
     if (ev.kind === 'error') lastError = ev.text;
     if (ev.kind === 'call') toolCalls++;
+    if (ev.kind === 'usage') usage = addUsage(usage, ev);
     if (ev.kind === 'final') { finalText = ev.text; finalError = ev.error === true; }
     const line = renderEvent(ev, p, who);
     if (line) out(`${p.dim(elapsed(Date.now() - started))}  ${line}`);
@@ -163,6 +165,7 @@ export async function runTask(opts: TaskOptions, ctx: CoreContext, io: TaskIo = 
     fs.rmSync(workDir, { recursive: true, force: true, maxRetries: 2 });
   }
 
+  const used = usage as Usage | null;   // set by `show`, which the compiler cannot follow
   const claimed = interrupted ? null : verdictOf(finalText);
   // A PASS with no tool call is not one: an agent left without its tools can describe steps it never took.
   const verdict = claimed === 'PASS' && toolCalls === 0 ? null : claimed;
@@ -170,13 +173,15 @@ export async function runTask(opts: TaskOptions, ctx: CoreContext, io: TaskIo = 
     ranCli: !!command });
   const code = interrupted ? 130 : verdict === 'PASS' ? 0 : 1;
   const session = sessionOfRun(sessionsDir(ctx.dataDir), runId, started);
-  log.write({ type: 'end', verdict, ...(claimed !== verdict ? { claimed } : {}), toolCalls, exitCode: code, agentExitCode: exitCode, ...(reason ? { reason } : {}), ...(session ? { session: session.id } : {}), ms: Date.now() - started });
+  log.write({ type: 'end', verdict, ...(claimed !== verdict ? { claimed } : {}), toolCalls, ...(used ? { usage: used } : {}), exitCode: code, agentExitCode: exitCode, ...(reason ? { reason } : {}), ...(session ? { session: session.id, acted: session.acted } : {}), ms: Date.now() - started });
 
   const tag = verdict === 'PASS' ? p.green(p.bold('PASS')) : verdict === 'FAIL' ? p.red(p.bold('FAIL')) : p.red(p.bold(interrupted ? 'STOPPED' : 'NO VERDICT'));
   const last = finalText.split('\n').map(l => l.trim()).filter(Boolean).pop() ?? '';
   out('');
   out(`${tag}  ${verdict ? last.replace(/^[\s*_`>#"'-]*(?:verdict:\s*)?(PASS|FAIL)\b[:\s-]*/i, '') : reason ?? ''}`);
   out(p.dim(`run log ${log.file}${session ? ` · clawdcursor session ${session.id}` : ''} · ${((Date.now() - started) / 1000).toFixed(1)} s · clawdcursor logs --run ${runId}`));
+  if (session?.calls) out(p.dim(actedLine(session.acted)));
+  if (used) out(p.dim(usageLine(used)));
   return { exitCode: code, verdict, runId, runFile: log.file, session: session?.id ?? null, finalText, ...(reason ? { reason } : {}) };
 }
 

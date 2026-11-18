@@ -236,6 +236,7 @@ export function toUiElement(raw: any, depth?: number, processId?: number): UiEle
   const label: string = raw.name ?? '';
   const secure = raw.secure === true || raw.subrole === 'AXSecureTextField';
   const value = secure || raw.value === undefined || raw.value === null ? undefined : String(raw.value);
+  const bounds = raw.bounds ?? { ...ZERO_RECT };
   // A checkbox, radio or switch keeps its tick in AXValue (0 / 1 / 2 = mixed): UiElement.checked, as on Windows and Linux.
   // Only for those roles: a slider at 1 is not "checked".
   const role = String(raw.controlType ?? raw.role ?? '');
@@ -246,14 +247,16 @@ export function toUiElement(raw: any, depth?: number, processId?: number): UiEle
     controlType: String(raw.controlType ?? raw.role ?? '').replace(/^AX/, ''),
     subrole: raw.subrole,
     secure,
-    bounds: raw.bounds ?? { ...ZERO_RECT },
+    bounds,
     value,
     enabled: raw.enabled,
     focused: raw.focused,
     selected: raw.selected,
     disabled: raw.enabled === false ? true : undefined,
     busy: raw.busy,
-    offscreen: raw.offscreen,
+    // No area, no place on screen: Chrome gives an element scrolled out of a page a frame of height 0 at the window's edge
+    // (Mac bench 2026-11-17: "Answer" @270,960 198x0). Offscreen, as on Windows and Linux, so nothing clicks that edge.
+    offscreen: raw.offscreen ?? (bounds.width > 0 && bounds.height > 0 ? undefined : true),
     expandable: raw.expandable,
     expanded: raw.expanded,
     ...(checked !== undefined ? { checked } : {}),
@@ -539,10 +542,20 @@ export interface MacAx {
    * another app, which the error names — throws `MacAxError`. System Events cannot do this when two processes share a name.
    */
   focusWindow(pid: number, title?: string): Promise<FocusedWindow | null>;
+  /**
+   * The largest on-screen window of `pid` (covered or not, not minimized): its CGWindowID and bounds in points. Null: the
+   * pid has none. Throws when the helper cannot answer.
+   */
+  windowOf?(pid: number): Promise<{ id: number; x: number; y: number; width: number; height: number; title?: string; processName?: string } | null>;
   /** The frontmost app per NSWorkspace, plus whether the screen is locked. */
   frontmost(): Promise<FrontmostInfo>;
   /** Since the user's last keyboard or mouse event (HID), and when it was (ms since 1970); null when the helper is not built (yet). */
   idle?(): Promise<{ idleMs: number; lastAt: number } | null>;
+  /**
+   * The window a user SEES at a screen point (points, top-left origin — what a click takes): front to back, modal and alert
+   * layers included. Null when nothing is there or the helper is not available (unknown).
+   */
+  windowAt?(x: number, y: number): Promise<{ processId: number; title?: string; processName?: string } | null>;
   /**
    * A running app by (display) name — its pid, launch state and readable windows —
    * straight from NSWorkspace, so a launch can be confirmed without diffing the
@@ -799,6 +812,16 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       return { elements: flattenAxTree(out?.uiTree, pid), truncated: false };
     },
 
+    async windowOf(pid: number) {
+      const reply = await viaHelper(['window-of', '--pid', String(pid), '--timeout-ms', String(HELPER_LIST_DEADLINE_MS)],
+        HELPER_LIST_DEADLINE_MS + HELPER_GRACE_MS, 'window lookup');
+      if (reply === null) throw new Error('the accessibility helper could not look the window up');
+      const w = reply.window;
+      if (!w || typeof w.id !== 'number') return null;
+      return { id: w.id, x: Number(w.x), y: Number(w.y), width: Number(w.width), height: Number(w.height),
+        ...(typeof w.title === 'string' ? { title: w.title } : {}), ...(typeof w.processName === 'string' ? { processName: w.processName } : {}) };
+    },
+
     async frontmost(): Promise<FrontmostInfo> {
       const what = 'frontmost app lookup';
       const reply = await viaHelper(['frontmost', '--timeout-ms', String(HELPER_LIST_DEADLINE_MS)], HELPER_LIST_DEADLINE_MS + HELPER_GRACE_MS, what, { waitForBuild: false });
@@ -812,6 +835,14 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       const reply = await viaHelper(['idle'], HELPER_GRACE_MS, 'idle time lookup', { waitForBuild: false }).catch(() => null);
       const idleMs = Number(reply?.idleMs), lastAt = Number(reply?.lastAt);
       return reply && Number.isFinite(idleMs) && idleMs >= 0 && Number.isFinite(lastAt) ? { idleMs, lastAt } : null;
+    },
+
+    async windowAt(x: number, y: number) {
+      const reply = await viaHelper(['window-at', '--x', String(Math.round(x)), '--y', String(Math.round(y)), '--timeout-ms', String(HELPER_LIST_DEADLINE_MS)],
+        HELPER_LIST_DEADLINE_MS + HELPER_GRACE_MS, 'window lookup', { waitForBuild: false });
+      const w = reply?.window;
+      if (!w || typeof w.processId !== 'number') return null;
+      return { processId: w.processId, title: typeof w.title === 'string' ? w.title : undefined, processName: typeof w.processName === 'string' ? w.processName : undefined };
     },
 
     async focusWindow(pid: number, title?: string): Promise<FocusedWindow | null> {

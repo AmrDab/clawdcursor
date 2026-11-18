@@ -10,7 +10,11 @@ export type TraceEvent =
   | { kind: 'call'; id?: string; tool: string; action?: string; args: string }
   | { kind: 'result'; id?: string; ok: boolean; text: string; images?: number }
   | { kind: 'final'; text: string; error?: boolean }
-  | { kind: 'error'; text: string };
+  | { kind: 'error'; text: string }
+  | ({ kind: 'usage' } & Usage);
+
+/** Tokens a run used: `in` is the input that was not read from the cache; `usd` only when the runner reports a cost. */
+export interface Usage { in: number; out: number; cacheRead?: number; cacheWrite?: number; usd?: number }
 
 type Json = Record<string, any>;
 
@@ -40,6 +44,31 @@ export function resultOf(content: unknown, ok: boolean, id?: string): TraceEvent
   return { kind: 'result', id, ok, text, ...(images ? { images } : {}) };
 }
 
+const num = (v: unknown): number | undefined => typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined;
+
+/** Usage from a runner's own counts (a count it did not give is left out); null when it gave none. */
+export function usageOf(c: { in?: unknown; out?: unknown; cacheRead?: unknown; cacheWrite?: unknown; usd?: unknown }): TraceEvent | null {
+  const inn = num(c.in), out = num(c.out), cacheRead = num(c.cacheRead), cacheWrite = num(c.cacheWrite), usd = num(c.usd);
+  if (inn === undefined && out === undefined && cacheRead === undefined && cacheWrite === undefined) return null;
+  return { kind: 'usage', in: inn ?? 0, out: out ?? 0, ...(cacheRead ? { cacheRead } : {}), ...(cacheWrite ? { cacheWrite } : {}), ...(usd !== undefined ? { usd } : {}) };
+}
+
+/** Anthropic's `usage` object (messages API, and the `usage` of Claude Code's result line). */
+export function anthropicUsage(u: unknown, usd?: unknown): TraceEvent | null {
+  if (!u || typeof u !== 'object') return null;
+  const x = u as Json;
+  return usageOf({ in: x.input_tokens, out: x.output_tokens, cacheRead: x.cache_read_input_tokens, cacheWrite: x.cache_creation_input_tokens, usd });
+}
+
+/** An OpenAI-compatible `usage` object: prompt_tokens counts the cached ones too, so they are taken out of `in`. */
+export function openaiUsage(u: unknown): TraceEvent | null {
+  if (!u || typeof u !== 'object') return null;
+  const x = u as Json;
+  const cached = num(x.prompt_tokens_details?.cached_tokens) ?? 0;
+  const prompt = num(x.prompt_tokens);
+  return usageOf({ in: prompt === undefined ? undefined : Math.max(0, prompt - cached), out: x.completion_tokens, cacheRead: cached });
+}
+
 /** One line of `claude -p --output-format stream-json --verbose`. */
 export function claudeEvents(line: string): TraceEvent[] {
   const m = parse(line);
@@ -61,7 +90,10 @@ export function claudeEvents(line: string): TraceEvent[] {
   }
   if (m.type === 'result') {
     const text = typeof m.result === 'string' ? m.result : '';
-    return [{ kind: 'final', text, ...(m.is_error === true || (m.subtype && m.subtype !== 'success') ? { error: true } : {}) }];
+    // The result line's usage and total_cost_usd cover the whole run; the per-message usage is not summed (it would count twice).
+    const usage = anthropicUsage(m.usage, m.total_cost_usd);
+    return [...(usage ? [usage] : []),
+      { kind: 'final', text, ...(m.is_error === true || (m.subtype && m.subtype !== 'success') ? { error: true } : {}) }];
   }
   return [];
 }
@@ -75,6 +107,13 @@ export function codexEvents(line: string): TraceEvent[] {
   if (!ev) return [];
   const item = ev.item as Json | undefined;
   if (ev.type === 'error') return [{ kind: 'error', text: String(ev.message ?? 'error') }];
+  // TODO(unverified): the shape is read from one recorded run log (usage on turn.completed, input_tokens including cached_input_tokens); Codex's docs were not checked.
+  if (ev.type === 'turn.completed' && ev.usage && typeof ev.usage === 'object') {
+    const u = ev.usage as Json;
+    const input = num(u.input_tokens), cached = num(u.cached_input_tokens);
+    const usage = usageOf({ in: input === undefined ? undefined : Math.max(0, input - (cached ?? 0)), out: u.output_tokens, cacheRead: cached, cacheWrite: u.cache_write_input_tokens });
+    return usage ? [usage] : [];
+  }
   if (ev.type === 'turn.failed') return [{ kind: 'error', text: String(ev.error?.message ?? 'the turn failed') }];
   if (!item || typeof item !== 'object') return [];
   if (item.type === 'mcp_tool_call' && typeof item.tool === 'string') {
@@ -137,7 +176,22 @@ export function renderEvent(ev: TraceEvent, p: Paint, who = 'agent'): string | n
     case 'result': return `  ${ev.ok ? p.green('← ok') : p.red('← error')}  ${p.dim(shortResult(ev.text, ev.images))}`;
     case 'error': return p.red(`✗ ${oneLine(ev.text, 200)}`);
     case 'final': return null;   // the caller prints the verdict
+    case 'usage': return null;   // summed and printed once, at the end
   }
+}
+
+/** The sum of usage events. */
+export function addUsage(total: Usage | null, ev: Usage): Usage {
+  const t = total ?? { in: 0, out: 0 };
+  const cacheRead = (t.cacheRead ?? 0) + (ev.cacheRead ?? 0), cacheWrite = (t.cacheWrite ?? 0) + (ev.cacheWrite ?? 0);
+  return { in: t.in + ev.in, out: t.out + ev.out, ...(cacheRead ? { cacheRead } : {}), ...(cacheWrite ? { cacheWrite } : {}),
+    ...(t.usd !== undefined || ev.usd !== undefined ? { usd: (t.usd ?? 0) + (ev.usd ?? 0) } : {}) };
+}
+
+/** "tokens: 1,234 in · 56 out · 7,890 cached · $0.12" (no $ when unknown). */
+export function usageLine(u: Usage): string {
+  const n = (x: number) => x.toLocaleString('en-US');
+  return `tokens: ${n(u.in)} in · ${n(u.out)} out · ${n(u.cacheRead ?? 0)} cached${u.usd !== undefined ? ` · $${u.usd.toFixed(2)}` : ''}`;
 }
 
 /** Seconds since the start, right-aligned: "  3.2s". */

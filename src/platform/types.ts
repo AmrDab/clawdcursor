@@ -47,6 +47,17 @@ export interface ScreenshotResult {
   origin?: { x: number; y: number };
 }
 
+/** One window drawn by itself (PlatformAdapter.captureWindowOf). */
+export interface WindowCapture {
+  /** The window's own pixels, PNG: what covers it on screen is not in them. */
+  png: Buffer;
+  /** Where the window is, in screen coordinates (what `mouseClick` takes: points on macOS, physical pixels elsewhere). */
+  bounds: { x: number; y: number; width: number; height: number };
+  /** Image pixels per screen unit (the image may be at the window's own DPI, or a Retina backing scale). */
+  pixelsPerUnit: number;
+  title: string;
+}
+
 export interface WindowInfo {
   title: string;
   processName: string;
@@ -223,6 +234,10 @@ export interface WaitForElementQuery {
  *
  * Business logic uses this interface and never touches `process.platform`.
  */
+/** The window a user sees at a point. A Windows Store app's frame belongs to ApplicationFrameHost (`processId`); the app
+ *  itself is `hostedProcessId`, as window lists report it (frame-host.ts). */
+export interface WindowAtPoint { processId: number; title?: string; processName?: string; hostedProcessId?: number; hostedProcessName?: string }
+
 export interface PlatformAdapter {
   /** OS family this adapter handles. */
   readonly platform: 'darwin' | 'win32' | 'linux';
@@ -250,6 +265,17 @@ export interface PlatformAdapter {
   // ─── WINDOWS ────────────────────────────────────────────────────
   listWindows(): Promise<WindowInfo[]>;
   getActiveWindow(): Promise<WindowInfo | null>;
+  /**
+   * Optional: the window a user SEES at a point, in the space `mouseClick` takes (physical pixels on Windows, points on
+   * macOS) — read-only, nothing is raised. Null = unknown or no window: callers treat it as allowed (fail open).
+   */
+  windowAtPoint?(x: number, y: number): Promise<WindowAtPoint | null>;
+  /**
+   * Optional: the largest visible, not minimized window of `pid`, drawn by itself — its own pixels even where other
+   * windows cover it — with nothing raised or focused. Null: the pid has no such window. Throws why it could not be drawn
+   * (not responding, Screen Recording refused). A platform without it cannot draw a covered window by itself.
+   */
+  captureWindowOf?(pid: number): Promise<WindowCapture | null>;
   /** `handle`: the exact window (Windows). When given, nothing else in the query is used. */
   focusWindow(query: { processName?: string; processId?: number; title?: string; handle?: number }): Promise<boolean>;
   /**
@@ -338,6 +364,11 @@ export interface PlatformAdapter {
    * typing anything sensitive. Absent = private.
    */
   typingIsPrivate?(): boolean;
+  /**
+   * Optional (macOS): whether the clipboard holds something other than text (an image, a file) that saving its text and
+   * writing it back would lose. False when it holds text only, or cannot be told.
+   */
+  clipboardHoldsNonText?(): Promise<boolean>;
   getFocusedElement(): Promise<UiElement | null>;
   /**
    * Optional: the whole text of the foreground window's document (a web page, an editor) read through accessibility

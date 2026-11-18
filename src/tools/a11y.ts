@@ -12,6 +12,7 @@ import { windowTextIncludes } from '../platform/window-text';
 import { narrowedScopeNote } from './scope-note';
 import { untrusted } from '../core/miss-text';
 import { isGuardRefusal } from '../core/control';
+import { wakeForNameSearch, onTopOfLine } from './name-search-help';
 import { copyAllText } from '../platform/copy-all-text';
 import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, CUT_VALUE_NEXT_STEP, cdpBrowserPid, cdpStepFor, nameMissHint, shownValue, shownHelp } from './blind-hints';
 import { wrapUntrustedScreenContent, screenJson, quoteScreenText } from '../core/untrusted-screen-content';
@@ -307,6 +308,7 @@ export function getA11yTools(): ToolDefinition[] {
         await ctx.ensureInitialized();
         let uiaHits: UiElement[];
         if (ctx.platform) {
+          if (name) await wakeForNameSearch(ctx.platform, processId);
           const elements = await ctx.platform.findElements({ name, controlType, automationId, processId });
           uiaHits = automationId
             ? elements.filter((el: UiElement) => el.automationId === automationId)
@@ -374,6 +376,9 @@ export function getA11yTools(): ToolDefinition[] {
         const where = searched.length ? `\nsearched:\n${untrusted(searched.join(', '))}${await narrowedScopeNote(ctx.platform, scopes)}` : '';
         const searchedPid = typeof processId === 'number' ? processId
           : scopes.length === 1 ? scopes[0].processId : undefined;
+        // Another app's window (a system dialog) on top of the searched one is the likelier reason for a miss.
+        const onTopLine = name ? await onTopOfLine(ctx.platform, searchedPid ?? processId) : null;
+        const onTop = onTopLine ? `\n${onTopLine}` : '';
         // A miss in a window with real structure is a wrong name, not a blind app: say what it has and what is close.
         // Only a thin window gets the "little or no accessibility structure" advice (live macOS: Freeform, 34 elements).
         if (name && ctx.platform) {
@@ -384,9 +389,9 @@ export function getA11yTools(): ToolDefinition[] {
           // browser advice (read the page over CDP / turn on renderer accessibility) still applies, after the names.
           const searchedProc = scopes.find(s => s.processId === searchedPid)?.processName;
           const browser = isBrowserProcess(searchedProc) || (searchedPid !== undefined && (await cdpBrowserPid(ctx.cdp)) === searchedPid);
-          if (miss) return { text: `(no elements found)${where}\n${miss}${browser ? `\n${await nextStepFor(ctx, searchedPid)}` : ''}` };
+          if (miss) return { text: `(no elements found)${where}\n${miss}${browser ? `\n${await nextStepFor(ctx, searchedPid)}` : ''}${onTop}` };
         }
-        return { text: `(no elements found)${where}\n${await nextStepFor(ctx, searchedPid)}` };
+        return { text: `(no elements found)${where}\n${await nextStepFor(ctx, searchedPid)}${onTop}` };
       },
     },
 

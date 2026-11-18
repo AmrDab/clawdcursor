@@ -30,7 +30,10 @@ import type {
   ScrollDirection,
   WaitForElementQuery,
   WindowState,
+  WindowAtPoint,
+  WindowCapture,
 } from './types';
+import { captureWindowViaHelper } from './native-helper';
 import { waitForLaunchedWindow, buildAppPredicate } from './launch-poll';
 import { checkSecureInput, secureInputMessage, type SecureInputState } from './mac-secure-input';
 import { getPackageRoot } from '../paths';
@@ -45,6 +48,7 @@ import {
   type AppState, type FrontmostInfo, type InvokeResult, type MacAx, type SkippedApp,
 } from './mac-ax';
 import { windowTextIncludes } from './window-text';
+import { clipboardInfoHoldsNonText } from './mac-clipboard';
 import { sleep } from '../sleep';
 
 const execFileAsync = promisify(execFile);
@@ -310,6 +314,26 @@ export class MacOSAdapter implements PlatformAdapter {
   // ─── WINDOWS ──────────────────────────────────────────────────────
 
   /**
+   * The pid's largest on-screen window, by itself: ax-helper finds its CGWindowID (no permission needed), and the
+   * screenshot helper captures that window alone, under its own Screen Recording grant (a refusal throws).
+   */
+  async captureWindowOf(pid: number): Promise<WindowCapture | null> {
+    const win = await this.ax.windowOf?.(pid);
+    if (!win) return null;
+    const shot = await captureWindowViaHelper(win.id);
+    try {
+      return {
+        png: fs.readFileSync(shot.path),
+        bounds: { x: win.x, y: win.y, width: win.width, height: win.height },
+        pixelsPerUnit: win.width > 0 ? shot.width / win.width : 1,
+        title: win.title ?? win.processName ?? '',
+      };
+    } finally {
+      try { fs.unlinkSync(shot.path); } catch { /* a temp file */ }
+    }
+  }
+
+  /**
    * Every titled window. A failure (timeout, locked screen) THROWS: it used to
    * be swallowed into `[]`, which the `window list` tool printed as "Windows (0)"
    * with fifteen windows open.
@@ -337,6 +361,10 @@ export class MacOSAdapter implements PlatformAdapter {
   async userIdle(): Promise<{ tick: number; idleMs: number } | null> {
     const r = (await this.ax.idle?.().catch(() => null)) ?? null;
     return r === null ? null : { tick: r.lastAt, idleMs: r.idleMs };
+  }
+
+  async windowAtPoint(x: number, y: number): Promise<WindowAtPoint | null> {
+    try { return (await this.ax.windowAt?.(x, y)) ?? null; } catch { return null; }
   }
 
   /** Why the last focusWindow returned false, when more is known than "no match". Taken once. */
@@ -722,6 +750,8 @@ export class MacOSAdapter implements PlatformAdapter {
   // ─── INPUT (mouse) ────────────────────────────────────────────────
 
   private lastCursor: { x: number; y: number } | null = null;
+  /** A button pressed by mouseDown and not yet released by mouseUp: a move then is a drag, so it glides instead of jumping. */
+  private buttonHeld = false;
 
   private toNutButton(button?: MouseButton): Button {
     if (button === 'right') return Button.RIGHT;
@@ -750,6 +780,17 @@ export class MacOSAdapter implements PlatformAdapter {
   }
 
   async mouseMove(x: number, y: number): Promise<void> {
+    const from = this.buttonHeld ? this.lastCursor : null;
+    if (from) {
+      // Held button (mouse_down … mouse_move … mouse_up, a stepped or path drag): steps of at most 18 px, 10 ms apart, as
+      // mouseDrag does. One jump of a whole segment is not a drag to an app that tracks the pointer.
+      const steps = Math.max(1, Math.ceil(Math.hypot(x - from.x, y - from.y) / 18));
+      for (let i = 1; i < steps; i++) {
+        const t = i / steps;
+        await mouse.setPosition(new Point(Math.round(from.x + (x - from.x) * t), Math.round(from.y + (y - from.y) * t)));
+        await this.delay(10);
+      }
+    }
     await mouse.setPosition(new Point(x, y));
     this.lastCursor = { x, y };
   }
@@ -818,10 +859,12 @@ export class MacOSAdapter implements PlatformAdapter {
   async mouseDown(button?: MouseButton): Promise<void> {
     await beforePointerPress(); // clawdcursor's own pill must not be under the click
     await mouse.pressButton(this.toNutButton(button));
+    this.buttonHeld = true;
+    await this.delay(80);   // the press must register before the first move, as in mouseDrag
   }
 
   async mouseUp(button?: MouseButton): Promise<void> {
-    await mouse.releaseButton(this.toNutButton(button));
+    try { await mouse.releaseButton(this.toNutButton(button)); } finally { this.buttonHeld = false; }
   }
 
   // ─── INPUT (keyboard) ─────────────────────────────────────────────
@@ -946,6 +989,15 @@ export class MacOSAdapter implements PlatformAdapter {
       return stdout;
     } catch {
       return '';
+    }
+  }
+
+  async clipboardHoldsNonText(): Promise<boolean> {
+    try {
+      const { stdout } = await execFileAsync('osascript', ['-e', 'clipboard info'], { timeout: 3_000 });
+      return clipboardInfoHoldsNonText(stdout);
+    } catch {
+      return false;
     }
   }
 

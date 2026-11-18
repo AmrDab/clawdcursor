@@ -49,7 +49,7 @@ describe('type tool — clipboard paste for long text', () => {
     expect(platform.typeText).not.toHaveBeenCalled();
     expect(calls).toContain(`write:${LONG.length}`);
     expect(calls).toContain('key:mod+v');
-    expect(r.text).toMatch(/\(paste\)/);
+    expect(r.text).toMatch(/\(paste, clipboard restored\)/);
   });
 
   it('restores the prior clipboard after pasting (no clobber of a pending copy)', async () => {

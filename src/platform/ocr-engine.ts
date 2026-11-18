@@ -21,7 +21,7 @@ import { promisify } from 'util';
 import sharp from 'sharp';
 import { getPackageRoot } from '../paths';
 import { sharpFromGrab, type GrabImage } from './grab-image';
-import { rawScreenGrab } from './screen-grab';
+import { helperScreenGrab, rawScreenGrab } from './screen-grab';
 import { psRunner } from './ps-runner';
 import { pickDisplay } from './display-target';
 import { cachedMacOcrBinary, compileMacOcrBinary } from './mac-swift-binary';
@@ -204,8 +204,8 @@ export class OcrEngine {
     const start = Date.now();
     const generation = this.generation;
     try {
-      // The working monitor via the bridge (Windows, non-primary); otherwise a
-      // full-resolution nut-js grab (grim on Wayland) of the primary.
+      // The working monitor via the bridge (Windows, non-primary); otherwise a full-resolution grab of the
+      // primary (the screenshot helper on macOS, nut-js elsewhere, grim on Wayland).
       const shot = await bridgeCapture();
       let pngBuffer: Buffer;
       if (shot) {
@@ -322,11 +322,34 @@ export class OcrEngine {
     }
   }
 
+  /**
+   * OCR an image that is not a capture of the screen: one window drawn by itself. Coordinates are the image's own pixels;
+   * the caller places them on screen. No cache, and no fence step: the image holds that one window's pixels only, and the
+   * fence gate checked its process before the call. Throws on a failed read.
+   */
+  async recognizeImage(png: Buffer): Promise<OcrResult> {
+    if (!this.isAvailable()) return { ...EMPTY_RESULT };
+    const start = Date.now();
+    const tmp = path.join(os.tmpdir(), `clawdcursor-ocr-window-${process.pid}-${crypto.randomUUID().slice(0, 8)}.png`);
+    fs.writeFileSync(tmp, png, { mode: 0o600, flag: 'wx' });
+    try {
+      const result = await this.runOcr(tmp);
+      result.durationMs = Date.now() - start;
+      return result;
+    } finally {
+      try { fs.unlinkSync(tmp); } catch { /* non-fatal */ }
+    }
+  }
+
   // ─── Private ──────────────────────────────────────────────────────────────
 
-  /** The shared full-screen grab (screen-grab.ts): no pill, grim on Wayland, never a wallpaper-only macOS image. */
-  private grab(): Promise<GrabImage> {
-    return rawScreenGrab();
+  /**
+   * The full screen for OCR. macOS: the screenshot helper first, as for screenshots (node itself may have no Screen
+   * Recording grant). Otherwise, or when there is no helper: the shared grab (screen-grab.ts): no pill, grim on Wayland,
+   * never a wallpaper-only macOS image.
+   */
+  private async grab(): Promise<GrabImage> {
+    return (await helperScreenGrab()) ?? rawScreenGrab();
   }
 
   private async runOcr(imagePath: string): Promise<OcrResult> {

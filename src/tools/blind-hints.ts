@@ -77,13 +77,15 @@ export function opaqueArea(tree: ReadonlyArray<UiElement>): { bounds: UiElement[
   return best ? { bounds: best.bounds, share: area(best) / windowArea } : null;
 }
 
-/** read_tree's line for an opaque area. No tool names but batch, so it reads the same on every surface. The MCP server
- *  matches its start to know the agent is on a canvas (mcp-server.ts). */
+/** read_tree's line for an opaque area. It names smart_click and batch; this line is outside <untrusted-screen-content>, so it is
+ *  rewritten to the caller's surface names like SPARSE_NEXT_STEP (hint-rewrite.ts, toCompactNames). The MCP server matches
+ *  its start to know the agent is on a canvas (mcp-server.ts). */
 export const OPAQUE_MARK = '→ Opaque area @';
 export function opaqueAreaLine(o: { bounds: UiElement['bounds']; share: number }): string {
   const b = o.bounds;
   return `${OPAQUE_MARK}${b.x},${b.y} ${b.width}×${b.height} (${Math.round(o.share * 100)}% of the window): nothing inside has a name — ` +
-    'a canvas, board or drawn view. Work in it from one screenshot: send all the strokes in ONE batch, then look again only at the area that changed.';
+    'a canvas, board or drawn view. Inside it, work from one screenshot: send all the strokes in ONE batch, then look again only at the area that changed. ' +
+    'Outside it, a button or field with a visible label is pressed with smart_click {"target":"<label>"}, no screenshot.';
 }
 
 /** read_tree cut a long value: how to read it whole (outside the screen-content block, so it is rewritten per surface).
@@ -174,6 +176,26 @@ export function isSparseTree(tree: ReadonlyArray<UiElement>, isBrowser: boolean)
   // In a web area the small-set exception needs 3 named elements: a canvas or Flutter page with one "Enable accessibility"
   // button is not a readable page.
   return !(isBrowser ? hasStructure(insideDocuments(tree), 3) : hasStructure(tree));
+}
+
+/** Title-bar buttons and the system menu: named, pressable, and nothing to do with the app's own controls. */
+const WINDOW_CHROME = /^(?:Minimize|Maximize|Restore|Close|System|System Menu Bar)$/i;
+const CHROME_ROLE = /^(?:Button|MenuItem|MenuBar)$/i;
+const CONTAINER_ROLE = /^(?:Pane|Group|ToolBar)$/i;
+
+/**
+ * A window that names things but has nothing to press: a CAD or drawn-UI app whose ribbon, toolbars and panels are named panes
+ * (live 2026-11-16, Designcenter: ~35 named Panes and the title-bar buttons, 73 coordinate clicks, ~58 on labelled buttons). It is not sparse
+ * (5+ named), so SPARSE_NEXT_STEP never fires. Fires on a tree that is not sparse, not a browser, has no actionable element once window chrome
+ * is left out, and at least 3 named Pane / Group / ToolBar elements. An open dialog lists its buttons and fields, so it does not fire.
+ */
+export function drawnControlsLine(tree: ReadonlyArray<UiElement>, isBrowser = false): string | null {
+  if (isBrowser || isSparseTree(tree, false)) return null;
+  const pressable = tree.some(el => ACTIONABLE.test(el.controlType ?? '') && !(named(el) && CHROME_ROLE.test(el.controlType ?? '') && WINDOW_CHROME.test((el.name ?? '').trim())));
+  if (pressable) return null;
+  if (tree.filter(el => named(el) && CONTAINER_ROLE.test(el.controlType ?? '')).length < 3) return null;
+  return '→ Nothing here to press by name: this window lists only panes and its title-bar buttons, so its toolbars and panels are drawn by the app. ' +
+    'Press what you can see by its label: smart_click {"target":"<label>"} reads the screen itself, no screenshot. A screenshot and x,y only for a point with no label.';
 }
 
 /** How alike two element names are, for "did you mean": shared words, containment, then a common prefix. 0 = unrelated. */

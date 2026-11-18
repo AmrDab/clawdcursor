@@ -6,10 +6,10 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { McpEntry } from './runners';
 import { SYSTEM_PROMPT } from './runners';
-import { callOf, resultOf, type TraceEvent } from './trace';
+import { anthropicUsage, callOf, openaiUsage, resultOf, type TraceEvent } from './trace';
 
 export const MAX_TURNS = 50;
-export const ANTHROPIC_DEFAULT_MODEL = 'claude-opus-5-5';
+export const ANTHROPIC_DEFAULT_MODEL = 'claude-haiku-5-5';
 /** Models that take server-side fallbacks on a refusal (the API routes the request to another model by itself). */
 const FALLBACK_MODELS = new Set(['claude-fable-5-2', 'claude-fable-5-1', 'claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5-5']);
 
@@ -65,18 +65,35 @@ export async function runApi(job: ApiJob): Promise<{ text: string; error?: strin
   }
 }
 
+/** The messages with cache_control on the last block of the newest message (a copy: the history stays as it was). */
+export function withCacheBreakpoint(messages: Anthropic.Beta.BetaMessageParam[]): Anthropic.Beta.BetaMessageParam[] {
+  const last = messages[messages.length - 1];
+  const blocks = typeof last.content === 'string' ? [{ type: 'text' as const, text: last.content }] : [...last.content as Anthropic.Beta.BetaContentBlockParam[]];
+  const tail = blocks[blocks.length - 1] as Anthropic.Beta.BetaContentBlockParam | undefined;
+  if (!tail) return messages;
+  blocks[blocks.length - 1] = { ...tail, cache_control: { type: 'ephemeral' } } as Anthropic.Beta.BetaContentBlockParam;
+  return [...messages.slice(0, -1), { ...last, content: blocks } as Anthropic.Beta.BetaMessageParam];
+}
+
 type Call = (name: string, args: Record<string, unknown>, id: string) => Promise<{ content: McpContent[]; isError: boolean }>;
 
 async function anthropicLoop(job: ApiJob, system: string, tools: McpTool[], call: Call): Promise<{ text: string; error?: string }> {
   const { default: AnthropicClient } = await import('@anthropic-ai/sdk');
   const api = new AnthropicClient({ apiKey: job.apiKey });
-  const defs = tools.map(t => ({ name: t.name, description: t.description ?? '', input_schema: t.inputSchema as Anthropic.Beta.BetaTool.InputSchema }));
+  // Prompt caching: a breakpoint on the last tool definition, one on the system prompt, and one on the newest user
+  // message each turn (the API reads the longest cached prefix, which holds the earlier turns). Three of the four allowed.
+  const cache = { type: 'ephemeral' as const };
+  const defs = tools.map((t, i) => ({ name: t.name, description: t.description ?? '', input_schema: t.inputSchema as Anthropic.Beta.BetaTool.InputSchema,
+    ...(i === tools.length - 1 ? { cache_control: cache } : {}) }));
+  const systemBlocks = [{ type: 'text' as const, text: system, cache_control: cache }];
   const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: 'user', content: job.task }];
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const r = await api.beta.messages.create({
-      model: job.model, max_tokens: 16000, system, tools: defs, messages,
+      model: job.model, max_tokens: 16000, system: systemBlocks, tools: defs, messages: withCacheBreakpoint(messages),
       ...(FALLBACK_MODELS.has(job.model) ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const } : {}),
     }, { signal: job.signal });
+    const usage = anthropicUsage(r.usage);
+    if (usage) job.emit(usage);
     if (r.stop_reason === 'refusal') return { text: '', error: 'the model declined the request (stop_reason: refusal)' };
     messages.push({ role: 'assistant', content: r.content as Anthropic.Beta.BetaContentBlockParam[] });
     const text = r.content.filter(b => b.type === 'text').map(b => (b as Anthropic.Beta.BetaTextBlock).text).join('\n');
@@ -111,7 +128,10 @@ async function openaiLoop(job: ApiJob, system: string, tools: McpTool[], call: C
       body: JSON.stringify({ model: job.model, messages, tools: defs }),
     });
     if (!res.ok) return { text: '', error: `${url} answered ${res.status}: ${(await res.text()).slice(0, 300)}` };
-    const msg = ((await res.json()) as { choices?: Array<{ message?: ChatMessage }> }).choices?.[0]?.message;
+    const body = (await res.json()) as { choices?: Array<{ message?: ChatMessage }>; usage?: unknown };
+    const usage = openaiUsage(body.usage);
+    if (usage) job.emit(usage);
+    const msg = body.choices?.[0]?.message;
     if (!msg) return { text: '', error: `${url} returned no message` };
     messages.push({ role: 'assistant', content: msg.content ?? '', ...(msg.tool_calls?.length ? { tool_calls: msg.tool_calls } : {}) });
     const text = typeof msg.content === 'string' ? msg.content : '';

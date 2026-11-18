@@ -5,6 +5,19 @@ All notable changes to Clawd Cursor will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **`clawdcursor task` prints how the run acted**, as a dim line after the run log: `how it acted: N by name or label · M by
+  coordinates · S screenshots` (`smart_click` counts as by name or label). `clawdcursor logs --run` shows it in its header,
+  and the run log's `end` line carries the same three counts.
+
+### Changed
+- **An invoke by a name the accessibility tree does not have presses the matching visible label itself** (OCR, no
+  screenshot), as `smart_click` does, instead of failing; it says so in the result. The same when every element it
+  matched only contains the name ("New to NX?" for "New"). Not with `within`. An ambiguous invoke's next step names the
+  element (controlType, within) instead of a coordinate click.
+- **`clawdcursor task` reports tokens (and cost when the runner gives it).** A run ends with one more line, for example
+  `tokens: 146 in · 24,343 out · 5,123,771 cached · $1.11`, and the same numbers are in the run log's `end` record and
+  at the top of `clawdcursor logs --run`. Claude Code reports tokens and a cost; Codex and the API runners report
+  tokens only (the cost is left out, not guessed). A run that reported nothing prints no line.
 - **A host app can draw the pill itself.** With `CLAWD_PILL_CMD` (a JSON array: the command and its arguments),
   clawdcursor starts that command in place of its own pill, with the same arguments, environment and stdin/stdout lines;
   if it cannot start, the built-in pill is used. `CLAWD_OWN_UI_PIDS` (comma-separated pids) names the host's processes
@@ -26,11 +39,70 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **`compile_ui` element refs work in a window the user is not in** (#453): a ref into a background window acts by name
   in that window's process instead of failing with STALE_REF; one with no unique name there is refused, since a click
   at its bounds would land on the user's window.
+- **`system ocr` with `processId` reads that app's window by itself, even behind other windows.** It reads the
+  process's largest window, not minimized, from the window's own pixels, so the text of the windows on top of it is not
+  in the read. Nothing is raised or focused. Windows draws it with `PrintWindow` (at the window's own DPI, after
+  checking that the app responds); macOS captures it with the screenshot helper's single-window mode (ScreenCaptureKit),
+  found by its window number, so the signed helper app is unchanged. The rows say where the text is on screen; a click
+  there goes to whatever is on top, so the reply says to focus the window first or act by name. Linux cannot draw a
+  covered window by itself: there the call reads nothing and says how to read the window (focus it, then
+  `scope:"window"`).
 
 ### Fixed
 - **The window outline never appeared on macOS** (#453): a macOS window's handle is its process id, and the drawer
   looked for a window with that number. **Nor in background-only work on any OS**: an agent that never touched the
   window in front got no frame.
+- **A field or button scrolled out of view at the end of a long page (macOS).** Chrome gives such an element a frame of
+  height 0 at the window's bottom edge, and three tools mishandled it (Mac benchmark, `web-long-read`):
+  - `find` listed that frame as a position. It now says `(offscreen)`, as on Windows and Linux, and `smart_click` no
+    longer clicks the window's edge for it.
+  - `find_field` / `find_button` answered `none` with no candidates. A match out of view is now named, with the call that
+    reaches it by name, `set_value` or `invoke`, which work without scrolling.
+  - `smart_type` focused the field by name, the page kept the focus, and the reply said the text went into the field.
+    When the page keeps the focus, nothing is typed, and the reply points to `set_value` by name.
+- **`smart_click` never clicks in another app's window.** It kept an OCR match inside the target window's rectangle only,
+  so a system dialog on top of the window (macOS "Accessibility Access") was clicked when its text matched the label.
+  The window at the click point is now asked first (macOS `ax-helper window-at`, an accessibility hit test that skips
+  click-through overlays such as the Dock's; Windows `window-at-point`): if it belongs to another process than the target, nothing is clicked and the result is a refusal naming that window. Also
+  for the accessibility-bounds click, and a call without `processId` now refuses before the click instead of warning
+  after it. Where the platform cannot say (Linux), it clicks as before.
+- **No false "FOCUS NOT CONFIRMED" after a click on macOS.** The app in front changing is the click working when that app
+  owns the clicked point (it was activated by the click); the warning now appears only when it does not, and on macOS
+  it says "another app is now in front: <name>; check before typing" without the Windows foreground-lock wording.
+- **`pause_for_user` documents `done_when`.** The tool description and the parameter now list each type's fields
+  (`element_exists {name}`, `ocr_contains {value}`, ...) and say it must be false now and must not be text the pause
+  card itself shows (your message, Resume / End task).
+- **`find`, `invoke` and `smart_click` by name find controls in Electron apps on macOS.** Only `read_tree` woke an
+  Electron / Chromium app's accessibility tree, so a search by name saw a thin tree and missed. The wake is now sent
+  once per process before the first by-name search. A miss in `find` / `invoke` also says when another app's window
+  (a system dialog) is on top of the window searched, with the `processId` to read it.
+- **`CLAWD_BANNER_POS=bottom` moves the pill and the pause card to the bottom centre on macOS** (default `top`),
+  for a Mac whose notch sits under them.
+- **Dragging on macOS is a drag.** `mouse_down` then `mouse_move`, `mouse_drag_stepped` and `drag` with a `path`
+  jumped from point to point; while a button is held each move now steps at most 18 px every 10 ms, and
+  `mouse_down` waits 80 ms before the first move, as the plain `drag` always did.
+- **Typing through the clipboard no longer loses an image or a file on it (macOS).** A paste saved the clipboard as
+  text only, so non-text data on it was replaced. The pasteboard types are read first: with non-text data, printable
+  ASCII up to 1000 characters is typed as keys, anything else is refused (`CLIPBOARD_HELD`, nothing typed). A paste
+  that put the clipboard back says so: `Typed N chars (paste, clipboard restored)`.
+- **OCR works on a Mac where node has no Screen Recording permission.** OCR grabbed the screen with nut-js inside node,
+  so it failed with "Failed to capture screen" while `computer screenshot` worked: screenshots go through the bundled
+  screenshot helper, which holds its own grant. OCR (`system ocr`, `smart_click` / `smart_read` by visible text, and an
+  `invoke` that falls back to the visible label) now captures through the helper too, and uses nut-js only when no helper
+  is built.
+- **A screen read limited to one window by an argument it does not take reads nothing.** `system ocr` with `processId`
+  read the whole screen, other apps' windows included, and only then warned that it had ignored `processId`. A read of
+  screen content (`ocr`, `copy_all_text`, `screenshot`, `find_button`, …) given `processId`, `processName`, `title` or
+  `windowId` that it cannot honour is now refused before it reads, with the call that reads that one window: focus it,
+  then `ocr` with `scope:"window"`. Other calls still run and warn as before. Over MCP this needed one more fix: the
+  SDK validates a call with zod, which dropped every argument a compound tool's schema does not list before the tool
+  saw it, so neither the refusal nor the "ignored an argument" warning ever ran there. Those arguments now reach the
+  compound tools (never a granular one).
+- **An agent waits for the user instead of giving up.** `pause_for_user` answers `{status:"waiting"}` every 50 s while
+  the prompt is up. That reply said only "re-call", so an agent counted three of them as unanswered and ended the task
+  while the user was still filling in a sign-up form. It now says that a sign-up, a payment form or an emailed code can
+  take several minutes, that waiting is not a refusal, and that only the user ends the pause (Resume or End task); it
+  also gives `waitedSec`, the time since the prompt came up.
 - **`accessibility read_tree` / `read_screen` on the browser clawdcursor drives over CDP points at the browser tools**
   (#235). The hint after a thin read (and after a full read of that browser) now leads with `browser page_context` /
   `read_text` / `click`, as `find` already did; the 1.x fix had gone into a copy of `read_tree` that no longer ran.
@@ -66,6 +138,25 @@ All notable changes to Clawd Cursor will be documented in this file.
   nothing more is sent; after 5 s it carries on if they are idle, else it waits for Resume on the pill. A call that
   waits returns within one tool call's budget (under 60 s) with `PAUSED` "paused by the user ... call the same step
   again": an agent re-calls the step and does not give up. Linux cannot read idle time, so nothing waits there.
+- **Canvas and CAD apps are told to press labelled controls by label, not by pixel.** `read_tree` says so after an
+  opaque area, and also for a window whose toolbars are only named panes (a CAD ribbon). The server instructions and the
+  canvas hint keep the screenshot for picks inside the drawn area, and after three clicks by coordinates with none by
+  name, one note says a visible label is pressed with `smart_click`.
+- **A refused act in the wrong foreground window says to focus yours and send the same call again**, with no screenshot.
+- **Agents are told they can do any task on the screen, and to use clawdcursor without being asked.** The skill, the
+  server instructions, `llms.txt` and the plugin listing now lead with five rules: you can open and operate any app, see
+  the screen, and you should not ask the user to do a step you can do or say you can't reach their desktop. They no
+  longer open with "FALLBACK ONLY": an API, CLI or file edit that does the same job is still preferred as cheaper, but a
+  task is never declined for lack of one. The blanket "ask before email, banking, messaging or password managers" rule
+  is gone (the user's request is the permission); asking first before an irreversible action the user did not ask for
+  stays.
+- **The skill says what to do when a task is beyond the agent:** hand it to a stronger model from the same provider
+  (a Sonnet or Opus subagent) or raise the reasoning effort, instead of giving up or asking the user; a sign-in or
+  a step only the user can take is still `pause_for_user`. Easy desktop work can run on a cheaper subagent.
+- **The API runner caches its prompt and defaults to Claude Haiku 5.5.** `--with anthropic` marks its system prompt, tool
+  list and newest message for the API's prompt cache, so a long run re-reads its first turns at a fraction of the
+  input price. Without `--model` (or a model set by `doctor --setup`) it now starts on the cheapest model,
+  `claude-haiku-5-5`, instead of `claude-opus-5-5`.
 - **The HTTP daemon answers only to `Host: 127.0.0.1:<port>` or `localhost:<port>`**; any other Host header gets 403.
   A page whose DNS name was rebound to 127.0.0.1 could load the dashboard and read the pause message. An SSH tunnel to
   the daemon must use the daemon's own port on the local end (`ssh -L 3847:127.0.0.1:3847 ...`).

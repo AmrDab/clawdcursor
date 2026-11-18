@@ -452,7 +452,8 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             let old = panel.frame
             panel.setFrame(NSRect(x: old.minX, y: old.maxY - rowH, width: width, height: rowH), display: true)
         } else {
-            panel.setFrame(NSRect(x: area.midX - width / 2, y: area.maxY - rowH - 8, width: width, height: rowH), display: true)
+            let y = ProcessInfo.processInfo.environment["CLAWD_BANNER_POS"] == "bottom" ? area.minY + 8 : area.maxY - rowH - 8
+            panel.setFrame(NSRect(x: area.midX - width / 2, y: y, width: width, height: rowH), display: true)
         }
     }
 
@@ -802,7 +803,9 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
         let screen = NSScreen.screens.first ?? NSScreen.main!
         let area = screen.visibleFrame
-        let frame = NSRect(x: area.midX - width / 2, y: area.maxY - height - 8, width: width, height: height)
+        // CLAWD_BANNER_POS=bottom: at the bottom of the screen (default: the top, which a notch can cover).
+        let y = ProcessInfo.processInfo.environment["CLAWD_BANNER_POS"] == "bottom" ? area.minY + 8 : area.maxY - height - 8
+        let frame = NSRect(x: area.midX - width / 2, y: y, width: width, height: height)
         let panel = PillPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel],
                               backing: .buffered, defer: false)
         panel.isOpaque = false

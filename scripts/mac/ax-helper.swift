@@ -1213,6 +1213,31 @@ func perform(_ action: String, _ h: Hit, pid: pid_t, appName: String) -> [String
 
 // MARK: - Commands
 
+/// The largest on-screen window of --pid (layer 0, not minimized, on this Space; "on screen" includes a window that others
+/// cover): its CGWindowID and bounds in points, top-left origin, for capturing it by itself (screenshot-helper <windowId>).
+/// Window numbers, owners and bounds need no permission; the title only comes with Screen Recording.
+func cmdWindowOf() -> Never {
+    guard let pid = Int32(opts["pid"] ?? ""), pid > 0 else { fail("failed", "window-of: needs --pid") }
+    let list = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? []
+    var best: [String: Any]? = nil
+    var bestArea = 0.0
+    for w in list {
+        guard (w[kCGWindowOwnerPID as String] as? Int32) == pid, (w[kCGWindowLayer as String] as? Int) == 0,
+              ((w[kCGWindowAlpha as String] as? Double) ?? 1) > 0,
+              let id = w[kCGWindowNumber as String] as? Int,
+              let b = w[kCGWindowBounds as String] as? [String: Double] else { continue }
+        let width = b["Width"] ?? 0, height = b["Height"] ?? 0
+        guard width > 0, height > 0, width * height > bestArea else { continue }
+        bestArea = width * height
+        var d: [String: Any] = ["id": id, "x": b["X"] ?? 0, "y": b["Y"] ?? 0, "width": width, "height": height]
+        if let t = w[kCGWindowName as String] as? String, !t.isEmpty { d["title"] = t }
+        if let name = NSRunningApplication(processIdentifier: pid)?.localizedName { d["processName"] = name }
+        best = d
+    }
+    if let found = best { emit(["ok": true, "window": found]) }
+    emit(["ok": true, "window": NSNull()])
+}
+
 func cmdFrontmost() -> Never {
     let locked = screenLocked()
     guard let app = NSWorkspace.shared.frontmostApplication else {
@@ -1238,6 +1263,28 @@ func cmdFrontmost() -> Never {
     ]
     if let b = app.bundleIdentifier { info["bundleId"] = b }
     emit(["ok": true, "locked": locked, "frontmost": info])
+}
+
+/// The window a click at a point would reach (--x, --y: points, top-left origin, like a click), modal and alert windows
+/// included. Asked of the system-wide accessibility element, which hit-tests the way a click is routed: a click-through
+/// overlay is not "on top". The first CGWindowList window containing the point was the Dock's full-screen window (layer
+/// 20) for every point, or a writing assistant's overlay (Mac check 2026-11-17). `window` is null when it cannot be told
+/// (no answer, no Accessibility permission) or the point is on clawdcursor's own window: callers then go ahead.
+func cmdWindowAt() -> Never {
+    guard let x = Double(opts["x"] ?? ""), let y = Double(opts["y"] ?? "") else { fail("failed", "window-at: needs --x and --y") }
+    var hit: AXUIElement?
+    var pid: pid_t = 0
+    guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(x), Float(y), &hit) == .success,
+          let el = hit, AXUIElementGetPid(el, &pid) == .success, pid > 0, pid != ownPid else {
+        emit(["ok": true, "window": NSNull()])
+    }
+    let owner = NSRunningApplication(processIdentifier: pid)?.localizedName ?? ""
+    if isOwnProcessName(owner) { emit(["ok": true, "window": NSNull()]) }
+    var d: [String: Any] = ["processId": Int(pid), "processName": owner]
+    // The title of the window the hit element is in (or the window itself).
+    let win: CFTypeRef? = str(copyAttr(el, "AXRole").value) == "AXWindow" ? (el as CFTypeRef) : copyAttr(el, "AXWindow").value
+    if let w = win, isElement(w), let t = str(copyAttr(w as! AXUIElement, "AXTitle").value), !t.isEmpty { d["title"] = t }
+    emit(["ok": true, "window": d])
 }
 
 func cmdWindows() -> Never {
@@ -1683,6 +1730,7 @@ func cmdIdle() -> Never {
 switch command {
 case "frontmost": cmdFrontmost()
 case "idle": cmdIdle()
+case "window-at": cmdWindowAt()
 case "windows": cmdWindows()
 case "active": cmdActive()
 case "apps": cmdApps()
@@ -1693,5 +1741,6 @@ case "invoke": cmdInvoke()
 case "type": cmdType()
 case "focus": cmdFocus()
 case "pagetext": cmdPageText()
-default: fail("failed", "usage: ax-helper windows|active|frontmost|idle|apps|focused|tree|find|invoke|type|focus|pagetext [options] (got \"\(command)\")")
+case "window-of": cmdWindowOf()
+default: fail("failed", "usage: ax-helper windows|window-at|window-of|active|frontmost|idle|apps|focused|tree|find|invoke|type|focus|pagetext [options] (got \"\(command)\")")
 }

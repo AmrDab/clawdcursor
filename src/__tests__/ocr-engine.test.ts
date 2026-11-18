@@ -36,7 +36,8 @@ vi.mock('../platform/ps-runner', () => ({
 
 // ── Mock heavy native deps before any import ──────────────────────────────────
 // The Screen Recording probe spawns the real helper on a macOS runner; the grab source is what these tests cover.
-vi.mock('../platform/native-helper', async (orig) => ({ ...(await orig<typeof import('../platform/native-helper')>()), assertScreenRecordingGranted: async () => {} }));
+vi.mock('../platform/native-helper', async (orig) => ({ ...(await orig<typeof import('../platform/native-helper')>()), assertScreenRecordingGranted: async () => {},
+  captureScreenViaHelper: async () => { throw new Error('no screenshot helper in tests'); } }));
 vi.mock('@nut-tree-fork/nut-js', () => ({
   mouse: { config: {}, move: vi.fn(), click: vi.fn() },
   keyboard: { config: {}, type: vi.fn() },

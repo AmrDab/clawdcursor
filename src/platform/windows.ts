@@ -51,6 +51,8 @@ import type {
   DeliverResult,
   WindowState,
   FocusActivation,
+  WindowAtPoint,
+  WindowCapture,
 } from './types';
 import { waitForLaunchedWindow, within, TIMED_OUT } from './launch-poll';
 import { findWindowsProcesses } from './win-processes';
@@ -315,6 +317,24 @@ export class WindowsAdapter implements PlatformAdapter {
   }
 
   // ─── WINDOWS ──────────────────────────────────────────────────────
+
+  /** The bridge's capture-window: PrintWindow (PW_RENDERFULLCONTENT) of the pid's largest window, at that window's own DPI. */
+  async captureWindowOf(pid: number): Promise<WindowCapture | null> {
+    const r = await psRunner.run({ cmd: 'capture-window', pid }) as {
+      success?: boolean; reason?: string; x: number; y: number; width: number; height: number; imageWidth: number; title?: string; png?: string;
+    };
+    if (!r?.success) {
+      if (r?.reason === 'no-window') return null;
+      throw new Error(r?.reason === 'not-responding' ? 'the window is not responding, so it could not be drawn'
+        : 'the window could not be drawn by itself');
+    }
+    return {
+      png: Buffer.from(r.png!, 'base64'),
+      bounds: { x: r.x, y: r.y, width: r.width, height: r.height },
+      pixelsPerUnit: r.width > 0 ? r.imageWidth / r.width : 1,
+      title: r.title ?? '',
+    };
+  }
 
   async listWindows(): Promise<WindowInfo[]> {
     try {
@@ -1065,6 +1085,16 @@ export class WindowsAdapter implements PlatformAdapter {
       // mouse input if the foreground check fails. Undefined = unknown.
       return undefined;
     }
+  }
+
+  /** Read-only: the window a user sees at a PHYSICAL virtual-desktop point (the click's space). Null = unknown. */
+  async windowAtPoint(x: number, y: number): Promise<WindowAtPoint | null> {
+    try {
+      const r = await psRunner.run({ cmd: 'window-at-point', x: Math.round(x), y: Math.round(y) }) as Partial<WindowAtPoint>;
+      if (!r || typeof r.processId !== 'number' || r.processId <= 0) return null;
+      return { processId: r.processId, title: r.title || undefined, processName: r.processName || undefined,
+        ...(r.hostedProcessId ? { hostedProcessId: r.hostedProcessId, hostedProcessName: r.hostedProcessName || undefined } : {}) };
+    } catch { return null; }
   }
 
   private toNutButton(button?: MouseButton): Button {

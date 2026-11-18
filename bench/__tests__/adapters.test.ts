@@ -449,3 +449,15 @@ describe('an adapter that cannot reach clawdcursor says so: it is the server\'s 
     });
   });
 });
+
+describe('usage from the hosts', () => {
+  it('Claude Code: the result line carries the whole run\'s tokens and cost', () => {
+    const line = JSON.stringify({ type: 'result', subtype: 'success', result: 'ok', total_cost_usd: 0.42,
+      usage: { input_tokens: 5, output_tokens: 7, cache_read_input_tokens: 100, cache_creation_input_tokens: 20 } });
+    expect(parseClaudeLine(line)).toEqual({ sigs: [], finalText: 'ok', usage: { in: 5, out: 7, cacheRead: 100, cacheWrite: 20, usd: 0.42 } });
+  });
+  it('Codex: turn.completed gives the uncached input, the output and the cache read', () => {
+    const line = JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 41818, cached_input_tokens: 36608, cache_write_input_tokens: 0, output_tokens: 199 } });
+    expect(parseCodexLine(line)).toEqual({ usage: { in: 5210, out: 199, cacheRead: 36608 } });
+  });
+});

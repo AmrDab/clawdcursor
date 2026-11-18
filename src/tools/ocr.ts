@@ -12,6 +12,7 @@ import { getWorkingPoint } from '../platform/display-target';
 import type { OcrElement } from '../platform/ocr-engine';
 import type { ToolDefinition } from './types';
 import { ocrPointToClickPoint, windowOcrRegion } from '../platform/coord-scale';
+import { ScreenRecordingDeniedError } from '../platform/native-helper';
 
 
 /**
@@ -44,6 +45,45 @@ export function ocrRows(elements: OcrElement[], toScreen: (x: number, y: number)
   return rows;
 }
 
+/**
+ * `ocr` with processId: the process's largest window drawn by itself (PlatformAdapter.captureWindowOf), so text of the
+ * windows on top of it is not read, and nothing is raised or focused. A platform that cannot draw a window by itself
+ * reads nothing: a read of the window's place on screen would include whatever covers it.
+ */
+async function readWindowOf(
+  pid: number, ctx: Parameters<ToolDefinition['handler']>[1], engine: ReturnType<typeof ocrEngine>,
+): Promise<{ text: string; isError?: boolean }> {
+  const focusThen = `focus it (window {"action":"focus","processId":${pid}}), then ocr with scope "window"`;
+  if (!ctx.platform?.captureWindowOf) {
+    return { text: `ocr cannot read one window by itself on this platform, so nothing was read. To read it: ${focusThen}.`, isError: true };
+  }
+  let cap: Awaited<ReturnType<NonNullable<typeof ctx.platform.captureWindowOf>>>;
+  try {
+    cap = await ctx.platform.captureWindowOf(pid);
+  } catch (err) {
+    if (err instanceof ScreenRecordingDeniedError) throw err;
+    return { text: `Could not read the window of process ${pid} by itself (${err instanceof Error ? err.message : String(err)}), so nothing was read. To read it: ${focusThen}.`, isError: true };
+  }
+  // Worded as the NOT_FOUND window rule reads it (result-codes.ts): its next call lists the windows.
+  if (!cap) return { text: `No window for that process on screen (process ${pid}: none open, or minimized), so nothing was read.`, isError: true };
+
+  const result = await engine.recognizeImage(cap.png);
+  const b = cap.bounds;
+  const k = cap.pixelsPerUnit > 0 ? cap.pixelsPerUnit : 1;
+  const where = `the window of process ${pid} at (${b.x},${b.y}) ${b.width}x${b.height}`;
+  const title = wrapUntrustedScreenContent(`window: ${cap.title.replace(/\s+/g, ' ')}`);
+  if (result.elements.length === 0) {
+    return { text: `No text read in ${where}, drawn by itself (${result.durationMs} ms). An app may draw nothing for a window it does not show; to read what is on screen there: ${focusThen}.\n${title}` };
+  }
+  const rows = ocrRows(result.elements, (x, y) => ({ x: Math.round(b.x + x / k), y: Math.round(b.y + y / k) }));
+  return {
+    text: `OCR of ${where}, drawn by itself (windows on top of it are not in the read): ${rows.length} rows (${result.elements.length} words), ${result.durationMs} ms. ` +
+      `Each row is @x,y "text": x,y is where the text is on screen. A click there goes to whatever window is on top at that spot: ` +
+      `to click it, focus this window first (window {"action":"focus","processId":${pid}}), or act by name (accessibility invoke with processId ${pid}).\n` +
+      wrapUntrustedScreenContent([`window: ${cap.title.replace(/\s+/g, ' ')}`, ...rows].join('\n')),
+  };
+}
+
 export function getOcrTools(): ToolDefinition[] {
   return [
     {
@@ -57,10 +97,15 @@ export function getOcrTools(): ToolDefinition[] {
           required: false,
           enum: ['screen', 'window'],
         },
+        processId: {
+          type: 'number',
+          description: 'Read only this process\'s window, drawn by itself: its largest window, even where other windows cover it, and without focusing it (Windows, macOS). The rows say where its text is on screen. scope is not used.',
+          required: false,
+        },
       },
       category: 'perception',
       safetyTier: 0,
-      handler: async ({ scope }, ctx) => {
+      handler: async ({ scope, processId }, ctx) => {
         await ctx.ensureInitialized();
         const engine = ocrEngine();
 
@@ -77,6 +122,9 @@ export function getOcrTools(): ToolDefinition[] {
         // Screen coordinates on every OS (what space:"screen" clicks take). OCR
         // reads physical pixels; on macOS a click takes logical points (Retina 2x).
         const ratio = ctx.desktop.getDpiRatio?.() || 1;
+
+        // One process's window, drawn by itself: no other app's text can be in the read, and nothing is focused.
+        if (processId !== undefined && processId !== null) return readWindowOf(Number(processId), ctx, engine);
 
         let read: 'screen' | 'window' = 'screen';
         let windowTitle: string | undefined;
@@ -118,7 +166,7 @@ export function getOcrTools(): ToolDefinition[] {
             ? ` You last worked at (${at.x},${at.y}), outside this window: if you meant another window, focus it first and read again.`
             : '';
           return {
-            text: `OCR of the focused window at (${b.x},${b.y}) ${b.width}x${b.height}: ${result.elements.length} words, ${result.durationMs} ms. ` +
+            text: `OCR of the focused window at (${b.x},${b.y}) ${b.width}x${b.height}: ${rows.length} rows (${result.elements.length} words), ${result.durationMs} ms. ` +
               `Each row is @x,y "text": x,y is the centre of the text in screen coordinates, click it as-is with space:"screen", or smart_click {"target":"<label>"}.${elsewhere}\n` +
               wrapUntrustedScreenContent([`window: ${(windowTitle ?? '').replace(/\s+/g, ' ')}`, ...rows].join('\n')),
           };
