@@ -145,11 +145,14 @@ export function getAgentTools(): ToolDefinition[] {
         const outcome = result?.outcome ?? null;
         if (outcome === null) {
           pauseGate.markWaiting(key); // only a caller told "waiting" gets the outcome handed over
+          const since = pauseGate.current()?.since;
           return {
             text: JSON.stringify({
               status: 'waiting',
               waitingFor: text,
-              next: 'The user has not answered yet. Re-call pause_for_user with the SAME message to keep waiting (re-attaches; the prompt stays up). Do not act on the desktop meanwhile. If the user says in chat that they are done, ask them to click Resume on the pill: only that ends the pause.',
+              ...(since ? { waitedSec: Math.round((Date.now() - since) / 1000) } : {}),
+              // Hetzner sign-up, 2026-11-18: told only "re-call", an agent counted three waits as "unanswered" and quit mid-form.
+              next: 'The user has not answered yet: they may still be doing it, and a sign-up, a payment form or an emailed code can take several minutes. Re-call pause_for_user with the SAME message to keep waiting (re-attaches; the prompt stays up), as many times as it takes: a waiting reply is not a refusal. The user ends the pause themselves (Resume, or End task if they will not do it). Do not give up, end the task or act on the desktop meanwhile. If the user says in chat that they are done, ask them to click Resume on the pill: only that ends the pause.',
             }),
           };
         }
