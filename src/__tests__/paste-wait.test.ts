@@ -26,6 +26,14 @@ describe('waitForPaste', () => {
     expect(took).toBeLessThan(5000);   // "not forever" — loose: timers stretch under a loaded test run
   });
 
+  // Flaky under a loaded test run: the first sleep outlasted the blind wait, and one read could not see the change.
+  it('a first sleep that outlasts the blind wait still reads twice before giving up on a changing field', async () => {
+    let n = 0;
+    const reads: number[] = [];
+    await waitForPaste(async () => { reads.push(Date.now()); return `typing ${n++}`; }, 'hello', { minMs: 120, stepMs: 10, blindMs: 50, maxMs: 300 });
+    expect(reads.length).toBeGreaterThanOrEqual(2);
+  });
+
   it('a field whose value never changes (a code editor that does not report its text) gets only the blind wait', async () => {
     const t0 = Date.now();
     await waitForPaste(async () => '', 'hello', { minMs: 10, stepMs: 10, blindMs: 100, maxMs: 2000 });
