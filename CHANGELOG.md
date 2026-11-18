@@ -10,8 +10,27 @@ All notable changes to Clawd Cursor will be documented in this file.
   if it cannot start, the built-in pill is used. `CLAWD_OWN_UI_PIDS` (comma-separated pids) names the host's processes
   whose windows are clawdcursor's own controls, never a target. The outline stays built-in. With neither set, nothing
   changes. The line protocol is in [docs/pill-host.md](docs/pill-host.md).
+- **The agent works in its own window while the user keeps theirs (Windows)** (#453). An act that cannot be done by
+  name in the background goes through one ladder: a window message to the agent's window (`WM_SETTEXT` / `WM_CHAR` /
+  `BM_CLICK`, focus not moved), then a short foreground burst only while the user is idle (their window and cursor
+  put back after), then `pause_for_user`. A by-name act on the browser clawdcursor drives over CDP is a page act. In a
+  two-agent live run the agent made 0 focus steals and 0 screenshots while the user worked in another app.
+- **The on-screen indicator shows what the agent is doing, on Windows and macOS** (#453). Background work: an amber
+  outline round the agent's own windows only, and a small pixel-arrow ghost where it acts (never like the user's
+  cursor). Input to the foreground: the full-screen amber edge glow. A step for the user (`pause_for_user`): the
+  full-screen blue pulsing glow and the card, never an outline. Verified live on macOS (7/7 checks, the owner
+  confirming each state).
+- **A Pause button on the pill** (Windows, macOS; #453). Every act of the agent's waits, background ones included,
+  until Resume on the pill; Resume continues without a chat step. A Pause in one clawdcursor process holds the others
+  too, as Stop does.
+- **`compile_ui` element refs work in a window the user is not in** (#453): a ref into a background window acts by name
+  in that window's process instead of failing with STALE_REF; one with no unique name there is refused, since a click
+  at its bounds would land on the user's window.
 
 ### Fixed
+- **The window outline never appeared on macOS** (#453): a macOS window's handle is its process id, and the drawer
+  looked for a window with that number. **Nor in background-only work on any OS**: an agent that never touched the
+  window in front got no frame.
 - **`accessibility read_tree` / `read_screen` on the browser clawdcursor drives over CDP points at the browser tools**
   (#235). The hint after a thin read (and after a full read of that browser) now leads with `browser page_context` /
   `read_text` / `click`, as `find` already did; the 1.x fix had gone into a copy of `read_tree` that no longer ran.
@@ -41,6 +60,12 @@ All notable changes to Clawd Cursor will be documented in this file.
   `start` / `serve` deprecation warnings no longer say "Removed in v0.10"; both still work as aliases of `agent`.
 
 ### Changed
+- **The agent never types or moves the mouse while the user's hands are on it** (Windows, macOS; #453). Every real
+  input (keys, typing, clicks, drags, pointer moves, bringing a window to the front, launching an app) waits until the
+  user has been idle 1 s; background acts (by name, window messages, page acts) do not wait. If the user takes over,
+  nothing more is sent; after 5 s it carries on if they are idle, else it waits for Resume on the pill. A call that
+  waits returns within one tool call's budget (under 60 s) with `PAUSED` "paused by the user ... call the same step
+  again": an agent re-calls the step and does not give up. Linux cannot read idle time, so nothing waits there.
 - **The HTTP daemon answers only to `Host: 127.0.0.1:<port>` or `localhost:<port>`**; any other Host header gets 403.
   A page whose DNS name was rebound to 127.0.0.1 could load the dashboard and read the pause message. An SSH tunnel to
   the daemon must use the daemon's own port on the local end (`ssh -L 3847:127.0.0.1:3847 ...`).
