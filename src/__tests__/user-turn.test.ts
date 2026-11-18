@@ -20,6 +20,8 @@ import { classifyResult } from '../core/result-codes';
 const EDGE = { processId: 100, processName: 'msedge' };
 const DEFAULTS = { ...turnTiming };
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+/** The error an act was refused with; an act that went through is a test failure. */
+const refused = (p: Promise<unknown>): Promise<Error> => p.then(() => new Error('not refused: the act went through'), e => e as Error);
 
 let dir: string;
 let typing: boolean;   // the user is at the keyboard: their last input is "now" at every read
@@ -106,7 +108,7 @@ describe('real input waits for the user', () => {
   it('Stop during a takeover: refused as stopped, and the pill is not left saying "your turn"', async () => {
     const d = fakeDesktop();
     typing = true;
-    const click = d.mouseClick(1, 1).catch(e => e as Error);
+    const click = refused(d.mouseClick(1, 1));
     await sleep(20);
     stopControl('pill');
     expect((await click).message).toBe(STOPPED_TEXT);
@@ -219,7 +221,7 @@ describe('the pill\'s Pause', () => {
     const d = fakeDesktop();
     holdControl('pill');
     turnTiming.waitMs = 300;
-    const err = await d.mouseClick(2, 2).catch(e => e as Error);
+    const err = await refused(d.mouseClick(2, 2));
     turnTiming.waitMs = 2000;
     expect(err).toBeInstanceOf(Error);
     expect(err.message).toMatch(/^paused by the user — they have the desktop, and nothing was sent/);
@@ -269,9 +271,9 @@ describe('the pill\'s Pause', () => {
     holdControl('pill');
     let second = 0;
     const errs = await withTurnBudget(async () => {
-      const a = await d.mouseClick(1, 1).catch(e => e as Error);
+      const a = await refused(d.mouseClick(1, 1));
       const t1 = Date.now();
-      const b = await d.mouseClick(2, 2).catch(e => e as Error);
+      const b = await refused(d.mouseClick(2, 2));
       second = Date.now() - t1;
       return [a, b];
     });
@@ -299,7 +301,7 @@ describe('the pill\'s Pause', () => {
   it('Stop while held: the waiting act is refused as stopped, and the hold is over', async () => {
     const d = fakeDesktop();
     holdControl('pill');
-    const click = d.mouseClick(1, 1).catch(e => e as Error);
+    const click = refused(d.mouseClick(1, 1));
     await sleep(20);
     stopControl('pill');
     expect((await click).message).toBe(STOPPED_TEXT);
