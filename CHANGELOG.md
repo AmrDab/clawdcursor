@@ -12,6 +12,11 @@ All notable changes to Clawd Cursor will be documented in this file.
   changes. The line protocol is in [docs/pill-host.md](docs/pill-host.md).
 
 ### Fixed
+- **An agent waits for the user instead of giving up.** `pause_for_user` answers `{status:"waiting"}` every 50 s while
+  the prompt is up. That reply said only "re-call", so an agent counted three of them as unanswered and ended the task
+  while the user was still filling in a sign-up form. It now says that a sign-up, a payment form or an emailed code can
+  take several minutes, that waiting is not a refusal, and that only the user ends the pause (Resume or End task); it
+  also gives `waitedSec`, the time since the prompt came up.
 - **`accessibility read_tree` / `read_screen` on the browser clawdcursor drives over CDP points at the browser tools**
   (#235). The hint after a thin read (and after a full read of that browser) now leads with `browser page_context` /
   `read_text` / `click`, as `find` already did; the 1.x fix had gone into a copy of `read_tree` that no longer ran.
