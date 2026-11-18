@@ -36,17 +36,19 @@ accessibility invoke     image=False  route=CDP page act, focus not moved
 
 ### 3. Two-mode indicator (owner's design)
 - **Background work → outline** around the agent's own window(s) only (`scripts/window-outline.ps1`). Multi-window `TARGET` line now emitted on every OS.
-  **Correction (2026-11-18):** in pure background mode, as in this run (the agent never touched the window in front), the outline was never told which window to frame, so no frame was drawn. The Mac run found this; it is fixed after `60a0c497` (see REPORT-macos.md §6.1) and still needs a live re-check on Windows too.
+  **Correction (2026-11-18):** in pure background mode, as in this run (the agent never touched the window in front), the outline was never told which window to frame, so no frame was drawn. The Mac run found this; it is fixed in `37994387` (REPORT-macos.md §8.1), verified live on macOS (REPORT-macos.md §7), and still needs a live re-check on Windows.
 - **Foreground input / R2 burst → full-screen amber edge glow** (`scripts/edge-glow.ps1`), for the burst + a 1.5 s tail, then back to the outline.
 - **Pill** (`scripts/banner.ps1`) with Stop: always on top, draggable by its body, amber flash on appear, burst count shown, "Paused — your turn" while a burst is paused. Verified on-screen by pixel capture (the pill/glow are capture-excluded, so a 0x11→0x0 temp copy was grabbed).
+- **The user's step (pause_for_user) → full-screen blue glow, no outline** (`8328273e`, the owner's third state). Unit-tested; live on macOS (REPORT-macos.md §7), not yet on Windows.
 
-### 4. Foreground burst pauses for the user (resume threshold 4 s)
-On user interference mid-burst: user's window + cursor returned at once, glow off, pill stays "Paused — your turn"; after 4 s idle it re-focuses, glow back on, re-applies the whole change from a clean state; if it can't re-establish safely → asks the user. Two correctness fixes from the security review applied (no stale-coordinate replay; restore to where the user actually was at resume). Covered by unit tests.
+### 4. The user's turn (updated 2026-11-18, the owner's rule: `58dbe13b`, `7c97b7be`)
+Every real input (keys, typing, clicks, drags, pointer moves, bringing a window to the front, launching an app) waits until the user has been idle 1 s; background acts (by name, window messages, browser page acts) do not. When the user takes over (busy as the agent wants to start, or their input mid-burst): their window and cursor come back at once, nothing more is sent, the glow goes off and the pill says "Paused — your turn"; after 5 s it goes on if they are idle, else it waits for **Resume** on the pill. The pill's new **Pause** button holds every act, background ones included, until Resume. A held call returns a waiting reply ("call the same step again") before a host's 60 s limit. This replaces the 4 s auto-resume this run had. Covered by unit tests (`user-turn.test.ts`, `foreground-burst.test.ts`); the Pause hold is verified live on macOS (REPORT-macos.md §6 f); **not yet live on Windows**.
 
 ### 5. Agent cursor (updated 2026-11-18, owner's call)
 The pill keeps its original orb (the mascot was removed). The ghost cursor that shows where the agent acts is a retro pixel arrow with **no eyes** — dark body, light rim — so it never looks like the user's own cursor. One grid in `scripts/agent-cursor.json`, drawn by the Windows ghost (`window-outline.ps1`) and the macOS ghost (`overlay.swift`); a parity test checks both embed the exact grid.
 
 ## Known limits (honest)
+- **Not yet re-checked live on Windows** (one on-screen run, needs the owner's go): the outline in background mode (fixed after this run), the blue glow at a pause, and the user's turn (the idle wait, the 5 s takeover, the pill's Pause / Resume).
 - Pill pixel art is slightly soft at 225 % DPI (powershell.exe is DPI-unaware); ghost cursor is crisp.
 - The in-place user-typing during this specific run raced with the owner's own apps (Notcho/Node popping focus); the 0-steal + screenshot-free facts come from the logged bridge + sampler, not from that typing.
 
