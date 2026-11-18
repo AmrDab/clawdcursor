@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>clawdcursor: lets AI use your computer in real time</title>
-  <meta name="description" content="clawdcursor lets AI use your computer in real time. It picks the fastest way into each app: the page itself in browsers, the accessibility tree in desktop apps, text recognition when there is no tree, and screenshots last. After every action it tells your AI whether it worked. Free and open source. Windows, macOS, Linux.">
-  <meta property="og:title" content="clawdcursor: lets AI use your computer in real time">
-  <meta property="og:description" content="It picks the fastest way into each app: the page itself in browsers, the accessibility tree in desktop apps, text recognition when there is no tree, and screenshots last. After every action it tells your AI whether it worked.">
+  <title>clawdcursor: the fallback AI execution layer</title>
+  <meta name="description" content="clawdcursor is the fallback AI execution layer: an AI agent uses your computer through it when there is no API, CLI or file edit for the job. It picks the fastest way into each app: the page itself in browsers, the accessibility tree in desktop apps, text recognition when there is no tree, and screenshots last. After every action it tells your AI whether it worked. Free and open source. Windows, macOS, Linux.">
+  <meta property="og:title" content="clawdcursor: the fallback AI execution layer">
+  <meta property="og:description" content="An AI agent uses your computer through clawdcursor when there is no API, CLI or file edit for the job. It picks the fastest way into each app: the page itself in browsers, the accessibility tree in desktop apps, text recognition when there is no tree, and screenshots last. After every action it tells your AI whether it worked.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://clawdcursor.com/">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -113,8 +113,12 @@
     irreversible action the user did not ask for, ask with system
     pause_for_user. Never type or ask for credentials.
     While an agent drives, a pill says what it is doing ("Typing in Edge") and
-    a thin amber outline marks the window it works in (blue while waiting for
-    the user).
+    an amber outline marks the window it works in during background work (the
+    user keeps using the computer), an amber glow covers the whole screen when it
+    uses the mouse and keyboard, and a blue glow covers the whole screen when it
+    needs the user for a step. On Windows and macOS it never types or moves the
+    mouse while the user is using the computer: it waits until the user has been
+    idle 1 s. The pill has Pause and Resume.
 
     ── PLATFORMS ───────────────────────────────────────────────────────────────
     Windows 10/11 (x64 + ARM64), macOS 12+ (Intel + Apple Silicon),
@@ -473,8 +477,8 @@
   <!-- Hero -->
   <div class="hero">
     <div class="hero-badge"><div class="pulse"></div> v2.2.0 &middot; free and open source &middot; Windows, macOS, Linux</div>
-    <h1>Lets AI use your computer<br><span class="gr">in real time.</span></h1>
-    <p>clawdcursor picks the fastest way into each app: the page itself in browsers, the accessibility tree in desktop apps, text recognition when there's no tree, and screenshots last. After every action it tells your AI whether it worked.</p>
+    <h1>The fallback AI<br><span class="gr">execution layer</span></h1>
+    <p>An AI agent uses your computer through clawdcursor when there is no API, CLI or file edit for the job. It picks the fastest way into each app: the page itself in browsers, the accessibility tree in desktop apps, text recognition when there's no tree, and screenshots last. After every action it tells your AI whether it worked.</p>
     <div class="hero-btns">
       <a href="https://github.com/AmrDab/clawdcursor" class="btn-p" id="star-btn">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
@@ -522,10 +526,91 @@
     </div>
   </section>
 
-  <!-- Proof: the benchmark -->
+  <!-- Proof: speed and the benchmarks -->
   <section id="proof" class="sect">
     <div class="sect-label">Proof</div>
     <h2>What we measured.</h2>
+    <p class="sub">Our own benchmarks, each run on one machine. The scope of every result is stated with it. None of it is a general claim.</p>
+
+    <h3 style="font-size:1.05rem;font-weight:700;margin:24px 0 12px;">Speed and accuracy on macOS (2.2)</h3>
+    <p style="color:var(--text2);font-size:0.88rem;line-height:1.65;margin-bottom:14px;">
+      macOS, one machine, 2026-11-17, release candidate rc-2.2 (<code>8408668d</code>): the same code as 2.2.0 except the own-window work. 13 scored tasks per model. The run took about 10 minutes wall-clock for both models.
+    </p>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:0;overflow-x:auto;-webkit-overflow-scrolling:touch;">
+      <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+        <tbody>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text3);font-weight:600;">Measure</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Claude Sonnet 5.5</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Claude Haiku 5.5</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Tasks done</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">11 of 13</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">13 of 13</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Within the call budget</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">not listed</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">12 of 13</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Tool calls</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">56 (a scripted reference run made 75)</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">86</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Screenshots</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">4</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">4</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">False "done"</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">0</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">0</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Loops</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">0</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">0</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Cost for the 13 tasks</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">$0.51</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">$0.048</td>
+            </tr>
+            <tr style="">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Seconds per task <!-- TODO seconds per task (Mac 2.2) --></td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">to come</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">to come</td>
+            </tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="color:var(--text2);font-size:0.88rem;line-height:1.65;margin-top:14px;">
+      Both Sonnet misses: the owner clicked their own Chrome mid-run, and clawdcursor's safety fence refused to act in the wrong window, as designed. On an earlier 2.2 build the same model did 13 of 13. The scripted reference run (the "oracle") also needs 4 screenshots: the drawing-canvas tasks have no named parts.
+    </p>
+
+    <h3 style="font-size:1.05rem;font-weight:700;margin:32px 0 12px;">Own-window work on Windows (2.2)</h3>
+    <div class="stats" style="margin-bottom:14px;">
+      <div class="stat"><div class="stat-val">14/14</div><div class="stat-lbl">On-screen checks passed</div></div>
+      <div class="stat"><div class="stat-val">0</div><div class="stat-lbl">Focus steals</div></div>
+      <div class="stat"><div class="stat-val">0</div><div class="stat-lbl">Screenshots</div></div>
+    </div>
+    <p style="color:var(--text2);font-size:0.88rem;line-height:1.65;">
+      Windows, one machine, 2.2 release candidate, 2026-11-18, with the owner at the PC. The agent never took the window you were using: foreground sampled every 50 ms, 0 steals. It made 0 screenshot calls (0 of 6 calls, in the two-agent run).
+      Details: <a href="https://github.com/AmrDab/clawdcursor/blob/main/eval/own-window/REPORT-windows.md" target="_blank" rel="noopener" style="color:var(--accent2);">REPORT-windows.md</a>.
+    </p>
+
+    <h3 style="font-size:1.05rem;font-weight:700;margin:32px 0 12px;">Reading the screen, and waiting for a person</h3>
+    <p style="color:var(--text2);font-size:0.88rem;line-height:1.65;">
+      <strong style="color:var(--text);">Reading the screen.</strong> Windows 11, 4K display, one machine, measured 2026-10-08: text recognition of one window takes 55&ndash;85 ms, and of the whole 4K screen about 0.54 s.
+    </p>
+    <p style="color:var(--text2);font-size:0.88rem;line-height:1.65;margin-top:10px;">
+      <strong style="color:var(--text);">Waiting for a person.</strong> In a sign-up test the agent waited 4 min 43 s for the person to type a password. It made no action meanwhile, and finished on its own about 7 s after they clicked Resume.
+    </p>
+
+    <h3 style="font-size:1.05rem;font-weight:700;margin:32px 0 12px;">Earlier measurement (2.0)</h3>
     <p class="sub">Our own benchmark: the Codex agent on Windows, 15 tasks.</p>
     <div class="stats" style="margin-bottom:18px;">
       <div class="stat"><div class="stat-val">14/15</div><div class="stat-lbl">Tasks done</div></div>
@@ -533,10 +618,10 @@
       <div class="stat"><div class="stat-val">0</div><div class="stat-lbl">Loops</div></div>
     </div>
     <p style="color:var(--text2);font-size:0.88rem;line-height:1.65;">
-      Where the app has an accessibility tree, the agent acted by name about 100% of the time. 12 of the 15 tasks stayed within their call budget. All 4 screenshots were on the two drawing-canvas tasks, which is the fewest those tasks allow. The run also found one false "ok", an action reported as done that was not: it is fixed on main and ships in the next release.
+      Where the app has an accessibility tree, the agent acted by name about 100% of the time. 12 of the 15 tasks stayed within their call budget. All 4 screenshots were on the two drawing-canvas tasks, which is the fewest those tasks allow. The run also found one false "ok", an action reported as done that was not: it was fixed after that run.
     </p>
     <p style="color:var(--text3);font-size:0.78rem;margin-top:14px;line-height:1.6;">
-      The scope is narrow: one OS, one agent, 15 tasks we built for the test. macOS, Linux and other models are not measured yet. From 2.1 the same benchmark runs on all three systems with several models, and a release ships only when it passes.
+      That run was narrow: one OS, one agent, 15 tasks we built for the test. A release now ships only when the benchmark passes.
       How it measures: <a href="https://github.com/AmrDab/clawdcursor/blob/main/bench/README.md" target="_blank" rel="noopener" style="color:var(--accent2);">bench/README.md</a>.
     </p>
   </section>
@@ -629,8 +714,8 @@
       </div>
       <div class="feat-card">
         <div class="feat-icon">📏</div>
-        <h4>Measured on Windows only</h4>
-        <p>The numbers above come from one OS and one agent. macOS and Linux are supported but not benchmarked yet.</p>
+        <h4>Measured on Windows and macOS</h4>
+        <p>The numbers above come from one machine each. Windows ran one agent (2.0) and macOS two models (2.2). Linux is supported but not benchmarked yet.</p>
       </div>
     </div>
   </section>
@@ -644,12 +729,12 @@
       <div class="feat-card">
         <div class="feat-icon">⏹️</div>
         <h4>A Stop button</h4>
-        <p>While your AI works, a small pill on screen says what it is doing ("Typing in Edge"). Press Stop on it, or run <code>clawdcursor stop</code>. It stays stopped until you resume.</p>
+        <p>While your AI works, a small pill on screen says what it is doing ("Typing in Edge"). Press Stop on it, or run <code>clawdcursor stop</code>. It stays stopped until you resume. Pause on the pill holds every act until you press Resume (Windows, macOS).</p>
       </div>
       <div class="feat-card">
         <div class="feat-icon">🟧</div>
-        <h4>An outline on the window</h4>
-        <p>A thin amber outline marks the window your AI is working in and moves with it from window to window. It turns blue while your AI waits for you.</p>
+        <h4>Three screen states</h4>
+        <p>An amber outline around the agent's window: it works in the background and you keep using the computer. An amber glow on the whole screen: it is using the mouse and keyboard. A blue glow on the whole screen: it needs you for a step.</p>
       </div>
       <div class="feat-card">
         <div class="feat-icon">🟦</div>
@@ -673,6 +758,9 @@
       </div>
     </div>
     <p style="color:var(--text2);font-size:0.88rem;margin-top:18px;line-height:1.65;">
+      <strong style="color:var(--text);">It waits while you use the computer</strong> (Windows, macOS). It never types or moves the mouse while your hands are on it: it waits until you have been idle for 1 s. If you take over mid-action, nothing more is sent; after 5 s it carries on if you are idle, otherwise it waits for Resume on the pill.
+    </p>
+    <p style="color:var(--text2);font-size:0.88rem;margin-top:12px;line-height:1.65;">
       <strong style="color:var(--text);">No built-in policy engine.</strong> clawdcursor does not decide what your AI may do: your AI and your MCP host's approval prompts do. If your host approves every tool call on its own, nothing asks before your AI sends, deletes or pays, unless you turn on confirm mode (from 2.1,
       <a href="https://github.com/AmrDab/clawdcursor/issues/373" target="_blank" rel="noopener" style="color:var(--accent2);">#373</a>): with <code>CLAWD_CONFIRM=1</code>, or the Claude Desktop extension's "Ask before Send / Delete / Pay / Close" setting, it waits on the pause card until you click Resume.
       The full threat model is in <a href="https://github.com/AmrDab/clawdcursor/blob/main/SECURITY.md" target="_blank" rel="noopener" style="color:var(--accent2);">SECURITY.md</a>.
@@ -805,8 +893,8 @@ claude plugin install clawdcursor@clawdcursor</code></pre>
       </div>
       <div class="feat-card">
         <div class="feat-icon">🧭</div>
-        <h4>2.1</h4>
-        <p>One standard benchmark across app types, OSes and models as the release gate, plus honest results, target resolution, perception without a tree, geometry and timing. Honest results, target resolution and perception are in 2.1, as are confirm mode, <code>clawdcursor update</code> and error reports; geometry and timing are next. <a href="https://github.com/AmrDab/clawdcursor/milestone/1" target="_blank" rel="noopener" style="color:var(--accent2);">2.1 milestone</a></p>
+        <h4>2.2</h4>
+        <p>It works beside you. On Windows and macOS it never types or moves the mouse while you use the computer, and the screen shows three states: an amber outline, an amber glow, a blue glow. The pill has Pause and Resume. On Windows the agent works in its own window without taking yours. Screen geometry and timing, the last two of the five mechanisms in the <a href="https://github.com/AmrDab/clawdcursor/milestone/1" target="_blank" rel="noopener" style="color:var(--accent2);">2.1 milestone</a>, are next.</p>
       </div>
     </div>
     <p style="color:var(--text3);font-size:0.78rem;margin-top:14px;line-height:1.6;">

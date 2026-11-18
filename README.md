@@ -1,8 +1,8 @@
 <h1 align="center">Clawd Cursor</h1>
 
 <p align="center">
-  <strong>Lets AI use your computer in real time.</strong><br>
-  clawdcursor picks the fastest way into each app: the page itself in browsers, the accessibility tree in desktop apps, text recognition when there's no tree, and screenshots last. After every action it tells your AI whether it worked.
+  <strong>The fallback AI execution layer</strong><br>
+  An AI agent uses your computer through clawdcursor when there is no API, CLI or file edit for the job. It picks the fastest way into each app: the page itself in browsers, the accessibility tree in desktop apps, text recognition when there's no tree, and screenshots last. After every action it tells your AI whether it worked.
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 
 <p align="center">
   <a href="#what-it-does">What it does</a> &middot;
-  <a href="#proof">Proof</a> &middot;
+  <a href="#proof">Proof and speed</a> &middot;
   <a href="#how-it-works">How it works</a> &middot;
   <a href="#limits">Limits</a> &middot;
   <a href="#what-protects-you">What protects you</a> &middot;
@@ -41,6 +41,43 @@ Clawd Cursor has no model and no API key of its own: your AI makes every decisio
 
 ## Proof
 
+Our own benchmarks, each run on one machine. The scope of every result is stated with it. None of it is a general claim.
+
+### Speed and accuracy on macOS (2.2)
+
+macOS, one machine, 2026-11-17, release candidate rc-2.2 (`8408668d`): the same code as 2.2.0 except the own-window work. 13 scored tasks per model. The run took about 10 minutes wall-clock for both models.
+
+| Measure | Claude Sonnet 5.5 | Claude Haiku 5.5 |
+|---|---|---|
+| Tasks done | 11 of 13 | 13 of 13 |
+| Within the call budget | not listed | 12 of 13 |
+| Tool calls | 56 (a scripted reference run made 75) | 86 |
+| Screenshots | 4 | 4 |
+| False "done" | 0 | 0 |
+| Loops | 0 | 0 |
+| Cost for the 13 tasks | $0.51 | $0.048 |
+| Seconds per task <!-- TODO seconds per task (Mac 2.2) --> | to come | to come |
+
+- Both Sonnet misses: the owner clicked their own Chrome mid-run, and clawdcursor's safety fence refused to act in the wrong window, as designed. On an earlier 2.2 build the same model did 13 of 13.
+- The scripted reference run (the "oracle") also needs 4 screenshots: the drawing-canvas tasks have no named parts.
+
+### Own-window work on Windows (2.2)
+
+Windows, one machine, 2.2 release candidate, 2026-11-18, with the owner at the PC: **14 of 14** on-screen checks passed. The agent took the window you were using **0 times** (0 focus steals, foreground sampled every 50 ms) and made **0 screenshot calls** (0 of 6 calls, in the two-agent run). Details: [eval/own-window/REPORT-windows.md](eval/own-window/REPORT-windows.md).
+
+### Reading the screen
+
+Windows 11, 4K display, one machine, measured 2026-10-08:
+
+- Text recognition of one window: 55&ndash;85 ms.
+- Text recognition of the whole 4K screen: about 0.54 s.
+
+### Waiting for a person
+
+In a sign-up test the agent waited 4 min 43 s for the person to type a password. It made no action meanwhile, and finished on its own about 7 s after they clicked Resume.
+
+### Earlier measurement (2.0)
+
 Our own benchmark: the Codex agent on Windows, 15 tasks.
 
 | Measure | Result |
@@ -50,9 +87,9 @@ Our own benchmark: the Codex agent on Windows, 15 tasks.
 | Within the call budget | 12 of 15 |
 | Screenshots | 4 in total, all on the two drawing-canvas tasks (the fewest those tasks allow) |
 | Loops | 0 |
-| False "ok" | 1 found (an action reported as done that was not): fixed on main, ships in the next release |
+| False "ok" | 1 found (an action reported as done that was not); fixed after that run |
 
-The scope is narrow: one OS, one agent, 15 tasks we built for the test. macOS, Linux and other models are not measured yet. From 2.1 the same benchmark runs on all three systems with several models, and a release ships only when it passes. How it measures: [bench/README.md](bench/README.md).
+That run was narrow: one OS, one agent, 15 tasks we built for the test. A release now ships only when the benchmark passes. How it measures: [bench/README.md](bench/README.md).
 
 ---
 
@@ -103,7 +140,7 @@ In tool terms:
 - **OCR:** text recognition, reading the words in a picture of the screen. It runs on your computer.
 - **Playwright and CDP:** Playwright is a library that controls Chrome and Edge from the inside, over the Chrome DevTools Protocol (CDP), the browser's own debugging connection. Apps built on a browser engine (Electron or WebView2) can be reached the same way; `system detect_webview` finds them.
 - **Compact tools:** the six tools your AI sees with `--compact`. Without it there are 89 smaller tools, one per action. See [The tools](#the-tools).
-- **The pill and the outline:** while your AI is working, a pill on screen says what it is doing ("Typing in Edge") and a thin amber outline marks the window it is working in, moving with it from window to window; it turns blue while your AI waits for you. Clicks go through it, and it stays out of your AI's screenshots.
+- **The pill and the three screen states:** while your AI is working, a pill on screen says what it is doing ("Typing in Edge"). An amber outline around the agent's window means background work, while you keep using the computer. An amber glow on the whole screen means it is using the mouse and keyboard. A blue glow on the whole screen means it needs you for a step. Clicks go through the pill, and it stays out of your AI's screenshots.
 
 ---
 
@@ -111,7 +148,7 @@ In tool terms:
 
 - It depends on apps exposing accessibility info. Most do: web pages, native apps, Office and system dialogs.
 - Apps that draw their own screen (drawing canvases, games, CAD viewports) have no named parts. There it needs OCR or screenshots.
-- The benchmark covers Windows and one agent so far. macOS and Linux are supported but not benchmarked yet.
+- Our benchmark covers Windows (2.0, one agent) and macOS (2.2, two models). Linux is supported but not benchmarked yet.
 - It acts with your permissions, and it has no built-in policy engine: see [What protects you](#what-protects-you).
 
 ---
@@ -123,6 +160,9 @@ Clawd Cursor runs with **your own OS permissions**: anything you can do with a m
 What is enforced, whatever your AI sends:
 
 - **A Stop button.** Press Stop on the pill (or double-click it), or run `clawdcursor stop`. Every Clawd Cursor process stops, including a call or batch already running, and stays stopped across restarts until you resume.
+- **Pause and Resume on the pill** (Windows, macOS). Pause holds every act of the agent, background ones included, until you press Resume. Resume continues without a step in the chat.
+- **Three screen states.** An amber outline around the agent's window: it is working in the background, and you keep using the computer. An amber glow on the whole screen: it is using the mouse and keyboard. A blue glow on the whole screen, and no outline: it needs you for a step.
+- **It waits while you use the computer** (Windows, macOS). It never types or moves the mouse while your hands are on it. It waits until you have been idle for 1 s. If you take over mid-action, nothing more is sent; after 5 s it carries on if you are idle, otherwise it waits for Resume. Background acts, by name or by window message, do not wait. Linux cannot read idle time, so nothing waits there.
 - **The pause card.** For a sign-in or a 2FA code your AI hands that one step to you with `system pause_for_user`: a card on screen says what is needed and can offer choices or a text box, and your AI continues when you click Resume, or as soon as its `done_when` condition shows on screen. While the card is up, no other tool call runs. A choice or a typed reply on the card comes only from you: your AI cannot click its own card or the pill. On the granular surface an agent can also end a pause with `resume_task`; that is reported as unverified, never as your answer.
 - **No typing into AI assistant windows.** Input is refused when the window in front is an AI assistant your AI did not focus or open on purpose, or is no longer the window it was working in.
 - **Password values are never read.** Password field values are never returned by tree, find or value reads on Windows, macOS and Linux. A screenshot or OCR can still show whatever is visible on screen.
@@ -324,6 +364,13 @@ Restart the host afterwards so it starts the new server. `clawdcursor versions` 
 
 ## What's new
 
+**2.2.0** &mdash; **Works beside you.** ([full changelog](CHANGELOG.md))
+- On Windows and macOS it never types or moves the mouse while you are using the computer: it waits until you stop.
+- Three screen states: an amber outline around the agent's window in background work, an amber glow on the whole screen when it uses the mouse and keyboard, a blue glow when it needs you for a step.
+- A Pause button on the pill: every act waits until you press Resume.
+- On Windows the agent works in its own window without taking yours: a window message first, a short foreground burst only while you are idle, then a pause for you.
+- `clawdcursor task` prints how the run acted and its tokens. Speed numbers are in [Proof](#proof).
+
 **2.0.0** &mdash; **A tool, driven by your agent.** First published as 1.6.0 and renumbered because it is a breaking change; 1.6.0 is deprecated on npm. ([full changelog](CHANGELOG.md))
 - **Breaking:** the built-in agent loop and all model settings are gone. The `task` tool, `clawdcursor task`, the scheduler and the `--provider` / `--model` / `--api-key` flags are removed, and `clawdcursor doctor` is a diagnostic only. Your agent calls the six tools step by step, or `batch` for a known sequence.
 - **Breaking:** the policy gate is gone: no tiers, no "confirm", nothing refused by label. See [What protects you](#what-protects-you) for what is still enforced, and what is not.
@@ -335,7 +382,7 @@ Restart the host afterwards so it starts the new server. `clawdcursor versions` 
 
 Earlier releases are in the [changelog](CHANGELOG.md).
 
-**2.1.** One standard benchmark across app types, OSes and models becomes the release gate, with five general mechanisms behind it: honest results, target resolution, perception without a tree, screen geometry and timing. The first three are in 2.1, and so are an opt-in confirm mode ([#373](https://github.com/AmrDab/clawdcursor/issues/373)), `clawdcursor update`, anonymous error reports and an orb in the pill; the thin outline around the agent's window stays as in 2.0. Screen geometry and timing are next: see the [2.1 milestone](https://github.com/AmrDab/clawdcursor/milestone/1).
+**2.2.** Clawd Cursor now works beside you: see [What's new](#whats-new) and [What protects you](#what-protects-you). The standard benchmark across app types, OSes and models is the release gate, and the numbers are in [Proof](#proof). Screen geometry and timing, the last two of the five mechanisms in the [2.1 milestone](https://github.com/AmrDab/clawdcursor/milestone/1), are next.
 
 ---
 
