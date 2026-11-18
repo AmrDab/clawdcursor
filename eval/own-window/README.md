@@ -183,6 +183,22 @@ node eval/own-window/full-macos.mjs --dry-run
 node eval/own-window/full-macos.mjs
 ```
 
+### Windows: the same three states and the user's turn, one run (`full-windows.mjs`)
+
+The owner sits at the PC; spoken cues say when to type, when to keep hands off, and when to click Pause and Resume on the
+pill; two Yes/No questions come on clawdcursor's own pause card. BACKGROUND (the owner types in ClawdUser; the agent acts
+by `processId` on ClawdTarget and on its own Edge page), FOREGROUND (`window focus` + `computer type`: the amber glow),
+PAUSE (a question card: the blue glow, no frame), YOUR TURN (the owner keeps typing while the agent wants the keyboard:
+it waits, holds, and goes on after their Resume), PILL PAUSE (a background act waits for Resume). `overlay-recorder.ps1`
+records only the test server's overlay windows and the agent's windows. A PASS/FAIL table at the end; results in
+`results/full-windows-<time>.json`. Every exit closes what it started (480 s hard timeout).
+
+```
+npm run build
+node eval/own-window/full-windows.mjs --dry-run
+node eval/own-window/full-windows.mjs
+```
+
 ### Send back
 
 The `results/macos-*.jsonl` and `results/live-macos-*.jsonl` files and the printed tables (outcomes, side effects, the live summary), plus any `FAILED:` / `skip` / `note:` lines.
