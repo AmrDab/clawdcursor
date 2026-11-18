@@ -100,7 +100,7 @@ node eval/own-window/live-windows.mjs              # the live run, about 40 s; h
 ## macOS
 
 Plan (h) step 1 for macOS, plus the `--external` two-agent run. Written on Windows, never run on a Mac: expect to fix small things.
-Files: `probe-macos.mjs`, `live-macos.mjs`, `macos-common.mjs` (shared), `macos-helper.swift` (compiled with `swiftc` into a temp dir at each run).
+Files: `probe-macos.mjs`, `live-macos.mjs`, `full-macos.mjs`, `macos-common.mjs` (shared), `macos-helper.swift` and `overlay-recorder.swift` (compiled with `swiftc` into a temp dir at each run).
 
 Needs: macOS with Xcode command line tools (`xcode-select --install`), node 22+, TextEdit, Google Chrome (skipped if missing), Safari (skipped if already running).
 Permissions for the terminal app that runs the commands (System Settings > Privacy & Security): **Accessibility** (required: AX reads/writes and posted events),
@@ -168,6 +168,20 @@ reaching the server. Each call is one line in
 `<dir>/calls.jsonl`: `t`, `tool`, `action`, `image` (the result carried a screenshot), `route`, `error`, plus `blocked: true` for a refused call.
 `route` is the route note in the reply, `(R1 ...)` or `(CDP page act ...)`; `null` means the reply had no route note (an R0 act by name, or a `browser`
 call), not a failure.
+
+### 3. The indicator's three states, one run (`full-macos.mjs`)
+
+The owner sits at the Mac; spoken cues say when to type and when to keep hands off. BACKGROUND: the owner types in a TextEdit window while the
+script's own MCP client acts by `processId` on ClawdTarget and its Chrome page (3 rounds); expected: a frame round the agent's window, no glow, no focus
+steal, the owner's typing intact. FOREGROUND: `window focus` + `computer type`; expected: the amber glow. PAUSE: `pause_for_user`; expected: the blue
+glow and the card, no frame; the owner clicks Resume. `overlay-recorder.swift` records the overlay windows (and the test's own windows, never the
+owner's) twice a second; each act is printed tagged with what was on screen, then a PASS/FAIL table. Every exit closes what it started (330 s hard timeout).
+
+```
+npm run build
+node eval/own-window/full-macos.mjs --dry-run
+node eval/own-window/full-macos.mjs
+```
 
 ### Send back
 

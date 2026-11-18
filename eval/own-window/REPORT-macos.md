@@ -115,6 +115,7 @@ One script (ClawdTarget, the owner's TextEdit in front, a temp Chrome, a server 
 
 ## 9. Known limits and what is left
 
-- **Not run yet on the Mac:** the idle reader (`ax-helper idle`, three reads: while the owner types, after 3 s of no input, and once more straight after), which the user's-turn wait relies on there.
+- **The idle reader** (`ax-helper idle`, which the user's-turn wait relies on on macOS), half checked: two reads 0 ms apart with no input in between gave the **same `lastAt`** (1794997145714), and `idleMs` grew by the wall time between them (789810 → 789838), so the agent can tell "no input since" exactly. **Not yet seen:** a read while someone types at the Mac itself (a few hundred ms, a new `lastAt`): the owner was on Remote Control, so no local input reached that Mac. Redo that one read with the owner at the Mac.
+- The test script for §7 is `full-macos.mjs` + `overlay-recorder.swift` (README §3).
 - On macOS a click by name comes back `[unverified]` even when it worked (the label did read CLICKED). It is a verification gap, not fixed here.
 - Agent A was the owner by hand, not computer use. Safari was not probed.
