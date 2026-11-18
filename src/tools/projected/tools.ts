@@ -18,7 +18,7 @@ import type { InvokeAction, UiElement } from '../../platform/types';
 import { ocrEngine } from '../../platform/ocr-engine';
 import { selectOption, selectedResult } from '../../platform/select-option';
 import { ownsPoint } from '../click-owner';
-import { SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, drawnControlsLine, SPARSE_NEXT_STEP, isSparseTree, CUT_VALUE_NEXT_STEP, cdpStepFor } from '../blind-hints';
+import { SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, drawnControlsLine, SPARSE_NEXT_STEP, isSparseTree, CUT_VALUE_NEXT_STEP, cdpStepFor, cdpBrowserPid } from '../blind-hints';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
 import { wakeForNameSearch, onTopOfLine } from '../name-search-help';
 import { isBrowserProcess } from '../../platform/browser-config';
@@ -36,7 +36,8 @@ import { pasteChoice, CLIPBOARD_HELD_REFUSAL, waitForPaste, writeClipboardVerifi
 import { sleepUnlessStopped, STOPPED_TEXT } from '../../core/control';
 import { timeWait } from '../../core/observability/steps';
 import { unguarded } from '../../platform/pointer-guard';
-import { preferControl, notSelectableReason, failReason, sameElement, inside, ensureInFront } from '../../platform/prefer-control';
+import { preferControl, notSelectableReason, failReason, sameElement, inside } from '../../platform/prefer-control';
+import { viaLadder } from '../../platform/ladder';
 import { effectLine, windowChange, type WindowRead } from '../../core/effect';
 import { missText, structuredMissFields, untrusted, targetOf, targetText } from '../../core/miss-text';
 import { sleep } from '../../sleep';
@@ -226,26 +227,32 @@ export function buildUnifiedTools(): UnifiedTool[] {
           const aw = await ctx.platform.getActiveWindow().catch(() => null);
           const plan = resolveRef(refIds, ctx.uiMaps, Date.now(), 'click', aw);
           if (!plan.ok) return { success: false, text: `invoke_element ref rejected: ${plan.error}`, isError: true };
-          if (plan.via === 'name') {
-            // A ref to a ListItem / combo-item / checkbox may not support
-            // InvokePattern: the same activation ladder as the by-name path below.
-            const { res: refRes, used: refUsed } = await runActivationLadder(
-              (action) => ctx.platform.invokeElement({ name: plan.name, action }), ['click', 'select', 'toggle']);
-            if (!refRes.success && canClickAtBounds(refRes)) {
-              const fallback = await clickBoundsFallback(ctx, plan.name, refRes.bounds);
-              if (fallback) return { ...fallback, text: `${fallback.text} (via ${plan.element.id})` };
+          if (plan.via === 'name' && plan.background) {
+            // A ref into a window that is not in front: the by-name act below, addressed to that process (R1 window
+            // messages, CDP, the ladder), so the focus is not moved and no click lands on the window in front.
+            args = { ...args, name: plan.name, processId: plan.processId };
+          } else {
+            if (plan.via === 'name') {
+              // A ref to a ListItem / combo-item / checkbox may not support
+              // InvokePattern: the same activation ladder as the by-name path below.
+              const { res: refRes, used: refUsed } = await runActivationLadder(
+                (action) => ctx.platform.invokeElement({ name: plan.name, action }), ['click', 'select', 'toggle']);
+              if (!refRes.success && canClickAtBounds(refRes)) {
+                const fallback = await clickBoundsFallback(ctx, plan.name, refRes.bounds);
+                if (fallback) return { ...fallback, text: `${fallback.text} (via ${plan.element.id})` };
+              }
+              await sleep(150);
+              return { success: refRes.success, text: refRes.success ? `Invoked ${quoteScreenText(plan.name)} via a11y${refUsed !== 'click' ? ` (${refUsed})` : ''} (via ${plan.element.id}).`
+                // The reason, as the name path gives it: an ambiguous name comes with the list of what it could mean.
+                : `a11y invoke of ${plan.element.id} missed — ${missText(refRes.data)}.`, targetLabel: plan.name };
             }
+            const seen = await boundsToClick(ctx, plan, aw);
+            if (!seen.ok) return { success: false, text: `invoke_element ref rejected: ${seen.error}`, isError: true };
+            const [bx, by, bw, bh] = seen.bounds;
+            await ctx.platform.mouseClick(Math.round(bx + bw / 2), Math.round(by + bh / 2));
             await sleep(150);
-            return { success: refRes.success, text: refRes.success ? `Invoked ${quoteScreenText(plan.name)} via a11y${refUsed !== 'click' ? ` (${refUsed})` : ''} (via ${plan.element.id}).`
-              // The reason, as the name path gives it: an ambiguous name comes with the list of what it could mean.
-              : `a11y invoke of ${plan.element.id} missed — ${missText(refRes.data)}.`, targetLabel: plan.name };
+            return { success: true, text: `Clicked ${plan.element.id} at its bounds center${plan.offView ? ' (scrolled into view first)' : ''}.`, targetLabel: plan.element.id };
           }
-          const seen = await boundsToClick(ctx, plan, aw);
-          if (!seen.ok) return { success: false, text: `invoke_element ref rejected: ${seen.error}`, isError: true };
-          const [bx, by, bw, bh] = seen.bounds;
-          await ctx.platform.mouseClick(Math.round(bx + bw / 2), Math.round(by + bh / 2));
-          await sleep(150);
-          return { success: true, text: `Clicked ${plan.element.id} at its bounds center${plan.offView ? ' (scrolled into view first)' : ''}.`, targetLabel: plan.element.id };
         }
         // `automationId` is accepted for MCP backward-compat but the PlatformAdapter
         // invokeElement interface does not expose automationId filtering — it is used
@@ -279,6 +286,11 @@ export function buildUnifiedTools(): UnifiedTool[] {
         // strict — the agent that asked to expand never silently gets a select.
         // Pure adapter-string retries → works on every OS with zero per-OS code,
         // and only the failing path pays the extra round-trips.
+        const page = action === 'click' ? await cdpOf(ctx, processId) : null;   // see set_field_value
+        if (page && (await page.clickByText(name).catch(() => null))?.success) {
+          ctx.platform.noteRoute?.(CDP_ROUTE);
+          return { success: true, text: `Invoked ${quoteScreenText(name)} via the page (browser).`, targetLabel: name };
+        }
         const ladder: InvokeAction[] = action === 'click' ? ['click', 'select', 'toggle'] : [action];
         await wakeForNameSearch(ctx.platform, processId);
         const { res, used } = await runActivationLadder(
@@ -339,31 +351,37 @@ export function buildUnifiedTools(): UnifiedTool[] {
           const aw = await ctx.platform.getActiveWindow().catch(() => null);
           const plan = resolveRef(refIds, ctx.uiMaps, Date.now(), 'fill', aw);
           if (!plan.ok) return { success: false, text: `set_field_value ref rejected: ${plan.error}`, isError: true };
-          if (plan.via === 'name') {
-            const before = await valueBefore(ctx, { name: plan.name });
-            const res = await ctx.platform.invokeElement({ name: plan.name, action: 'set-value', value: fillValue });
+          if (plan.via === 'name' && plan.background) {
+            // A ref into a window that is not in front: the by-name act below, addressed to that process (R1 window
+            // messages, CDP, the ladder), so the focus is not moved and no click lands on the window in front.
+            args = { ...args, name: plan.name, processId: plan.processId };
+          } else {
+            if (plan.via === 'name') {
+              const before = await valueBefore(ctx, { name: plan.name });
+              const res = await ctx.platform.invokeElement({ name: plan.name, action: 'set-value', value: fillValue });
+              await sleep(150);
+              if (!res.success) return { success: false, text: `Set of ${plan.element.id} failed.`, targetLabel: plan.name };
+              return setResult(ctx.platform, fillValue, plan.name, ` (via ${plan.element.id})`, { name: plan.name },
+                { before, type: () => typeIntoField(ctx, fillValue, plan.name, undefined, undefined) });
+            }
+            const seen = await boundsToClick(ctx, plan, aw);
+            if (!seen.ok) return { success: false, text: `set_field_value ref rejected: ${seen.error}`, isError: true };
+            const [bx, by, bw, bh] = seen.bounds;
+            await ctx.platform.mouseClick(Math.round(bx + bw / 2), Math.round(by + bh / 2));
+            // No select-all when the click put the focus on the page or a document itself, or on a list or button: there it
+            // selects the whole page or every item. A text field or text area takes it; an unread focus keeps the old way.
+            const fe = await (async () => ctx.platform.getFocusedElement())().catch(() => null);
+            const scope = selectAllScope(fe);
+            if (scope === 'other' || (scope === 'document' && !fe?.multiline)) {
+              return { success: false, text: `set_field_value: clicked ${plan.element.id}, but the focus is not in a text field, so nothing was typed. Find the field (find_field) and set it by its element_id.`, isError: true };
+            }
+            // Replace, don't append: a set_value that types after the old text
+            // left "old textnew" in the Save-As box (live Windows check).
+            await ctx.platform.keyPress('mod+a');
+            await ctx.platform.typeText(fillValue);
             await sleep(150);
-            if (!res.success) return { success: false, text: `Set of ${plan.element.id} failed.`, targetLabel: plan.name };
-            return setResult(ctx.platform, fillValue, plan.name, ` (via ${plan.element.id})`, { name: plan.name },
-              { before, type: () => typeIntoField(ctx, fillValue, plan.name, undefined, undefined) });
+            return setResult(ctx.platform, fillValue, plan.element.id, ` (via bounds + select-all + type${plan.offView ? ', scrolled into view first' : ''})`);
           }
-          const seen = await boundsToClick(ctx, plan, aw);
-          if (!seen.ok) return { success: false, text: `set_field_value ref rejected: ${seen.error}`, isError: true };
-          const [bx, by, bw, bh] = seen.bounds;
-          await ctx.platform.mouseClick(Math.round(bx + bw / 2), Math.round(by + bh / 2));
-          // No select-all when the click put the focus on the page or a document itself, or on a list or button: there it
-          // selects the whole page or every item. A text field or text area takes it; an unread focus keeps the old way.
-          const fe = await (async () => ctx.platform.getFocusedElement())().catch(() => null);
-          const scope = selectAllScope(fe);
-          if (scope === 'other' || (scope === 'document' && !fe?.multiline)) {
-            return { success: false, text: `set_field_value: clicked ${plan.element.id}, but the focus is not in a text field, so nothing was typed. Find the field (find_field) and set it by its element_id.`, isError: true };
-          }
-          // Replace, don't append: a set_value that types after the old text
-          // left "old textnew" in the Save-As box (live Windows check).
-          await ctx.platform.keyPress('mod+a');
-          await ctx.platform.typeText(fillValue);
-          await sleep(150);
-          return setResult(ctx.platform, fillValue, plan.element.id, ` (via bounds + select-all + type${plan.offView ? ', scrolled into view first' : ''})`);
         }
         const name = String(args.name ?? '');
         const value = String(args.value ?? '');
@@ -374,6 +392,15 @@ export function buildUnifiedTools(): UnifiedTool[] {
         // A role alone is fine: the platform acts on the one field with that role, or refuses when several have it.
         if (!name.trim() && !controlType) {
           return { success: false, text: 'Set failed: name the field (its accessibility name), or pass element_id + snapshot_id from compile_ui. To type into the focused field, use type.', isError: true };
+        }
+        // The browser clawdcursor holds a CDP connection to: a DOM fill, where UIA's set would take its window to the front.
+        const page = await cdpOf(ctx, processId);
+        if (page && name.trim()) {
+          const r = await page.typeByLabel(name, value).catch(() => null);
+          if (r?.success) {
+            ctx.platform.noteRoute?.(CDP_ROUTE);
+            return { ...setVerdict(await readBackTyped(async () => r.read?.() ?? null, value, { whole: true }), value, name, ' (browser)'), targetLabel: name };
+          }
         }
         const field = { name, controlType: await preferControl(ctx.platform, 'set-value', { name, controlType, processId }), processId };
         const before = await valueBefore(ctx, field);
@@ -1442,6 +1469,13 @@ export function buildUnifiedTools(): UnifiedTool[] {
   return tools;
 }
 
+const CDP_ROUTE = 'CDP page act, focus not moved';
+
+/** The CDP driver when `pid` is the browser it is connected to (a by-name step on it is a page act), else null. */
+async function cdpOf(ctx: AgentToolContext, pid: number | undefined) {
+  return pid !== undefined && await cdpBrowserPid(ctx.cdp) === pid ? ctx.cdp! : null;
+}
+
 /**
  * Resolve `processId` to the active-window pid when the LLM omits it.
  * Without this, UIA / AX searches walk the entire system tree and
@@ -1567,12 +1601,15 @@ async function clickBoundsFallback(
   const at = await clickablePoint(ctx, b);
   if (!at) return null;
   const { x: cx, y: cy } = at;
-  // A coordinate click hits whatever is on top. When the element was looked
-  // up in a named process (not the foreground window), raise that window
-  // first so the click can't land on a window covering it.
-  if (processId !== undefined) await ctx.platform.focusWindow({ processId }).catch(() => false);
-  await ctx.platform.mouseClick(cx, cy);
+  // A coordinate click hits whatever is on top. When the element was looked up in a named process (not the window in
+  // front), the ladder delivers the click to its window (R1), or brings that window up for a moment (R2), so the click
+  // can't land on a window covering it.
+  // replay:false — this is a fixed-coordinate click (cx,cy resolved before the burst); if the user interrupts and scrolls,
+  // re-clicking the old point could hit the wrong thing, so an interruption goes to R3 rather than replay.
+  const via = await viaLadder(ctx.platform, processId, { r1: { name, input: { click: true } }, r2: async act => { await act(() => ctx.platform.mouseClick(cx, cy)); } }, { replay: false });
+  if (via.rung === 'R3') return null;
   await sleep(150);
+  if (via.rung === 'R1') return { success: true, text: `Clicked ${quoteScreenText(name)} via a window message (the element exposes no invoke/toggle/select pattern).`, targetLabel: name };
   return { success: true, text: `Clicked ${quoteScreenText(name)} via a11y bounds (coordinate fallback at ${cx},${cy} — element found but exposes no invoke/toggle/select pattern).`, targetLabel: name };
 }
 
@@ -1719,16 +1756,21 @@ async function typeIntoField(
 ): Promise<Retyped> {
   const target = await editableTarget(ctx, name, controlType, processId, !secureOk);
   if (!target) return { skipped: `no editable field named ${quoteScreenText(name)} is on screen${secureOk ? '' : ' (a password field is never typed into on a guess)'}` };
-  const pid = processId ?? target.el.processId;
-  if (pid !== undefined && !await ensureInFront(ctx.platform, pid)) return { skipped: 'its window would not come to the front' };
-  await ctx.platform.mouseClick(target.x, target.y);
-  await sleep(100);
-  if (!focusIsField(await ctx.platform.getFocusedElement().catch(() => null), target.el, secureOk)) return 'unfocused';
-  await ctx.platform.keyPress('mod+a');
-  if (value) await ctx.platform.typeText(value);
-  else await ctx.platform.keyPress('Delete');
-  await sleep(150);
-  return 'typed';
+  const via = await viaLadder(ctx.platform, processId ?? target.el.processId, {
+    r1: { name, input: { setText: value } },
+    r2: async act => {
+      await act(() => ctx.platform.mouseClick(target.x, target.y));
+      await sleep(100);
+      if (!focusIsField(await ctx.platform.getFocusedElement().catch(() => null), target.el, secureOk)) return 'unfocused' as const;
+      await act(() => ctx.platform.keyPress('mod+a'));
+      if (value) await act(() => ctx.platform.typeText(value));
+      else await act(() => ctx.platform.keyPress('Delete'));
+      await sleep(150);
+      return 'typed' as const;
+    },
+  });
+  if (via.rung === 'R1') return 'typed';
+  return via.rung === 'R3' ? { skipped: via.why } : via.value;
 }
 
 /** The "another app's window is on top" line for a plain miss (not an ambiguous or hidden element), with its newline; else "". */

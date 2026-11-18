@@ -99,6 +99,51 @@ describe('resolveRef', () => {
     if (!r.ok) expect(r.error).toMatch(/window/i);
   });
 
+  // Own-window (macOS run 2026-11-18): compile_ui by processId on the agent's window in the background, then a ref into it.
+  describe('a map of a window that is not the one in front', () => {
+    const otherWin = { processId: 5, processName: 'textedit', title: 'user.txt', bounds: { x: 0, y: 0, width: 400, height: 400 } };
+
+    it('plans an act by name in the map\'s process when the name is unique (the window in front does not matter)', () => {
+      const r = resolveRef({ element_id: 'el_0', snapshot_id: 'obs_1' }, holderWith(mapWith([el({ id: 'el_0' })])), 0, 'click', otherWin);
+      expect(r).toMatchObject({ ok: true, via: 'name', name: 'send', processId: 9, background: true });
+    });
+
+    it('refuses an element with no unique name: a click at its bounds would land on the window in front', () => {
+      const els = [el({ id: 'el_0' }), el({ id: 'el_1', bounds: [100, 200, 40, 12] })];
+      const r = resolveRef({ element_id: 'el_1', snapshot_id: 'obs_1' }, holderWith(mapWith(els)), 0, 'click', otherWin);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toMatch(/no unique name and its window \(pid 9\) is not the one in front/);
+    });
+
+    it('with no known pid it is still "window changed": the title alone cannot say where that window went', () => {
+      const map = { ...mapWith([el({ id: 'el_0' })]), process_id: '0' };
+      const r = resolveRef({ element_id: 'el_0', snapshot_id: 'obs_1' }, holderWith(map), 0, 'click', otherWin);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toMatch(/window changed since compile/);
+    });
+
+    it('invoke_element and set_field_value act by name in that process, and never click', async () => {
+      const holder = new UIMapHolder();
+      while (holder.nextId() !== 'obs_1') { /* advance counter */ }
+      holder.put(mapWith([el({ id: 'el_0' }), el({ id: 'el_1', role: 'input', text: 'Note', normalized_text: 'note', editable: true })]), Date.now());
+      const calls: any[] = [];
+      const platform = {
+        getActiveWindow: async () => otherWin,
+        invokeElement: async (q: any) => { calls.push(q); return q.action === 'get-value' ? { success: true, data: { value: 'hi' } } : { success: true }; },
+        mouseClick: async () => { throw new Error('clicked'); },
+        getFocusedElement: async () => null,
+      } as any;
+      const ctx = { platform, task: 't', screen: { logicalWidth: 800, logicalHeight: 600, physicalWidth: 800, physicalHeight: 600, dpiRatio: 1 }, screenshotsCaptured: { n: 0 }, uiMaps: holder } as unknown as AgentToolContext;
+      const tools = buildUnifiedTools();
+      const inv = await tools.find(t => t.name === 'invoke_element')!.execute({ element_id: 'el_0', snapshot_id: 'obs_1' }, ctx);
+      expect(inv.success).toBe(true);
+      expect(calls.find(q => q.action === 'click')).toMatchObject({ name: 'send', processId: 9 });
+      const set = await tools.find(t => t.name === 'set_field_value')!.execute({ element_id: 'el_1', snapshot_id: 'obs_1', value: 'hi' }, ctx);
+      expect(set.success).toBe(true);
+      expect(calls.find(q => q.action === 'set-value')).toMatchObject({ name: 'note', processId: 9, value: 'hi' });
+    });
+  });
+
   it('flags a bounds dispatch whose element is outside the window rect as offView (scrolled out of view), not as refused', () => {
     const els = [el({ id: 'el_0' }), el({ id: 'el_1', bounds: [5000, 5000, 40, 12] })]; // below the fold
     const r = resolveRef({ element_id: 'el_1', snapshot_id: 'obs_1' }, holderWith(mapWith(els)), 0, 'click', active);

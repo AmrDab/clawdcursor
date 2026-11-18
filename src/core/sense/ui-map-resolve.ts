@@ -14,7 +14,9 @@ export type RefIntent = 'click' | 'fill';
 interface ActiveWindow { processId: number; processName: string; title: string; bounds: { x: number; y: number; width: number; height: number }; }
 
 export type RefPlan =
-  | { ok: true; via: 'name'; name: string; element: UIElement }
+  // `background`: the map's window is not the one in front (compile_ui with a processId, or the user switched apps since):
+  // act by name in `processId`, the way a by-name act with that process goes, without moving the focus.
+  | { ok: true; via: 'name'; name: string; element: UIElement; processId?: number; background?: true }
   // `offView`: the element is in the map's window but not fully inside the active window's rect — scrolled out of view (below
   // the fold of a page, past the end of a list). The caller scrolls it in (ensureVisible) before acting on `bounds`.
   | { ok: true; via: 'bounds'; bounds: Bounds; element: UIElement; offView?: true }
@@ -64,11 +66,19 @@ export function resolveRef(
   const sameWin = pidKnown
     ? String(activeWindow.processId) === map.process_id   // pid is authoritative when known
     : activeWindow.title === map.window_title;            // fall back to title only when pid unknown
-  if (!sameWin) return { ok: false, error: 'window changed since compile — call compile_ui again' };
 
   // Prefer the reliable a11y path when the name is unique; else disambiguate by bounds.
   const name = element.normalized_text ?? '';
   const uniqueName = name !== '' && map.elements.filter(e => e.normalized_text === name).length === 1;
+  const processId = pidKnown ? Number(map.process_id) : undefined;
+  if (!sameWin) {
+    // The map's window is still there, just not in front (macOS run 2026-11-18: compile_ui by processId on the agent's
+    // background window, then every ref came back "window changed"). An act by name addressed to that process reaches it
+    // wherever it is; a click at its bounds would land on the window in front, so that one is refused.
+    if (processId === undefined) return { ok: false, error: 'window changed since compile — call compile_ui again' };
+    if (uniqueName) return { ok: true, via: 'name', name, element, processId, background: true };
+    return { ok: false, error: `${element.id} has no unique name and its window (pid ${processId}) is not the one in front, so a click at its bounds would land on the window in front — act on it by name with processId, or bring its window to the front and call compile_ui again` };
+  }
   if (uniqueName) return { ok: true, via: 'name', name, element };
 
   // The window check above passed, so the element belongs to this window's tree. Bounds outside the window's rect then mean

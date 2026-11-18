@@ -23,6 +23,23 @@ All notable changes to Clawd Cursor will be documented in this file.
   if it cannot start, the built-in pill is used. `CLAWD_OWN_UI_PIDS` (comma-separated pids) names the host's processes
   whose windows are clawdcursor's own controls, never a target. The outline stays built-in. With neither set, nothing
   changes. The line protocol is in [docs/pill-host.md](docs/pill-host.md).
+- **The agent works in its own window while the user keeps theirs (Windows)** (#453). An act that cannot be done by
+  name in the background goes through one ladder: a window message to the agent's window (`WM_SETTEXT` / `WM_CHAR` /
+  `BM_CLICK`, focus not moved), then a short foreground burst only while the user is idle (their window and cursor
+  put back after), then `pause_for_user`. A by-name act on the browser clawdcursor drives over CDP is a page act. In a
+  two-agent live run the agent made 0 focus steals and 0 screenshots while the user worked in another app.
+- **The on-screen indicator shows what the agent is doing, on Windows and macOS** (#453). Background work: an amber
+  outline round the agent's own windows only, and a small pixel-arrow ghost where it acts (never like the user's
+  cursor). Input to the foreground: the full-screen amber edge glow. A step for the user (`pause_for_user`): the
+  full-screen blue pulsing glow and the card, never an outline. Verified live on macOS (7/7 checks, the owner
+  confirming each state).
+- **A Pause button on the pill** (Windows, macOS; #453). Every act of the agent's waits, background ones included,
+  until Resume on the pill; Resume continues without a chat step. A Pause in one clawdcursor process holds the others
+  too, as Stop does. The pill's orb shows it: it stops, in grey, while it is the user's turn, and the card that waits for
+  the user shows the orb's blue "listening" wave (Thinking Orbs' own states).
+- **`compile_ui` element refs work in a window the user is not in** (#453): a ref into a background window acts by name
+  in that window's process instead of failing with STALE_REF; one with no unique name there is refused, since a click
+  at its bounds would land on the user's window.
 - **`system ocr` with `processId` reads that app's window by itself, even behind other windows.** It reads the
   process's largest window, not minimized, from the window's own pixels, so the text of the windows on top of it is not
   in the read. Nothing is raised or focused. Windows draws it with `PrintWindow` (at the window's own DPI, after
@@ -33,6 +50,9 @@ All notable changes to Clawd Cursor will be documented in this file.
   `scope:"window"`).
 
 ### Fixed
+- **The window outline never appeared on macOS** (#453): a macOS window's handle is its process id, and the drawer
+  looked for a window with that number. **Nor in background-only work on any OS**: an agent that never touched the
+  window in front got no frame.
 - **A field or button scrolled out of view at the end of a long page (macOS).** Chrome gives such an element a frame of
   height 0 at the window's bottom edge, and three tools mishandled it (Mac benchmark, `web-long-read`):
   - `find` listed that frame as a position. It now says `(offscreen)`, as on Windows and Linux, and `smart_click` no
@@ -113,6 +133,12 @@ All notable changes to Clawd Cursor will be documented in this file.
   `start` / `serve` deprecation warnings no longer say "Removed in v0.10"; both still work as aliases of `agent`.
 
 ### Changed
+- **The agent never types or moves the mouse while the user's hands are on it** (Windows, macOS; #453). Every real
+  input (keys, typing, clicks, drags, pointer moves, bringing a window to the front, launching an app) waits until the
+  user has been idle 1 s; background acts (by name, window messages, page acts) do not wait. If the user takes over,
+  nothing more is sent; after 5 s it carries on if they are idle, else it waits for Resume on the pill. A call that
+  waits returns within one tool call's budget (under 60 s) with `PAUSED` "paused by the user ... call the same step
+  again": an agent re-calls the step and does not give up. Linux cannot read idle time, so nothing waits there.
 - **Canvas and CAD apps are told to press labelled controls by label, not by pixel.** `read_tree` says so after an
   opaque area, and also for a window whose toolbars are only named panes (a CAD ribbon). The server instructions and the
   canvas hint keep the screenshot for picks inside the drawn area, and after three clicks by coordinates with none by

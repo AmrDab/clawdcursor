@@ -39,6 +39,7 @@
  */
 
 import { screenJson } from '../core/untrusted-screen-content';
+import { isGuardRefusal } from '../core/control';
 import type { ToolDefinition, ToolResult, ToolContext } from './types';
 import { powershellExe, psOpts } from '../platform/ps-spawn';
 
@@ -230,7 +231,7 @@ export function getElectronBridgeTools(): ToolDefinition[] {
             ], psOpts({ stdio: 'ignore', windowsHide: true, env: { ...process.env, CLAWD_PS_FILE: name } }));
             child.unref();
           } else {
-            await ctx.platform.launchApp(name, { url: flag }).catch(() => ({}));
+            await ctx.platform.launchApp(name, { url: flag }).catch(e => { if (isGuardRefusal(e)) throw e; return {}; });
           }
           await new Promise(r => setTimeout(r, 1500));
           const alive = await fetch(`http://127.0.0.1:${p}/json/version`, { signal: AbortSignal.timeout(2000) })

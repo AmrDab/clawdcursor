@@ -29,6 +29,7 @@ import {
 } from '@nut-tree-fork/nut-js';
 
 import { psRunner } from './ps-runner';
+import { withGiveBack } from './give-back';
 import { setWindowsClipboard } from './ps-input';
 import { modifierOf, normalizeKey } from './keys';
 import { sharpFromGrab } from './grab-image';
@@ -45,6 +46,9 @@ import type {
   MouseButton,
   ScrollDirection,
   WaitForElementQuery,
+  DeliverTarget,
+  DeliverInput,
+  DeliverResult,
   WindowState,
   FocusActivation,
   WindowAtPoint,
@@ -815,6 +819,45 @@ export class WindowsAdapter implements PlatformAdapter {
     }
   }
 
+  private routeNotes: string[] = [];
+  noteRoute(n: string): void { if (!this.routeNotes.includes(n)) this.routeNotes.push(n); }
+  takeRouteNote(): string | null {
+    const n = this.routeNotes.join('; ');
+    this.routeNotes = [];
+    return n || null;
+  }
+
+  async deliverToWindow(target: DeliverTarget, input: DeliverInput): Promise<DeliverResult> {
+    try {
+      const r = await psRunner.run({ cmd: 'deliver-to-window', ...target, ...input }) as Record<string, unknown> | null;
+      return {
+        success: r?.success === true,
+        ...(typeof r?.method === 'string' ? { method: r.method } : {}),
+        ...(typeof r?.verified === 'boolean' ? { verified: r.verified } : {}),
+        ...(typeof r?.reason === 'string' ? { reason: r.reason } : {}),
+        ...(typeof r?.error === 'string' ? { error: r.error } : {}),
+      };
+    } catch (e) {
+      return { success: false, reason: 'post-failed', error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  async userIdle(): Promise<{ tick: number; idleMs: number } | null> {
+    const r = await psRunner.run({ cmd: 'get-idle' }).catch(() => null) as { success?: boolean; tick?: number; idleMs?: number } | null;
+    return r?.success && Number.isFinite(r.tick) && Number.isFinite(r.idleMs) ? { tick: r.tick!, idleMs: r.idleMs! } : null;
+  }
+
+  async cursorPos(): Promise<{ x: number; y: number } | null> {
+    const r = await psRunner.run({ cmd: 'get-cursor' }).catch(() => null) as { success?: boolean; x?: number; y?: number } | null;
+    return r?.success && Number.isFinite(r.x) && Number.isFinite(r.y) ? { x: r.x!, y: r.y! } : null;
+  }
+
+  /** Put window `handle` back in front, verified (ps-bridge `restore-foreground`: the foreground-lock workaround). */
+  async restoreForeground(handle: number): Promise<boolean> {
+    const r = await psRunner.run({ cmd: 'restore-foreground', handle }) as { restored?: boolean } | null;
+    return r?.restored === true;
+  }
+
   async invokeElement(query: {
     name?: string;
     controlType?: string;
@@ -867,7 +910,21 @@ export class WindowsAdapter implements PlatformAdapter {
     if (processId === undefined) return { success: false };
 
     try {
-      const result = await psRunner.run({
+      // An act (not a read) on a process that is not in front may take the foreground: the user's window is put back.
+      const acts = query.action !== 'get-value';
+      // R1 first: a by-name act took the foreground for ~100 ms even with give-back (live 2026-11-17); a window message to
+      // a native edit or button does not. It refuses the window in front, Chromium and password fields: then R0 below.
+      const action = query.action ?? 'click';
+      // Only for the roles R1 finds (an edit, a button): a menu item named like a button must not get the button's click.
+      const r1Role = action === 'click' ? 'Button' : 'Edit';
+      if (query.name && (!ct || ct === r1Role) && (action === 'click' || (action === 'set-value' && query.value !== undefined))) {
+        const r1 = await this.deliverToWindow({ processId, name: query.name }, action === 'click' ? { click: true } : { setText: query.value! });
+        if (r1.success && (r1.verified || action === 'click')) {
+          this.noteRoute('R1 window message, focus not moved');
+          return { success: true };
+        }
+      }
+      const { result, gaveBack, focus } = await withGiveBack(this, acts ? processId : undefined, () => psRunner.run({
         cmd: 'invoke-element',
         processId,
         action: query.action ?? 'click',
@@ -876,7 +933,10 @@ export class WindowsAdapter implements PlatformAdapter {
         ...(ct !== undefined ? { controlType: ct } : {}),
         ...(query.value !== undefined ? { value: query.value } : {}),
         ...(query.within ? { within: query.within } : {}),
-      }) as any;
+      }) as Promise<any>);
+      if (focus === 'kept') this.noteRoute('R0 by name, focus not moved');
+      else if (focus === 'gave-back') this.noteRoute('R0 by name, gave your window back');
+      else if (focus === 'lost') this.noteRoute('R0 by name, but it took the foreground and your window could not be put back');
       return {
         success: result?.success === true,
         // On a "found but no invoke/toggle/select pattern" miss the bridge
@@ -891,7 +951,7 @@ export class WindowsAdapter implements PlatformAdapter {
         // element_value_contains actually see the value (review 2026-06-11).
         // The miss's reason and a late failure of an earlier invoke ride in data too: the tools read res.data.error /
         // res.data.lateInvokeError to tell the agent WHY, instead of "not found or not actionable".
-        data: (result?.data || result?.value !== undefined || result?.error || result?.reason || result?.lateInvokeError || result?.unverified === true || result?.target) ? {
+        data: (result?.data || result?.value !== undefined || result?.error || result?.reason || result?.lateInvokeError || result?.unverified === true || result?.target || gaveBack) ? {
           ...(result?.data ?? {}),
           // The element acted on (the bridge's pick), not the name asked for.
           ...(result?.success === true && targetOf(result.target) ? { target: targetOf(result.target) } : {}),
@@ -908,6 +968,7 @@ export class WindowsAdapter implements PlatformAdapter {
           ...(typeof result?.lateInvokeError === 'string' ? { lateInvokeError: result.lateInvokeError } : {}),
           // A keyboard set-value that typed into the right window but could not read the field back.
           ...(result?.unverified === true ? { unverified: true } : {}),
+          ...(gaveBack ? { gaveBack: true } : {}),
         } : undefined,
       };
     } catch {

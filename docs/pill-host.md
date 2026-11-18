@@ -79,9 +79,11 @@ paused form.
 | --- | --- |
 | `ACTIVITY <text>` | Running form only. Replace the activity text. `<text>` is one line, at most 60 characters, sent raw (no escaping). |
 | `HIDE <ms>` | Hide the pill now and show it again by itself after `<ms>` milliseconds (a whole number; the built-in pill keeps it between 50 and 10000). A later `HIDE` restarts the wait. clawdcursor sends it just before the agent clicks, drags or scrolls, and waits 90 ms for the pill to be gone, so hide at once. Sent in both forms. |
+| `ORB working` / `ORB paused` | Running form only. The state of the pill's animated mark: `paused` while it is the user's turn (a hold or a takeover: stop it, in a muted colour), `working` after. The built-in pill's orb also has a `listening` state, which the paused card shows by itself while it waits for the user. |
+| `HELD ON` / `HELD OFF` | Running form only. The user holds the agent (your Pause, or they kept working after taking over): show a Resume button in place of Pause; `HELD OFF`, Pause again. clawdcursor sends the label too (`ACTIVITY Paused`), and keeps the pill up while held. |
 
-There are no other commands. In particular there is no "pause", "unpause", "choices" or "input" command: the
-paused form is a new process with `--paused` and the environment above. Ignore lines you do not know.
+There are no other commands. In particular there is no "choices" or "input" command, and the user's hold above is not
+a pause for the user: that paused form is a new process with `--paused` and the environment above. Ignore lines you do not know.
 
 ## Answers on stdout
 
@@ -90,7 +92,8 @@ Each answer is one line. clawdcursor trims it and matches it exactly.
 | Line | When | Meaning |
 | --- | --- | --- |
 | `BANNER_STOP` | either form | The user pressed Stop (the built-in pill also takes a double-click anywhere on the running pill). clawdcursor stops all agent control. |
-| `BANNER_RESUME` | paused | The user pressed Resume: the agent continues. |
+| `BANNER_PAUSE` | running | The user pressed Pause: every act of the agent's waits, background ones included, until `BANNER_RESUME`. clawdcursor answers `HELD ON`. Keep the pill up: this is not an answer that ends it. |
+| `BANNER_RESUME` | paused, or running while held | The user pressed Resume: the agent continues. From the running pill it ends the user's hold (clawdcursor answers `HELD OFF`). |
 | `BANNER_END` | paused | The user pressed End task. |
 | `BANNER_CHOICE <index>` | paused, with choices | The user picked an option. `<index>` is the 0-based position in `CLAWD_BANNER_CHOICES`, in decimal, one or two digits. Send only the index, never the text. |
 | `BANNER_REPLY <base64>` | paused | The user typed an answer ("Something else", or the text box of `CLAWD_BANNER_INPUT`). `<base64>` is the standard base64 (alphabet `A-Z a-z 0-9 + /`, `=` padding, no line breaks) of the UTF-8 text. Newlines inside the text are allowed. clawdcursor trims the text, ignores an empty one, and keeps at most 2000 characters. |
@@ -100,7 +103,8 @@ Rules:
 
 - The first of `BANNER_RESUME`, `BANNER_END`, `BANNER_CHOICE` or `BANNER_REPLY` settles the pause. clawdcursor then
   kills the paused pill. The built-in pill hides and exits right after writing its answer; yours may do the same.
-- Answers other than `BANNER_STOP` count only from the pill that was started for the pause now on screen.
+- Answers other than `BANNER_STOP`, `BANNER_PAUSE` and the running pill's `BANNER_RESUME` count only from the pill that
+  was started for the pause now on screen.
 - A `BANNER_CHOICE` whose index is not in the list, and any other line, is ignored.
 - Flush stdout after each line.
 

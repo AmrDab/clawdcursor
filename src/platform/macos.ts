@@ -354,6 +354,15 @@ export class MacOSAdapter implements PlatformAdapter {
     return this.ax.activeWindow();
   }
 
+  /**
+   * The user's idle time (the HID system's, ax-helper `idle`): real input waits for it (core/control.ts). The tick is when the
+   * last input was, as the helper computed it: two reads of the same input agree.
+   */
+  async userIdle(): Promise<{ tick: number; idleMs: number } | null> {
+    const r = (await this.ax.idle?.().catch(() => null)) ?? null;
+    return r === null ? null : { tick: r.lastAt, idleMs: r.idleMs };
+  }
+
   async windowAtPoint(x: number, y: number): Promise<WindowAtPoint | null> {
     try { return (await this.ax.windowAt?.(x, y)) ?? null; } catch { return null; }
   }

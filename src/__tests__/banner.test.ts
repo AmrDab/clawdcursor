@@ -12,9 +12,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
-import { controlBanner, outlineFlags } from '../core/banner';
-import { stopControl, __setControlDirForTests, __setForegroundReaderForTests } from '../core/control';
-import { guardInputMethods } from '../platform/pointer-guard';
+import { controlBanner, outlineFlags, glowFlags, glowColorFlags, outlineWindowNumber } from '../core/banner';
+import { stopControl, __setControlDirForTests, __setForegroundReaderForTests, isHeld, releaseHold } from '../core/control';
+import { guardInputMethods, setOwnUiPids } from '../platform/pointer-guard';
+import { withForegroundBurst } from '../platform/foreground-burst';
 import type { ChildProcess } from 'child_process';
 import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
@@ -35,11 +36,13 @@ class FakeChild extends EventEmitter {
 
 let spawned: FakeChild[];      // pill processes
 let outlines: FakeChild[];     // window-outline processes
+let glows: FakeChild[];        // full-screen glow processes (foreground mode)
 
 beforeEach(() => {
   vi.useFakeTimers();
   spawned = [];
   outlines = [];
+  glows = [];
   controlBanner.__resetForTests();
   controlBanner.__setPlatformEnabledForTests(true);
   controlBanner.__setSpawnerForTests(() => {
@@ -50,6 +53,11 @@ beforeEach(() => {
   controlBanner.__setOutlineSpawnerForTests(() => {
     const c = new FakeChild();
     outlines.push(c);
+    return c as unknown as ChildProcess;
+  });
+  controlBanner.__setGlowSpawnerForTests(() => {
+    const c = new FakeChild();
+    glows.push(c);
     return c as unknown as ChildProcess;
   });
 });
@@ -201,7 +209,8 @@ describe('the outline around the window the agent works in', () => {
     expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET']);
   });
 
-  it('the paused outline is spawned paused and blue on every OS; the running one with no flags (#392)', () => {
+  it('where no glow can be drawn (Linux) the pause is the blue outline; the running outline has no flags (#392)', () => {
+    controlBanner.__setGlowSpawnerForTests(() => { throw new Error('no glow drawer here'); });   // Linux: the pause is an outline
     const modes: unknown[] = [];
     controlBanner.__setOutlineSpawnerForTests(mode => { modes.push(mode); const c = new FakeChild(); outlines.push(c); return c as unknown as ChildProcess; });
     controlBanner.pin();
@@ -219,7 +228,8 @@ describe('the outline around the window the agent works in', () => {
     expect(outlines[0].written).toEqual(['TARGET 0 100']);
   });
 
-  it('a new outline process (the paused form) starts on the window the agent was working in', () => {
+  it('a new outline process (the paused form, Linux) starts on the window the agent was working in', () => {
+    controlBanner.__setGlowSpawnerForTests(() => { throw new Error('no glow drawer here'); });   // Linux: the pause is an outline
     controlBanner.pin();
     controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
     controlBanner.showPaused({ id: 1, message: 'Sign in', since: 0 }, () => {});
@@ -227,7 +237,8 @@ describe('the outline around the window the agent works in', () => {
     expect(live()[0].written).toEqual(['TARGET 1440 100']);
   });
 
-  it('a pause after the idle hide goes round the window the card names, not nothing', async () => {
+  it('a pause after the idle hide goes round the window the card names, not nothing (Linux)', async () => {
+    controlBanner.__setGlowSpawnerForTests(() => { throw new Error('no glow drawer here'); });   // Linux: the pause is an outline
     // The idle hide forgets the outline's window; the card still names the app the agent last worked in (control.ts).
     __setForegroundReaderForTests(async () => ({ processId: 100, processName: 'msedge', title: 'Inbox - Edge', handle: 0x5a0 }));
     try {
@@ -332,15 +343,234 @@ describe('the macOS pause card takes the keyboard for an answer', () => {
   });
 });
 
-// The drawers put real windows on screen, so these read the source: nothing draws on a whole screen any more.
-describe('no full-screen glow', () => {
+// Two modes (owner, 2026-11-17): background acts get the window frame alone; the full-screen glow is up only while the
+// agent's input goes to the foreground (a guarded SendInput method, or an R2 burst), plus a short tail.
+describe('the indicator has two modes', () => {
+  const TAIL = 1_500;
+  const states = (g: FakeChild) => g.written.filter(l => l === 'ON' || l === 'OFF');
+
+  it('a background act (by name, a window message, a page act) keeps the window frame and never raises the full-screen glow', async () => {
+    controlBanner.pin();
+    const d = guardInputMethods({
+      async invokeElement(_q: unknown) { return { success: true }; }, async deliverToWindow(_q: unknown) { return { ok: true }; },
+      async navigate(_u: string) {}, async typeInField(_q: unknown) {},
+    });
+    await d.invokeElement({ name: 'Save' });
+    await d.deliverToWindow({ processId: 100 });
+    await d.navigate('https://example.com');
+    await d.typeInField({ text: 'x' });
+    controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
+    expect(outlines[0].written).toEqual(['TARGET 1440 100']);
+    expect(glows).toHaveLength(1);
+    expect(glows[0].written).toEqual([]);   // spawned hidden, never told to show
+  });
+
+  it('a foreground input raises the glow, and it goes down ~1.5 s after the last one', async () => {
+    controlBanner.pin();
+    const d = guardInputMethods({ async typeText(_t: string) {}, async mouseClick(_x: number, _y: number) {} });
+    await d.typeText('a');
+    expect(states(glows[0])).toEqual(['ON']);
+    vi.advanceTimersByTime(TAIL - 100);
+    await d.mouseClick(1, 1);   // another input restarts the tail
+    vi.advanceTimersByTime(TAIL - 100);
+    expect(states(glows[0])).toEqual(['ON', 'ON']);
+    vi.advanceTimersByTime(101);
+    expect(states(glows[0])).toEqual(['ON', 'ON', 'OFF']);
+    expect(outlines[0].killed).toBe(false);   // the window frame is untouched throughout
+  });
+
+  it('an R2 burst keeps it up for the whole burst, then the tail', async () => {
+    controlBanner.pin();
+    const w = { processId: 42, handle: 900 };
+    const user = { processId: 10, handle: 500 };
+    let fg = user;
+    let release!: () => void;
+    const hold = new Promise<void>(r => { release = r; });
+    const run = withForegroundBurst({
+      getActiveWindow: async () => fg as never,
+      focusWindow: async () => { fg = w; return true; },
+      restoreForeground: async () => { fg = user; return true; },
+      userIdle: async () => ({ tick: 1, idleMs: 5000 }),
+      cursorPos: async () => null,
+      mouseMove: async () => {},
+    }, { processId: 42 }, async () => { await hold; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(states(glows[0])).toEqual(['ON']);
+    await vi.advanceTimersByTimeAsync(10 * TAIL);   // far longer than the tail: still up, the burst is not over
+    expect(states(glows[0])).toEqual(['ON']);
+    release();
+    await run;
+    expect(states(glows[0])).toEqual(['ON', 'ON']);
+    vi.advanceTimersByTime(TAIL + 1);
+    expect(states(glows[0])).toEqual(['ON', 'ON', 'OFF']);
+  });
+
+  it('a paused burst turns the glow off at once (no tail), keeps the pill, and resume turns it back on', () => {
+    controlBanner.pin();
+    controlBanner.setActivity('Typing in Edge');
+    controlBanner.burstEvent('start');
+    controlBanner.burstEvent('pause');
+    expect(states(glows[0])).toEqual(['ON', 'OFF']);
+    expect(controlBanner.isVisible()).toBe(true);
+    expect(spawned[0].written).toContain('ACTIVITY Paused — your turn');
+    controlBanner.burstEvent('resume');
+    expect(states(glows[0])).toEqual(['ON', 'OFF', 'ON']);
+    expect(spawned[0].written.slice(-2)).toEqual(['ACTIVITY Typing in Edge', 'ORB working']);   // the orb works again
+    vi.advanceTimersByTime(10 * TAIL);
+    expect(states(glows[0])).toEqual(['ON', 'OFF', 'ON']);   // up for the rest of the burst
+    controlBanner.burstEvent('pause');
+    controlBanner.burstEvent('end');   // given up while paused: the glow is already down, nothing flashes
+    vi.advanceTimersByTime(10 * TAIL);
+    expect(states(glows[0])).toEqual(['ON', 'OFF', 'ON', 'OFF']);
+  });
+
+  // Three states (owner, 2026-11-18): background work = the outline; foreground input = the amber glow; the user's turn
+  // (pause_for_user: sign-in, CAPTCHA, any step) = the full-screen BLUE glow and never an outline, as in v1.5.
+  it('a pause shows the full-screen blue glow, up at once, and no outline; Resume goes back to the outline and the hidden amber glow', () => {
+    const modes: unknown[] = [];
+    controlBanner.__setGlowSpawnerForTests(mode => { modes.push(mode); const c = new FakeChild(); glows.push(c); return c as unknown as ChildProcess; });
+    const liveOutlines = () => outlines.filter(o => !o.killed);
+    controlBanner.pin();
+    controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
+    controlBanner.showPaused({ id: 1, message: 'Sign in', since: 0 }, () => {});
+    expect(glows[0].killed).toBe(true);                                      // the running glow went with the running form
+    expect(modes[1]).toEqual({ paused: expect.objectContaining({ id: 1 }) });  // spawned paused: blue
+    expect(states(glows[1])).toEqual(['ON']);                                // up for the whole pause
+    expect(liveOutlines()).toEqual([]);                                      // and no outline
+    controlBanner.foreground();
+    controlBanner.burstEvent('pause');
+    vi.advanceTimersByTime(10 * TAIL);
+    expect(states(glows[1])).toEqual(['ON']);                                // nothing amber turns the blue glow off
+    controlBanner.showRunning();
+    expect(glows[1].killed).toBe(true);
+    expect(modes[2]).toEqual({ paused: undefined });                         // amber again...
+    expect(states(glows[2])).toEqual([]);                                    // ...hidden until foreground input
+    expect(liveOutlines()[0].written).toEqual(['TARGET 1440 100']);          // the outline is back on the agent's window
+    controlBanner.unpin();
+    expect(glows[2].killed).toBe(true);
+    expect(glowFlags(7)).toEqual(['-PillPid', '7']);
+    expect(glowColorFlags(false, 'win32')).toEqual([]);
+    expect(glowColorFlags(false, 'darwin')).toEqual([]);
+    expect(glowColorFlags(true, 'win32')).toEqual(['-Color', '#3b82f6']);
+    expect(glowColorFlags(true, 'darwin')).toEqual(['--color', '#3b82f6']);
+  });
+});
+
+// Mac run 2026-11-18: no outline ever drew on macOS. Its windows have no number to give, so their handle is the process
+// id (mac-ax.ts toWindow), and the drawer looked for a window numbered like the pid. 0 is its "the process's front window".
+describe('the window number a TARGET line gives the outline drawer', () => {
+  it('on macOS a handle that is only the process id is 0 (the process’s front window); a real window number is kept', () => {
+    expect(outlineWindowNumber(4242, 4242, 'darwin')).toBe(0);
+    expect(outlineWindowNumber(undefined, 4242, 'darwin')).toBe(0);
+    expect(outlineWindowNumber(1440, 4242, 'darwin')).toBe(1440);
+    expect(outlineWindowNumber(4242, 4242, 'linux')).toBe(0);
+  });
+  it('on Windows the handle is the window’s own (an HWND), whatever it equals', () => {
+    expect(outlineWindowNumber(0x5a0, 100, 'win32')).toBe(0x5a0);
+    expect(outlineWindowNumber(100, 100, 'win32')).toBe(100);
+    expect(outlineWindowNumber('1440', 100, 'win32')).toBe(1440);
+  });
+});
+
+// The user's turn (owner, 2026-11-18): Pause on the pill holds the agent until Resume there; a takeover says "your turn".
+// No glow while they work: the blue one is for pause_for_user alone.
+describe('the pill\'s Pause and Resume', () => {
+  const states = (g: FakeChild) => g.written.filter(l => l === 'ON' || l === 'OFF');
+  /** A line on the pill's stdout, delivered (readline reads it on a later tick). */
+  const fromPill = (c: FakeChild, line: string) => new Promise<void>(resolve => {
+    c.stdout.write(`${line}\n`);
+    setImmediate(resolve);
+    vi.advanceTimersByTime(0);
+  });
+  afterEach(() => releaseHold('test'));
+
+  it('Pause holds the agent: the pill says Paused and offers Resume, no glow, and it stays up past the idle hide; Resume goes on', async () => {
+    controlBanner.touch();
+    controlBanner.setActivity('Typing in Edge');
+    await fromPill(spawned[0], 'BANNER_PAUSE');
+    expect(isHeld()).toBe(true);
+    expect(spawned[0].written).toEqual(expect.arrayContaining(['ACTIVITY Paused', 'ORB paused', 'HELD ON']));   // the orb stops, in grey
+    controlBanner.foreground();                       // nothing turns the glow on while they hold it
+    expect(states(glows[0])).not.toContain('ON');
+    controlBanner.setActivity('Clicking in Edge');    // shown once it is the agent's turn again, not over "Paused"
+    expect(spawned[0].written.filter(l => l.startsWith('ACTIVITY ')).at(-1)).toBe('ACTIVITY Paused');
+    vi.advanceTimersByTime(120_000);
+    expect(spawned[0].killed).toBe(false);            // its Resume is the way back: never hidden while held
+    await fromPill(spawned[0], 'BANNER_RESUME');
+    expect(isHeld()).toBe(false);
+    expect(spawned[0].written.slice(-3)).toEqual(['ACTIVITY Clicking in Edge', 'ORB working', 'HELD OFF']);
+    vi.advanceTimersByTime(31_000);
+    expect(spawned[0].killed).toBe(true);             // back to the agent: the idle hide counts again
+  });
+
+  it('both pills have it: Pause prints BANNER_PAUSE, HELD ON makes it Resume (BANNER_RESUME), and a click never closes the pill', () => {
+    const read = (...p: string[]) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', ...p), 'utf8');
+    const ps = read('banner.ps1');
+    expect(ps).toMatch(/\$hold\.Tag\s+= 'BANNER_PAUSE'/);
+    expect(ps).toMatch(/\$hold\.Tag = 'BANNER_RESUME'/);
+    expect(ps).toMatch(/line == "HELD ON" \|\| line == "HELD OFF"/);
+    expect(ps).toMatch(/\$hold\.Add_Click\(\{ \[Console\]::Out\.WriteLine/);   // a line only: Send-Line would close the pill
+    const swift = read('mac', 'overlay.swift');
+    expect(swift).toMatch(/makeButton\("Pause", "BANNER_PAUSE"/);
+    expect(swift).toMatch(/hold\.line = on \? "BANNER_RESUME" : "BANNER_PAUSE"/);
+    expect(swift).toMatch(/line == "HELD ON" \|\| line == "HELD OFF"/);
+    expect(swift).toMatch(/@objc func holdClicked\(_ sender: FirstClickButton\) \{\s*emit\(sender\.line\)\s*\}/);
+  });
+
+  // The orb (Thinking Orbs, owner 2026-11-18): working (amber orbits), paused (stopped, grey) on "ORB paused", and the
+  // library's "listening" wave in blue on the card that waits for the user. Both drawers, read from the source.
+  it('both pills’ orbs change: ORB lines set the running one, and the waiting card’s orb is the listening wave', () => {
+    const read = (...p: string[]) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', ...p), 'utf8');
+    const ps = read('banner.ps1');
+    expect(ps).toMatch(/line\.StartsWith\("ORB "\)/);
+    expect(ps).toMatch(/\$form\.add_OrbChanged\(\[Action\[string\]\]\{ param\(\$s\) \$dot\.State = \$s \}\)/);
+    expect(ps).toMatch(/\$dot\.State\s+= 'listening'/);
+    expect(ps).toMatch(/if \(state == "listening"\) Wave\(t\); else Orbit\(t\);/);
+    expect(ps).toMatch(/double t = state == "paused" \? frozen : Now\(\);/);
+    const swift = read('mac', 'overlay.swift');
+    expect(swift).toMatch(/line\.hasPrefix\("ORB "\)/);
+    expect(swift).toMatch(/dot\.state = "listening"/);
+    expect(swift).toMatch(/if state == "listening" \{/);
+    expect(swift).toMatch(/let t = state == "paused" \? frozen : clock\(state\)/);
+  });
+
+  it('a pill shown again while held offers Resume at once', async () => {
+    controlBanner.touch();
+    await fromPill(spawned[0], 'BANNER_PAUSE');
+    controlBanner.showPaused({ id: 7, message: 'Pick one', since: 0 }, () => {});
+    controlBanner.showRunning();
+    expect(spawned.at(-1)!.written).toContain('HELD ON');
+    expect(spawned.at(-1)!.written).toContain('ORB paused');   // ...and its orb is stopped
+  });
+
+  it('a takeover says "your turn" with the glow down, and its end gives the agent\'s label back', () => {
+    controlBanner.pin();
+    controlBanner.setActivity('Typing in Edge');
+    controlBanner.foreground();
+    controlBanner.holdEvent('takeover');
+    expect(states(glows[0])).toEqual(['ON', 'OFF']);
+    expect(spawned[0].written.slice(-2)).toEqual(['ACTIVITY Paused — your turn', 'ORB paused']);
+    expect(spawned[0].written).not.toContain('HELD ON');   // no Resume button: it goes on by itself if they stop
+    controlBanner.holdEvent('resumed');
+    expect(spawned[0].written.slice(-2)).toEqual(['ACTIVITY Typing in Edge', 'ORB working']);
+  });
+});
+
+// The drawers put real windows on screen, so these read the source: the window frame never sizes to a screen; the glow
+// is the full-screen drawer, hidden until told ON.
+describe('the full-screen glow is the foreground-mode drawer only', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
   const read = (...p: string[]) => readFileSync(join(root, ...p), 'utf8');
 
-  it('no outline drawer sizes a window to a screen', () => {
+  it('no outline drawer sizes a window to a screen; only the glow drawer does, and it starts hidden', () => {
+    const glow = read('scripts', 'edge-glow.ps1');
+    expect(glow).toContain('Monitors()');
+    for (const style of ['0x00080000', '0x00000020', '0x08000000', '0x00000080']) expect(glow).toContain(style);
+    expect(glow).toContain('bool shown = false;');
+    expect(glow).toContain('bool want = on && ');
     expect(read('scripts', 'window-outline.ps1')).not.toMatch(/AllScreens|PrimaryScreen|\.Bounds\b/);
     const swift = read('scripts', 'mac', 'overlay.swift');
-    expect(swift.slice(swift.indexOf('func windowOutline()'))).not.toMatch(/screen\.frame|NSScreen\.screens/);
+    expect(swift.slice(swift.indexOf('func windowOutline()'), swift.indexOf('// The ghost cursor'))).not.toMatch(/screen\.frame|NSScreen\.screens/);
     const py = read('scripts', 'linux', 'overlay.py');
     const start = py.indexOf('def run_outline(');
     expect(py.slice(start, py.indexOf('\ndef ', start + 1))).not.toMatch(/get_monitor|get_n_monitors/);
@@ -352,41 +582,66 @@ describe('no full-screen glow', () => {
     expect(swift).toContain('if window == nil || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return }');
   });
 
+  it('both pills keep the orb: no mascot in the pill (owner, 2026-11-18)', () => {
+    const pill = read('scripts', 'banner.ps1');
+    expect(pill).toContain('public class Orb : Control');
+    expect(pill).not.toMatch(/class Mascot|MASCOT/);
+    const swift = read('scripts', 'mac', 'overlay.swift');
+    expect(swift).toContain('let orb = makeOrb()');
+    expect(swift).not.toMatch(/MascotView|makeMascot|MASCOT/);
+  });
+
   it('the macOS outline is the 2.0 border: 3 pt inside the agent\'s window, amber (blue when paused), still, click-through, under the pill', () => {
     const swift = read('scripts', 'mac', 'overlay.swift');
-    const outline = swift.slice(swift.indexOf('func windowOutline()'));
-    expect(outline).toContain('view.layer?.borderColor = hexColor(option("--color", "#f59e0b")).cgColor');
+    const outline = swift.slice(swift.indexOf('func makeOutlineWindow()'), swift.indexOf('// The ghost cursor'));
+    expect(outline).toContain('view.layer?.borderColor = hexColor(outlineColor).cgColor');
     expect(outline).toContain('view.layer?.borderWidth = 3');
     expect(outline).toContain('win.ignoresMouseEvents = true');
-    expect(outline).toContain('win.level = .floating');
+    expect(outline).toContain('win.level = .normal');   // ordered just above the agent's window, not above the user's
     expect(outline).toContain('win.sharingType = .none');
     expect(swift).toContain('panel.level = .screenSaver');
     // Drawn once: no beam layers and nothing animated.
     expect(outline).not.toMatch(/CAShapeLayer|CAGradientLayer|CABasicAnimation|CAKeyframeAnimation|lineDashPhase/);
   });
 
-  it('the macOS outline goes only round a window of the app in front that is on screen and can be seen', () => {
+  it('the macOS outline goes only round a window that is on screen and can be seen', () => {
     const swift = read('scripts', 'mac', 'overlay.swift');
-    const find = swift.slice(swift.indexOf('func targetFrame()'), swift.indexOf('func windowOutline()'));
-    expect(find).toContain('NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(targetPid)');
+    const find = swift.slice(swift.indexOf('func seenFrame('), swift.indexOf('func makeOutlineWindow()'));
     expect(find).toContain('CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)');
     expect(find).toContain('((w[kCGWindowAlpha as String] as? Double) ?? 1) > 0.01');
-    expect(find).toContain('rect.width >= 40, rect.height >= 40 else { continue }');
+    expect(find).toContain('rect.width >= 40, rect.height >= 40');
     // No stand-in: with no such window nothing is drawn (the pill alone shows control).
     expect(find).not.toMatch(/mouseLocation|visibleFrame|pointerScreen/);
     expect(swift).toMatch(/line == "TARGET" \|\| line\.hasPrefix\("TARGET "\)/);
   });
 
+  it('the Windows pill stays in front, can be dragged, and shows an amber outline when it appears', () => {
+    const ps = read('scripts', 'banner.ps1');
+    // In front: re-asserted on the existing timers, only when a visible window is above it, never activating.
+    expect(ps).toContain('SetWindowPos(Handle, (IntPtr)(-1), 0, 0, 0, 0, 0x13)');   // HWND_TOPMOST, NOACTIVATE|NOMOVE|NOSIZE
+    expect(ps).toContain('if (IsWindowVisible(w))');
+    expect((ps.match(/\$form\.KeepOnTop\(\)/g) ?? []).length).toBe(2);   // the running and the paused timer
+    // Dragging: by hand with the mouse, on the body only; the position is kept, on screen, instead of top-centre.
+    expect(ps).toContain('function Enable-Drag(');
+    expect(ps).toContain('foreach ($c in @($form, $dot, $brand, $activity, $elapsed)) { Enable-Drag $c }');
+    expect(ps).toContain('foreach ($c in @($form, $dot, $title, $msg)) { Enable-Drag $c }');
+    expect(ps).not.toMatch(/Enable-Drag \$(stop|yes|no|send|reply)/);
+    expect(ps).toContain('if ($script:userPos) { $at = Get-OnScreen $script:userPos $f }');
+    // Appearing: solid amber outline for 3 s, then a fade: not a loop.
+    expect(ps).toContain('function Start-Pulse');
+    expect(ps).toContain('if ($k -le 0) { $script:pulse.Stop() }');
+  });
+
   it('the Windows outline is click-through, never activates, and stays out of captures', () => {
     const ps = read('scripts', 'window-outline.ps1');
-    for (const style of ['0x00080000', '0x00000020', '0x08000000', '0x00000080', '0x00000008']) expect(ps).toContain(style);
+    for (const style of ['0x00080000', '0x00000020', '0x08000000', '0x00000080']) expect(ps).toContain(style);
     expect(ps).toContain('SetWindowDisplayAffinity(Handle, 0x11)');
     // Where the frame is, and where the border goes, are physical pixels on every monitor (per-monitor-v2).
     expect(ps).toContain('SetThreadDpiAwarenessContext([IntPtr](-4))');
     // Re-placed only when it moved or is no longer above its window (walking up the z-order), never on every poll.
     expect(ps).toContain('if (placed && !moved) return;');
     // TARGET and HIDE act on receipt, not on the next poll: a capture follows HIDE after 90 ms.
-    expect(ps).toContain('BeginInvoke((Action)Follow)');
+    expect(ps).toContain('BeginInvoke((Action)FollowAll)');
     // A byte-order mark in front of the first line (a .NET parent) does not lose the command.
     expect(ps).toContain('p[0].EndsWith("TARGET")');
     expect(ps).toContain('p[0].EndsWith("HIDE")');
@@ -411,7 +666,49 @@ describe('no full-screen glow', () => {
   it('the Windows outline goes round no window that Windows does not show, even the one in front', () => {
     const ps = read('scripts', 'window-outline.ps1');
     expect(ps).toContain('static extern bool IsWindowVisible(IntPtr hWnd);');
-    expect(ps).toMatch(/GetForegroundWindow\(\) == t && !IsIconic\(t\) && IsWindowVisible\(t\)/);
+    expect(ps).toMatch(/!IsIconic\(t\)\s+&& IsWindowVisible\(t\)/);
     expect(ps).toContain('(DwmGetWindowAttribute(t, 14, out cloaked, 4) != 0 || cloaked == 0)');   // DWMWA_CLOAKED
+  });
+
+  // Plan (h): an agent window has its border while it is visible, in front or not, without drawing over the user's window.
+  it('the Windows outline is not topmost: it sits directly above its window, and shows while that window is not in front', () => {
+    const ps = read('scripts', 'window-outline.ps1');
+    expect(ps).not.toContain('GetForegroundWindow');
+    expect(ps).not.toContain('ExStyle |= 0x00000008');
+    expect(ps).toContain('IntPtr above = GetWindow(target, 3); // GW_HWNDPREV');
+    expect(ps).toContain('SetWindowPos(Handle, above, ');
+    expect(ps).not.toContain('new IntPtr(-1)');
+  });
+
+  it('with several agent windows the outline is sent them all, the working one first (Windows)', async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    let fg: { processId: number; processName: string; handle: number } = { processId: 100, processName: 'msedge', handle: 0x5a0 };
+    __setForegroundReaderForTests(async () => fg);
+    try {
+      controlBanner.pin();
+      const d = guardInputMethods({ async keyPress(_k: string) {}, async focusWindow(_q: unknown) { fg = { processId: 300, processName: 'notepad', handle: 0x7b2 }; return true; } });
+      await d.keyPress('a');
+      await d.focusWindow({ processId: 300 });
+      await d.keyPress('b');
+      expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300 1440 100']);
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+      __setForegroundReaderForTests(null);
+    }
+  });
+});
+
+describe('the window frame never goes round clawdcursor\'s own windows', () => {
+  it('a working window or an agent window that is an overlay is never sent as a TARGET', () => {
+    setOwnUiPids(() => [777]);
+    try {
+      controlBanner.pin();
+      controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
+      controlBanner.setWorkingWindow({ processId: 777, handle: 0x9f0 });
+      expect(outlines[0].written).toEqual(['TARGET 1440 100']);
+    } finally {
+      setOwnUiPids(() => [...controlBanner.overlayPids()]);
+    }
   });
 });

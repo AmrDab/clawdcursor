@@ -1,0 +1,29 @@
+{
+  "name": "clawdcursor agent cursor",
+  "about": "The ghost cursor that shows where the agent acts: a retro pixel arrow (dark body, light rim) so it never looks like the user's own cursor. One pixel grid, drawn as filled squares by window-outline.ps1 (Windows) and overlay.swift (macOS). The tip is the hotspot (0,0).",
+  "legend": {
+    ".": null,
+    "K": "#C9DDF2",
+    "B": "#1B2232"
+  },
+  "hotspot": [0, 0],
+  "rows": [
+    "K..........",
+    "KK.........",
+    "KBK........",
+    "KBBK.......",
+    "KBBBK......",
+    "KBBBBK.....",
+    "KBBBBBK....",
+    "KBBBBBBK...",
+    "KBBBBBBBK..",
+    "KBBBBBBBBK.",
+    "KBBBBBKKKKK",
+    "KBBKBBK....",
+    "KBK.KBBK...",
+    "KK..KBBK...",
+    "K....KBBK..",
+    ".....KBBK..",
+    "......KK..."
+  ]
+}

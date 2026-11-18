@@ -33,6 +33,12 @@ export interface WindowQuery { processId?: number; processName?: string; title?:
 interface InputGuard {
   /** Throws while the user has stopped clawdcursor. */
   stopCheck(): void;
+  /**
+   * Before an act: waits while the user holds clawdcursor (the pill's Pause, or a takeover they kept working through), and
+   * for `real` input (the mouse, the keyboard, the front window) until the user is idle. Throws the held waiting reply or
+   * STOPPED. (before() and byName() run it themselves.)
+   */
+  turn?(real: boolean): Promise<void>;
   /** Before an input: throws while stopped, or when the agent's window is no longer in front. */
   before(): Promise<void>;
   /** After an input; `movesFocus` when it could bring another window up (a click, Return, a shortcut). */
@@ -64,6 +70,15 @@ let onAgentInput: ((method: string) => void) | null = null;
 export function setOnAgentInput(f: ((method: string) => void) | null): void {
   onAgentInput = f;
 }
+/** Told where an agent act that passed the guard happens on screen (a click, a scroll, an element acted on by name): the ghost cursor is drawn there. */
+let onAgentPoint: ((x: number, y: number) => void) | null = null;
+export function setOnAgentPoint(f: ((x: number, y: number) => void) | null): void {
+  onAgentPoint = f;
+}
+const pointAt = (x: unknown, y: unknown) => {
+  if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return;
+  try { onAgentPoint?.(Math.round(x), Math.round(y)); } catch { /* cosmetic */ }
+};
 /** Told before every agent act, as the pill is: what was read from the screen before it is stale (ocr-engine.ts). */
 const actListeners: Array<() => void> = [];
 export function onAgentAct(f: () => void): void {
@@ -112,7 +127,7 @@ export const GUARDED_METHODS: Readonly<Record<string, { kind: 'input' | 'stop' |
   mouseDrag: { kind: 'input', activity: 'Dragging' }, mouseScroll: { kind: 'input', activity: 'Scrolling' },
   typeText: { kind: 'input', activity: 'Typing' }, keyPress: { kind: 'input', activity: 'Pressing keys' },
   keyDown: { kind: 'input', activity: 'Pressing keys' },
-  invokeElement: { kind: 'stop', activity: 'Clicking' }, scrollIntoView: { kind: 'stop', activity: 'Scrolling' },
+  invokeElement: { kind: 'stop', activity: 'Clicking' }, deliverToWindow: { kind: 'stop', activity: 'Typing' }, scrollIntoView: { kind: 'stop', activity: 'Scrolling' },
   setWindowState: { kind: 'stop', activity: 'Arranging windows' }, setWindowBounds: { kind: 'stop', activity: 'Arranging windows' },
   navigate: { kind: 'stop', activity: 'Opening a page' }, click: { kind: 'stop', activity: 'Clicking' },
   clickByText: { kind: 'stop', activity: 'Clicking' }, typeInField: { kind: 'stop', activity: 'Typing' },
@@ -124,6 +139,43 @@ export const GUARDED_METHODS: Readonly<Record<string, { kind: 'input' | 'stop' |
 const methodsOf = (kind: 'input' | 'stop') => Object.keys(GUARDED_METHODS).filter(m => GUARDED_METHODS[m].kind === kind);
 const INPUT_METHODS = methodsOf('input');
 const STOP_METHODS = methodsOf('stop');
+
+/**
+ * When the agent's own synthetic input last ended (a key, a click, a move, a focus, putting the user's window back): the OS
+ * counts every process's input in its idle time, ours too, and the idle check (core/control.ts) must not read ours as the
+ * user's.
+ */
+let ownInputEnd = 0;
+export const ownInputAt = (): number => ownInputEnd;
+/** Told right after each input of the agent's was sent: the idle check reads the OS's input clock then (core/control.ts). */
+let afterOwnInput: (() => void) | null = null;
+export function setAfterOwnInput(f: (() => void) | null): void { afterOwnInput = f; }
+/** The agent pressed a mouse button (mouseDown) and has not let it go: a drag in progress. */
+let buttonDown = false;
+/**
+ * A gesture of the agent's is in progress: a button or a key it holds down. It is finished before the user's turn begins
+ * (core/control.ts), never left pressed while they move their own mouse or type.
+ */
+export const gestureInProgress = (): boolean => buttonDown || heldKeys.size > 0;
+/** Innermost, so it is noted only for input that was really sent (a refusal sends nothing). */
+function noteOwnInput(target: object): void {
+  const t = target as Record<string, unknown>;
+  for (const m of new Set([...INPUT_METHODS, ...pointerMethods(target), 'keyUp', 'focusWindow', 'launchApp', 'restoreForeground'])) {
+    const f = t[m];
+    if (typeof f !== 'function') continue;
+    t[m] = async (...args: unknown[]) => {
+      try {
+        const r = await f.apply(target, args);
+        ownInputEnd = Date.now();
+        if (m === 'mouseDown') buttonDown = true;
+        try { afterOwnInput?.(); } catch { /* the idle check falls back to the time */ }
+        return r;
+      } finally {
+        if (m === 'mouseUp') buttonDown = false;
+      }
+    };
+  }
+}
 
 /** Every pointer method of the object (a move, press, release, click, drag, scroll), its prototypes' included. */
 function pointerMethods(target: object): string[] {
@@ -150,6 +202,7 @@ async function confirmCheck(method: string, args: unknown[], target: object): Pr
  * CDP driver. One check per outermost call: a method that calls another (typeText → keyPress for a paste) is one input.
  */
 export function guardInputMethods<T extends object>(target: T, actedPid?: () => Promise<number | null>): T {
+  noteOwnInput(target);
   const t = target as unknown as Record<string, unknown>;
   // `nested`: called from inside another guarded call (a paste's keyPress, navigate raising the browser), already checked.
   type Run = (g: InputGuard, f: (...a: unknown[]) => unknown, args: unknown[], nested: boolean) => unknown;
@@ -184,6 +237,7 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
       await confirmCheck(m, args, target);
       await g.before();
       announce(m);
+      if (m.startsWith('mouse') && m !== 'mouseMoveRelative') pointAt(args[0], args[1]);
       const r = await f(...args);
       g.done(movesFocus(m, args));
       return r;
@@ -198,7 +252,10 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
       if (q.action !== 'get-value') { await confirmCheck('invokeElement', args, target); await g.byName(q.processId); }
       announce('invokeElement');
     }
-    return f(...args);
+    const r = await f(...args) as { success?: boolean; bounds?: { x: number; y: number; width: number; height: number } } | undefined;
+    const b = r?.bounds;
+    if (!nested && q.action !== 'get-value' && r?.success !== false && b && b.width > 0 && b.height > 0) pointAt(b.x + b.width / 2, b.y + b.height / 2);
+    return r;
   });
   // Reads by element take a process id, or with none the window in front: never clawdcursor's own UI either way.
   for (const m of ['getUiTree', 'getScreenContext', 'findElements', 'findElement', 'getPageText']) {
@@ -209,22 +266,32 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
     });
   }
   // A release (mouseUp) is never refused; the window-checked pointer input is wrapped above.
-  const stopOnly = [...STOP_METHODS, ...pointerMethods(target).filter(m => m !== 'mouseUp' && !INPUT_METHODS.includes(m))];
+  const pointerOnly = pointerMethods(target).filter(m => m !== 'mouseUp' && !INPUT_METHODS.includes(m));
+  const stopOnly = [...STOP_METHODS, ...pointerOnly];
   for (const m of stopOnly.filter(m => m !== 'invokeElement')) {
     wrap(m, async (g, f, args, nested) => {
       if (nested) return f(...args);
       g.stopCheck();
+      // A move is the user's pointer too: it waits for them to be idle. Background acts only wait out a hold.
+      await g.turn?.(pointerOnly.includes(m));
       await confirmCheck(m, args, target);
       announce(m);
       // `actedPid`: the process these acts go to (the CDP driver's browser), told once the act ran (a navigate may connect first).
-      try { return await f(...args); } finally { if (actedPid) await g.byProcess?.(await actedPid().catch(() => null)).catch(() => {}); }
+      try { return await f(...args); } finally {
+        if (actedPid) {
+          await g.byProcess?.(await actedPid().catch(() => null)).catch(() => {});
+          // The browser it went to is known only now: the pill and the outline follow it at once, not at the next act.
+          try { onAgentInput?.(m); } catch { /* cosmetic */ }
+        }
+      }
     });
   }
   // The agent's own focus and launches rebind the window it works in, nested or not (a navigate raises its browser).
   // The platform adapter takes a query and answers true/false; the accessibility bridge takes (title, processId) and
   // answers {success}.
   wrap('focusWindow', async (g, f, args, nested) => {
-    if (!nested) g.stopCheck();
+    // Bringing a window to the front takes the user's keyboard: it waits for them to be idle.
+    if (!nested) { g.stopCheck(); await g.turn?.(true); }
     const r = await f(...args) as boolean | { success?: boolean } | undefined;
     const q: WindowQuery = typeof args[0] === 'object' && args[0] !== null
       ? args[0] as WindowQuery
@@ -235,7 +302,7 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
   });
   // A launch types into the Start menu / Spotlight itself: its own keys run inside this one guarded call.
   wrap('launchApp', async (g, f, args, nested) => {
-    if (!nested) { g.stopCheck(); announce('launchApp'); }
+    if (!nested) { g.stopCheck(); await g.turn?.(true); announce('launchApp'); }
     const r = await f(...args) as { pid?: number; title?: string } | undefined;
     await g.launched(r, typeof args[0] === 'string' ? args[0] : undefined);
     announce('launchApp');  // again, now that the launched window is known: the outline goes to it
@@ -358,6 +425,7 @@ function guardHardKeys(target: object): void {
 /** For tests: forget the held keys. */
 export function _resetHeldKeys(): void {
   heldKeys.clear();
+  buttonDown = false;
 }
 
 /**

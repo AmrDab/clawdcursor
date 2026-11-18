@@ -8,7 +8,9 @@
 //                  what the agent is doing (env CLAWD_BANNER_ACTIVITY, then
 //                  "ACTIVITY <text>" lines on stdin), the time since it appeared
 //                  and a Stop button; Stop or a double-click prints BANNER_STOP.
-//                  stdin also takes "HIDE <ms>". Paused (env CLAWD_BANNER_MODE=paused):
+//                  Pause prints BANNER_PAUSE (the parent holds the agent); "HELD ON" on
+//                  stdin turns it into Resume (BANNER_RESUME), "HELD OFF" back. The pill
+//                  stays up for both. stdin also takes "HIDE <ms>". Paused (env CLAWD_BANNER_MODE=paused):
 //                  a card with a blue outline, "waiting for you" (+ the app from
 //                  CLAWD_BANNER_APP), the instruction from CLAWD_BANNER_MESSAGE, and
 //                  Resume / Something else / End task -> prints BANNER_RESUME /
@@ -23,11 +25,21 @@
 //                  the keyboard; Esc gives it back), replacing "Something else".
 //                  In a multiline field Return adds a line, Cmd+Return sends.
 //   overlay outline [--color #RRGGBB]
-//                  a thin border around the window the agent works in, and nothing
-//                  else: no fill, nothing on the rest of the screen; clicks pass
-//                  straight through it. stdin: "TARGET <handle> <pid>" names the
-//                  process (a bare "TARGET": none). The border is drawn around the
-//                  process's frontmost window while that app is in front, and follows it.
+//                  a thin border around each window the agent works in (background
+//                  mode), and nothing else: no fill, nothing on the rest of the screen;
+//                  clicks pass straight through it. stdin: "TARGET <handle> <pid>
+//                  [<handle> <pid> ...]" names the windows (handle: a window number, or
+//                  0 for the process's frontmost window; a bare "TARGET": none). Each
+//                  border follows its window and sits just above it in the stacking
+//                  order, so a window in front of the agent's still covers it. Also
+//                  "GHOST <x> <y>": the agent's cursor (a retro pixel arrow, never the
+//                  user's) drawn as a ghost cursor at that screen
+//                  point (top-left origin, tip at the point) for 1.5 s; a bare "GHOST"
+//                  hides it. Never moves the real cursor.
+//   overlay glow   the foreground-mode indicator: a click-through amber glow along
+//                  every screen's edges, pulsing. Starts hidden; stdin: "ON" / "OFF" /
+//                  "HIDE <ms>". Never takes focus and is never part of a capture.
+//                  Adapted from the glow proven live in PR #448.
 //
 // The pill's orb is a port of Thinking Orbs by Jakub Antalik (libraries.dev, github.com/Jakubantalik/Libraries.dev,
 // packages/thinking-orbs), MIT License,
@@ -67,7 +79,6 @@ func rgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> NSColor {
 }
 
 let blue = rgb(59, 130, 246)
-let blueDim = rgb(25, 55, 110)
 let background = rgb(22, 24, 29)
 let outline = rgb(58, 62, 72)
 let muted = rgb(140, 146, 158)
@@ -154,9 +165,19 @@ func takeKeyboard(_ panel: PillPanel, _ field: NSView) {
 
 final class PillView: NSView {
     var onDoubleClick: (() -> Void)?
+    var onDragged: (() -> Void)?
+    var grab = NSPoint.zero   // where in the window the press landed
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2 { onDoubleClick?() }
+        grab = event.locationInWindow
+    }
+    /// Dragging the body moves the pill (the Stop button is a control: it takes its own clicks and never drags).
+    override func mouseDragged(with event: NSEvent) {
+        guard let w = window else { return }
+        let m = NSEvent.mouseLocation
+        w.setFrameOrigin(NSPoint(x: m.x - grab.x, y: m.y - grab.y))
+        onDragged?()
     }
 }
 
@@ -219,6 +240,21 @@ final class OrbView: NSView {
     var redraw: Timer?
     override var isFlipped: Bool { true }   // y grows downward, as on the canvas the numbers are for
 
+    /// The library's state, as on Windows (banner.ps1 class Orb): "working" (the orbits, amber), "paused" (the library's
+    /// `paused`: the frame stops where it was, in the pill's grey), "listening" (mode wave, lattice.ts frameWave, in the
+    /// pause's blue: the agent waits for the user). "ORB <state>" on the pill's stdin sets it.
+    var state = "working" {
+        didSet {
+            if state == oldValue { return }
+            if state == "paused" { frozen = clock(oldValue) }
+            needsDisplay = true
+        }
+    }
+    var frozen = 0.6
+    func clock(_ s: String) -> Double {
+        redraw == nil ? 0.6 : Date().timeIntervalSince(started) * (s == "listening" ? 3.998 : 3.9)
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         redraw?.invalidate()
@@ -237,13 +273,33 @@ final class OrbView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        let box = 20.0, speed = 3.9, sized = 2.4
-        let t = redraw == nil ? 0.6 : Date().timeIntervalSince(started) * speed
+        let box = 20.0, sized = 2.4
+        let t = state == "paused" ? frozen : clock(state)
         let centre = box / 2, radius = centre * 0.82, scale = pow(box / 300, 0.6)
+        var dots: [(x: Double, y: Double, z: Double, r: Double, ink: Double, alpha: Double)] = []
+        if state == "listening" {
+            // At 20 px: rings 15 and lonDensity 40 x sqrt(.105) = 5 and 13, radii x 1.6; turning .18 t, tilted .38.
+            let r0 = centre * 0.874
+            let yaw = t * 0.18, st = sin(0.38), ct = cos(0.38), sy = sin(yaw), cy = cos(yaw)
+            for ri in 0...5 {
+                let lat = -Double.pi / 2 + Double(ri) / 5 * Double.pi, cl = cos(lat), sl = sin(lat)
+                let w = 0.62 * sin(t * 2.1 - Double(ri) * 0.52) + 0.38 * sin(t * 1.27 + Double(ri) * 0.83)   // two tempi
+                let rr = r0 * (0.88 + 0.105 * w), crest = max(0, w)
+                let lons = max(1, Int((abs(cl) * 13).rounded()))
+                for lj in 0..<lons {
+                    let lon = Double(lj) / Double(lons) * 2 * Double.pi
+                    let x = cl * cos(lon) * rr, y = sl * rr, z = cl * sin(lon) * rr
+                    let x1 = x * cy + z * sy, z1 = -x * sy + z * cy, y1 = y * ct - z1 * st, z2 = y * st + z1 * ct
+                    let depth = (z2 / r0 + 1) / 2
+                    dots.append((x: centre + x1, y: centre - y1, z: z2,
+                                 r: max(0.3, (0.6 + 1.7 * depth) * 1.6 * (1 + 0.4 * crest) * scale),
+                                 ink: 0.66 - 0.56 * depth - 0.1 * crest, alpha: 1))
+                }
+            }
+        }
         // The shared spin and tilt (core.ts makeProj).
         let yaw = t * 0.12, st = sin(0.3), ct = cos(0.3), sy = sin(yaw), cy = cos(yaw)
-        var dots: [(x: Double, y: Double, z: Double, r: Double, ink: Double, alpha: Double)] = []
-        for orbit in 0..<3 {
+        for orbit in 0..<(state == "listening" ? 0 : 3) {
             let h1 = hash(Double(orbit), 1.7), h2 = hash(Double(orbit), 5.2), h3 = hash(Double(orbit), 8.9)
             let ro = radius * (0.45 + 0.52 * h1), th = h1 * 2 * Double.pi, phi = acos(2 * h2 - 1)
             // The orbit's plane: u and v at right angles to its normal.
@@ -266,11 +322,60 @@ final class OrbView: NSView {
                              alpha: ghost ? 0.5 * (0.4 + 0.6 * depth) : 1))
             }
         }
-        // Far to near; on a dark ground the tint (amber, #f59e0b) fades toward black with the ink (core.ts inkColor).
+        // Far to near; on a dark ground the tint fades toward black with the ink (core.ts inkColor). The state's tint:
+        // amber at work, the pill's grey when paused, the pause's blue when it waits for the user.
+        let tint: (r: CGFloat, g: CGFloat, b: CGFloat) = state == "paused" ? (140, 146, 158) : state == "listening" ? (59, 130, 246) : (245, 158, 11)
         for d in dots.sorted(by: { $0.z < $1.z }) {
             let ink = CGFloat(1 - min(1, max(0, d.ink)))
-            ctx.setFillColor(red: 245 / 255 * ink, green: 158 / 255 * ink, blue: 11 / 255 * ink, alpha: CGFloat(d.alpha))
+            ctx.setFillColor(red: tint.r / 255 * ink, green: tint.g / 255 * ink, blue: tint.b / 255 * ink, alpha: CGFloat(d.alpha))
             ctx.fillEllipse(in: CGRect(x: d.x - d.r, y: d.y - d.r, width: 2 * d.r, height: 2 * d.r))
+        }
+    }
+}
+
+// The agent's ghost cursor: a retro pixel arrow, so it never looks like the user's cursor. One grid shared with the
+// Windows drawer (scripts/agent-cursor.json: K rim, B body; the tip is the hotspot, 0,0).
+// AGENT-CURSOR-BEGIN
+let agentCursor: [String] = [
+    "K..........",
+    "KK.........",
+    "KBK........",
+    "KBBK.......",
+    "KBBBK......",
+    "KBBBBK.....",
+    "KBBBBBK....",
+    "KBBBBBBK...",
+    "KBBBBBBBK..",
+    "KBBBBBBBBK.",
+    "KBBBBBKKKKK",
+    "KBBKBBK....",
+    "KBK.KBBK...",
+    "KK..KBBK...",
+    "K....KBBK..",
+    ".....KBBK..",
+    "......KK...",
+]
+// AGENT-CURSOR-END
+
+/// The agent cursor as crisp filled squares (no interpolation). `cell` is points per grid square.
+final class CursorView: NSView {
+    let cell: CGFloat
+    override var isFlipped: Bool { true }   // row 0 is the top, the tip (0,0) the top-left corner
+
+    init(cell: CGFloat) {
+        self.cell = cell
+        super.init(frame: NSRect(x: 0, y: 0, width: CGFloat(agentCursor[0].count) * cell, height: CGFloat(agentCursor.count) * cell))
+    }
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        ctx.setShouldAntialias(false)   // squares on the pixel grid, no soft edges
+        for (r, row) in agentCursor.enumerated() {
+            for (c, ch) in row.enumerated() where ch != "." {
+                ctx.setFillColor((ch == "K" ? hexColor("#C9DDF2") : hexColor("#1B2232")).cgColor)
+                ctx.fill(CGRect(x: CGFloat(c) * cell, y: CGFloat(r) * cell, width: cell, height: cell))
+            }
         }
     }
 }
@@ -280,7 +385,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     init(mode: String) { self.mode = mode }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if mode == "pill" { pill() } else { windowOutline() }
+        if mode == "pill" { pill() } else if mode == "glow" { glow() } else { windowOutline() }
         giveFocusBack()
         // Activation can also land a moment after launch.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { giveFocusBack() }
@@ -304,6 +409,11 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     @objc func answer(_ sender: FirstClickButton) {
         emit(sender.line)
         NSApp.terminate(nil)
+    }
+
+    /// The running pill's Pause / Resume: one line on stdout, and the pill stays (the parent answers HELD ON / HELD OFF).
+    @objc func holdClicked(_ sender: FirstClickButton) {
+        emit(sender.line)
     }
 
     /// A flat rounded button; a click prints `line` (see answer) unless the caller changes the action.
@@ -339,18 +449,20 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         return OrbView(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
     }
 
-    // The running pill: [orb] ClawdCursor  <activity>  m:ss  [Stop]
+    // The running pill: [orb] ClawdCursor  <activity>  m:ss  [Pause] [Stop]
     var runDot: NSView?
+    var userMoved = false   // the user dragged the pill: layoutRunning keeps it where it was dropped
     var runActivity: NSTextField?
     var runClock: NSTextField?
     var runBrand: NSTextField?
     var runStop: NSButton?
+    var runHold: FirstClickButton?
     var runStart = Date()
 
     /// Lays the row out left to right, sizes the pill to it and puts it back at the top centre.
     func layoutRunning() {
         guard let panel = pillPanel, let dot = runDot, let brand = runBrand, let act = runActivity,
-              let clock = runClock, let stop = runStop else { return }
+              let clock = runClock, let hold = runHold, let stop = runStop else { return }
         let rowH: CGFloat = 38
         func place(_ l: NSTextField, _ x: CGFloat, _ maxWidth: CGFloat) -> CGFloat {
             l.sizeToFit()
@@ -360,24 +472,41 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             return w
         }
         var x: CGFloat = 14
-        dot.frame = NSRect(x: x - 2, y: (rowH - 20) / 2, width: 20, height: 20)
-        x += 20 + 2
+        dot.frame = NSRect(x: x - 2, y: (rowH - dot.frame.height) / 2, width: dot.frame.width, height: dot.frame.height)
+        x += dot.frame.width + 2
         x += place(brand, x, 200) + 6
         x += place(act, x, 360) + 8
         x += place(clock, x, 100) + 12
+        hold.frame = NSRect(x: x, y: 7, width: 60, height: 24)
+        x += 60 + 6
         stop.frame = NSRect(x: x, y: 7, width: 52, height: 24)
         x += 52 + 7
         let width = ceil(x)
         let screen = NSScreen.screens.first ?? NSScreen.main!
         let area = screen.visibleFrame
-        let y = ProcessInfo.processInfo.environment["CLAWD_BANNER_POS"] == "bottom" ? area.minY + 8 : area.maxY - rowH - 8
-        panel.setFrame(NSRect(x: area.midX - width / 2, y: y, width: width, height: rowH), display: true)
+        if userMoved {   // grow and shrink from the top-left corner it was dropped at
+            let old = panel.frame
+            panel.setFrame(NSRect(x: old.minX, y: old.maxY - rowH, width: width, height: rowH), display: true)
+        } else {
+            let y = ProcessInfo.processInfo.environment["CLAWD_BANNER_POS"] == "bottom" ? area.minY + 8 : area.maxY - rowH - 8
+            panel.setFrame(NSRect(x: area.midX - width / 2, y: y, width: width, height: rowH), display: true)
+        }
     }
 
     func setActivity(_ text: String) {
         guard let act = runActivity else { return }
         act.stringValue = text
         layoutRunning()
+    }
+
+    /// "HELD ON": the user holds the agent, so the button offers Resume (blue); "HELD OFF": Pause again.
+    func setHeld(_ on: Bool) {
+        guard let hold = runHold else { return }
+        let text = on ? "Resume" : "Pause"
+        hold.line = on ? "BANNER_RESUME" : "BANNER_PAUSE"
+        hold.layer?.backgroundColor = (on ? rgb(37, 99, 235) : rgb(58, 62, 72)).cgColor
+        hold.attributedTitle = NSAttributedString(string: text, attributes: [
+            .foregroundColor: NSColor.white, .font: NSFont.systemFont(ofSize: 11, weight: .semibold)])
     }
 
     func updateClock() {
@@ -431,16 +560,35 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 } else if line.hasPrefix("ACTIVITY ") {
                     let text = String(line.dropFirst(9))
                     DispatchQueue.main.async { self?.setActivity(text) }
+                } else if line == "HELD ON" || line == "HELD OFF" {
+                    let on = line == "HELD ON"
+                    DispatchQueue.main.async { self?.setHeld(on) }
+                } else if line.hasPrefix("ORB ") {
+                    let state = String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+                    DispatchQueue.main.async { (self?.runDot as? OrbView)?.state = state }
                 } else if line == "TARGET" || line.hasPrefix("TARGET ") {
+                    // Pairs after the word: <window number or 0> <pid>.
                     let parts = line.split(separator: " ")
-                    let pid = parts.count > 2 ? Int(parts[2]) ?? 0 : 0
-                    DispatchQueue.main.async { self?.targetPid = pid }
+                    var found: [(num: Int, pid: Int)] = []
+                    var i = 1
+                    while i + 1 < parts.count {
+                        if let pid = Int(parts[i + 1]), pid != 0 { found.append((num: Int(parts[i]) ?? 0, pid: pid)) }
+                        i += 2
+                    }
+                    DispatchQueue.main.async { self?.targets = found }
+                } else if line == "ON" || line == "OFF" {
+                    DispatchQueue.main.async { self?.glowOn = line == "ON" }
+                } else if line == "GHOST" || line.hasPrefix("GHOST ") {
+                    let parts = line.split(separator: " ")
+                    let point = parts.count > 2 ? Double(parts[1]).flatMap { x in Double(parts[2]).map { y in CGPoint(x: x, y: y) } } : nil
+                    DispatchQueue.main.async { self?.showGhost(point) }
                 }
             }
         }
     }
 
     func hide(for ms: Int) {
+        if mode == "glow" { glowHideUntil = Date().addingTimeInterval(Double(max(50, min(ms, 10_000))) / 1000); return }
         guard let panel = pillPanel else { return }
         hideToken += 1
         let token = hideToken
@@ -518,7 +666,9 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         content.layer?.borderWidth = 1
         content.layer?.borderColor = (paused ? blue : outline).cgColor
 
-        let dot = label("\u{25CF}", size: 9, color: blue)   // the paused card's dot; the running pill has the orb
+        // The paused card's orb: the library's "listening" state, in the pause's blue (the running pill's is makeOrb()).
+        let dot = OrbView(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
+        dot.state = "listening"
         var height: CGFloat = 38
 
         if paused {
@@ -563,8 +713,8 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             let rowTop: CGFloat = afterMsg + choicesH + inputH
             height = rowTop + 30 + 16
 
-            dot.frame = NSRect(x: pad, y: height - 16 - 16, width: 12, height: 16)
-            title.frame = NSRect(x: pad + 14, y: height - 16 - 16, width: inner - 14, height: 16)
+            dot.frame = NSRect(x: pad - 4, y: height - 16 - 18, width: 20, height: 20)
+            title.frame = NSRect(x: pad + 20, y: height - 16 - 16, width: inner - 20, height: 16)
             msg.frame = NSRect(x: pad, y: height - msgTop - msgH, width: inner, height: msgH)
 
             let gray = footerBg
@@ -659,8 +809,13 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             clock.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
             let stop = makeButton("Stop", "BANNER_STOP", frame: NSRect(x: 0, y: 7, width: 52, height: 24),
                                   color: rgb(64, 30, 33), textColor: rgb(252, 165, 165), fontSize: 11, radius: 6)
+            // Pause: the agent waits, background work included, until Resume here (owner, 2026-11-18).
+            let hold = makeButton("Pause", "BANNER_PAUSE", frame: NSRect(x: 0, y: 7, width: 60, height: 24),
+                                  color: rgb(58, 62, 72), fontSize: 11, radius: 6)
+            hold.action = #selector(holdClicked(_:))
+            runHold = hold
             let orb = makeOrb()
-            let rowViews: [NSView] = [orb, brand, activity, clock, stop]
+            let rowViews: [NSView] = [orb, brand, activity, clock, hold, stop]
             rowViews.forEach { content.addSubview($0) }
             runDot = orb
             runBrand = brand
@@ -671,6 +826,19 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             content.onDoubleClick = {
                 emit("BANNER_STOP")
                 NSApp.terminate(nil)
+            }
+            content.onDragged = { [weak self] in self?.userMoved = true }
+            // The amber outline when the pill appears: solid for 3 s, then fading out over 1 s into the usual one.
+            let amber = (245.0, 158.0, 11.0), rest = (58.0, 62.0, 72.0)
+            content.layer?.borderColor = hexColor("#f59e0b").cgColor
+            content.layer?.borderWidth = 2
+            let appeared = Date()
+            Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { t in
+                let e = Date().timeIntervalSince(appeared)
+                let k = e < 3 ? 1.0 : max(0.0, 1 - (e - 3))
+                content.layer?.borderColor = rgb(CGFloat(rest.0 + (amber.0 - rest.0) * k), CGFloat(rest.1 + (amber.1 - rest.1) * k),
+                                                 CGFloat(rest.2 + (amber.2 - rest.2) * k)).cgColor
+                if k == 0 { content.layer?.borderWidth = 1; t.invalidate() }
             }
         }
 
@@ -708,66 +876,203 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             }
         }
 
-        var bright = true
-        timer = Timer.scheduledTimer(withTimeInterval: paused ? 0.9 : 0.7, repeats: true) { [weak self] _ in
-            bright.toggle()
-            if paused { dot.textColor = bright ? blue : blueDim } else { self?.updateClock() }
+        // The running pill's clock; the card's orb moves by itself.
+        if !paused {
+            timer = Timer.scheduledTimer(withTimeInterval: 0.7, repeats: true) { [weak self] _ in self?.updateClock() }
         }
     }
 
-    /// The process whose window gets the outline ("TARGET <handle> <pid>" on stdin); 0: none.
-    var targetPid = 0
+    /// The windows that get an outline ("TARGET <handle> <pid> [...]" on stdin): a window number (0: the process's
+    /// frontmost ordinary window) and its process. Empty: none.
+    var targets: [(num: Int, pid: Int)] = []
+    var outlineWindows: [NSWindow] = []
+    var outlineColor = "#f59e0b"
 
-    /// The frame, in AppKit coordinates, of the target process's frontmost ordinary window while that app is in front.
-    /// The windows are listed only then (the list is front to back). A window nobody sees is passed over: one that is
-    /// see-through (alpha 0), or a sliver under 40 pt that an app keeps for itself.
-    func targetFrame() -> NSRect? {
-        guard targetPid != 0,
-              NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(targetPid),
-              let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
+    /// A window nobody sees is passed over: one that is see-through (alpha 0), or a sliver under 40 pt that an app keeps
+    /// for itself. Returns its AppKit frame (Quartz measures down from the top of the primary display, AppKit up from its
+    /// bottom) and its window number.
+    func seenFrame(_ w: [String: Any]) -> (frame: NSRect, number: Int)? {
+        guard (w[kCGWindowLayer as String] as? Int) == 0,
+              ((w[kCGWindowAlpha as String] as? Double) ?? 1) > 0.01,
+              let number = w[kCGWindowNumber as String] as? Int,
+              let bounds = w[kCGWindowBounds as String] as? NSDictionary,
+              let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary),
+              rect.width >= 40, rect.height >= 40,
               let primary = NSScreen.screens.first else { return nil }
-        for w in list where (w[kCGWindowOwnerPID as String] as? Int) == targetPid && (w[kCGWindowLayer as String] as? Int) == 0 {
-            guard ((w[kCGWindowAlpha as String] as? Double) ?? 1) > 0.01,
-                  let bounds = w[kCGWindowBounds as String] as? NSDictionary,
-                  let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary),
-                  rect.width >= 40, rect.height >= 40 else { continue }
-            // Quartz measures down from the top of the primary display, AppKit up from its bottom.
-            return NSRect(x: rect.minX, y: primary.frame.height - rect.maxY, width: rect.width, height: rect.height)
-        }
-        return nil
+        return (NSRect(x: rect.minX, y: primary.frame.height - rect.maxY, width: rect.width, height: rect.height), number)
     }
 
-    func windowOutline() {
+    /// One (frame, window number) per target that is on screen now, in the same order as `targets`. The window list is
+    /// front to back; with a window number the target is that window, with 0 the process's frontmost ordinary one.
+    func targetFrames() -> [(frame: NSRect, number: Int)] {
+        guard !targets.isEmpty,
+              let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+        else { return [] }
+        var found: [(frame: NSRect, number: Int)] = []
+        for t in targets {
+            for w in list where (w[kCGWindowOwnerPID as String] as? Int) == t.pid {
+                if t.num != 0 && (w[kCGWindowNumber as String] as? Int) != t.num { continue }
+                if let v = seenFrame(w) {
+                    if !found.contains(where: { $0.number == v.number }) { found.append(v) }
+                    break
+                }
+            }
+        }
+        return found
+    }
+
+    func makeOutlineWindow() -> NSWindow {
         let win = NSWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: false)
         win.isOpaque = false
         win.backgroundColor = .clear   // only the border is drawn: nothing over the window's content
         win.hasShadow = false
         win.ignoresMouseEvents = true
-        win.level = .floating   // above ordinary windows, below the pill and the menu bar
+        // Ordinary level, ordered just above the agent's window (see windowOutline): a window in front of the agent's
+        // covers the border, and the user's front window is never covered by it.
+        win.level = .normal
         win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         win.sharingType = .none  // the outline is not captured either
         let view = NSView()
         view.wantsLayer = true
-        view.layer?.borderColor = hexColor(option("--color", "#f59e0b")).cgColor
+        view.layer?.borderColor = hexColor(outlineColor).cgColor
         view.layer?.borderWidth = 3   // points: AppKit scales it for each display
         // Rounded like the window's own corners, or a wedge of what is behind shows at each one. The system does not
         // give a window's radius: about 16 pt for a standard window on macOS 26 (which reports itself as 16 to a
         // binary built with an older SDK), about 10 pt before.
         view.layer?.cornerRadius = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 16 ? 16 : 10
         win.contentView = view
-        windows.append(win)
+        return win
+    }
+
+    func windowOutline() {
+        outlineColor = option("--color", "#f59e0b")
         listenForCommands()
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            guard let frame = self?.targetFrame() else { win.orderOut(nil); return }
-            if win.frame != frame { win.setFrame(frame, display: true) }
-            if !win.isVisible { win.orderFrontRegardless() }
+            guard let self = self else { return }
+            let frames = self.targetFrames()
+            while self.outlineWindows.count < frames.count {
+                let w = self.makeOutlineWindow()
+                self.outlineWindows.append(w)
+                self.windows.append(w)
+            }
+            for (i, win) in self.outlineWindows.enumerated() {
+                guard i < frames.count else { win.orderOut(nil); continue }
+                if win.frame != frames[i].frame { win.setFrame(frames[i].frame, display: true) }
+                // Just above the agent's window, wherever it is in the stack.
+                win.order(.above, relativeTo: frames[i].number)
+            }
+            self.updateGhost()
         }
+    }
+
+    // The ghost cursor: a retro pixel arrow where the agent's pointer would be, about 1.5 s after the last GHOST. Click-through,
+    // never in a capture, and the real cursor is never moved.
+    var ghostWindow: NSWindow?
+    var ghostUntil = Date.distantPast
+
+    /// `point`: screen coordinates, origin at the top-left of the primary display, the tip of the arrow at the point.
+    func showGhost(_ point: CGPoint?) {
+        guard let p = point, let primary = NSScreen.screens.first else { ghostUntil = .distantPast; updateGhost(); return }
+        let m = ghostWindow?.contentView as? CursorView ?? CursorView(cell: 2)
+        if ghostWindow == nil {
+            let win = NSWindow(contentRect: m.frame, styleMask: .borderless, backing: .buffered, defer: false)
+            win.isOpaque = false
+            win.backgroundColor = .clear
+            win.hasShadow = false
+            win.ignoresMouseEvents = true
+            win.level = .statusBar
+            win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+            win.sharingType = .none
+            win.contentView = m
+            ghostWindow = win
+            windows.append(win)
+        }
+        ghostWindow?.setFrameOrigin(NSPoint(x: p.x, y: primary.frame.height - p.y - m.frame.height))
+        ghostUntil = Date().addingTimeInterval(1.5)
+        updateGhost()
+    }
+
+    func updateGhost() {
+        guard let win = ghostWindow else { return }
+        if Date() < ghostUntil { if !win.isVisible { win.orderFrontRegardless() } } else if win.isVisible { win.orderOut(nil) }
+    }
+
+    // The full-screen edge glow (foreground mode): starts hidden; "ON" / "OFF" / "HIDE <ms>" on stdin show and hide it.
+    // Adapted from the glow proven live in PR #448: one window per screen, four gradient bands, a pulsing opacity.
+    var glowWindows: [NSWindow] = []
+    var glowOn = false { didSet { updateGlow() } }
+    var glowHideUntil = Date.distantPast { didSet { updateGlow() } }
+
+    func updateGlow() {
+        let want = glowOn && Date() >= glowHideUntil
+        for win in glowWindows {
+            if want && !win.isVisible { win.orderFrontRegardless() } else if !want && win.isVisible { win.orderOut(nil) }
+        }
+    }
+
+    func glow() {
+        let color = option("--color", "#f59e0b")
+        let thickness = CGFloat(Double(option("--thickness", "80")) ?? 80)
+        let period = (Double(option("--period", "1600")) ?? 1600) / 1000
+        let minAlpha = Float((Double(option("--min-alpha", "60")) ?? 60) / 255)
+        let peak = CGFloat((Double(option("--peak-alpha", "200")) ?? 200) / 255)
+        let edge = hexColor(color, alpha: peak).cgColor
+        let clear = hexColor(color, alpha: 0).cgColor
+
+        for screen in NSScreen.screens {
+            let f = screen.frame
+            let win = NSWindow(contentRect: f, styleMask: .borderless, backing: .buffered, defer: false)
+            win.isOpaque = false
+            win.backgroundColor = .clear
+            win.hasShadow = false
+            win.ignoresMouseEvents = true // click-through
+            win.level = .statusBar // above apps and the menu bar, below the pill (.screenSaver)
+            win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+            win.sharingType = .none // for the person at the screen only: not in a screenshot
+            let view = NSView(frame: NSRect(origin: .zero, size: f.size))
+            view.wantsLayer = true
+            let root = CALayer()
+            root.frame = view.bounds
+            let t = min(thickness, f.width / 2, f.height / 2)
+            let w = f.width, h = f.height
+            // Layer unit coordinates on macOS: (0,0) is bottom-left.
+            let bands: [(CGRect, CGPoint, CGPoint)] = [
+                (CGRect(x: 0, y: h - t, width: w, height: t), CGPoint(x: 0.5, y: 1), CGPoint(x: 0.5, y: 0)), // top
+                (CGRect(x: 0, y: 0, width: w, height: t), CGPoint(x: 0.5, y: 0), CGPoint(x: 0.5, y: 1)),     // bottom
+                (CGRect(x: 0, y: 0, width: t, height: h), CGPoint(x: 0, y: 0.5), CGPoint(x: 1, y: 0.5)),     // left
+                (CGRect(x: w - t, y: 0, width: t, height: h), CGPoint(x: 1, y: 0.5), CGPoint(x: 0, y: 0.5)), // right
+            ]
+            for (rect, start, end) in bands {
+                let g = CAGradientLayer()
+                g.frame = rect
+                g.colors = [edge, clear]
+                g.startPoint = start
+                g.endPoint = end
+                root.addSublayer(g)
+            }
+            let pulse = CABasicAnimation(keyPath: "opacity")
+            pulse.fromValue = minAlpha
+            pulse.toValue = Float(1)
+            pulse.duration = period / 2
+            pulse.autoreverses = true
+            pulse.repeatCount = .infinity
+            pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            root.add(pulse, forKey: "pulse")
+            view.layer?.addSublayer(root)
+            win.contentView = view
+            win.setFrame(f, display: false)
+            glowWindows.append(win)   // starts hidden: ON shows it
+            windows.append(win)
+        }
+        listenForCommands()   // stdin: ON / OFF / HIDE <ms>, and its EOF ends the glow
+        // A HIDE runs out by itself: the glow comes back if it is still wanted.
+        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.updateGlow() }
     }
 }
 
 let mode = CommandLine.arguments.dropFirst().first ?? ""
-guard mode == "pill" || mode == "outline" else {
-    FileHandle.standardError.write("usage: overlay pill | outline [--color #RRGGBB]\n".data(using: .utf8)!)
+guard mode == "pill" || mode == "outline" || mode == "glow" else {
+    FileHandle.standardError.write("usage: overlay pill | outline [--color #RRGGBB] | glow\n".data(using: .utf8)!)
     exit(2)
 }
 let app = NSApplication.shared

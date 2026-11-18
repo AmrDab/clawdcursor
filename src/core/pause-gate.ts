@@ -38,7 +38,7 @@
 
 import { controlBanner } from './banner';
 import { foreignOverlayState, untilNoForeignPause } from './overlay-state';
-import { isStopped, resumeControl } from './control';
+import { isStopped, releaseHold, resumeControl } from './control';
 import { unguarded } from '../platform/pointer-guard';
 import { logger } from './observability/logger';
 
@@ -361,10 +361,14 @@ class PauseGate {
     if (this.pending !== p) return;
     this.pending = null;
     if (p.key && this.waiting.delete(p.key)) this.recent.set(p.key, { result, at: Date.now() });
-    // The user's own Resume (never an agent's, never a detected done_when) gives control back after a stop (control.ts).
+    // The user's own Resume (never an agent's, never a detected done_when) gives control back after a stop, and ends a
+    // hold of theirs (the pill's Pause), so one Resume is enough (control.ts).
     // 'ended' is the user's End task (or the task being aborted); the reply text is never logged.
     logger.info('pause.end', { outcome: result.outcome, ...(result.detected ? { detected: true } : {}) });
-    if (result.outcome === 'resumed' && !result.detected && isStopped()) resumeControl('pause_resume');
+    if (result.outcome === 'resumed' && !result.detected) {
+      if (isStopped()) resumeControl('pause_resume');
+      else releaseHold('pause_resume');
+    }
     controlBanner.showRunning();
     p.settle(result);
   }

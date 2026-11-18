@@ -14,6 +14,7 @@ import type { ChildProcess } from 'child_process';
 import { controlBanner, overlayEnv, activityLabel, type OverlayMode } from '../core/banner';
 import { appLabel } from '../core/app-label';
 import { guardInputMethods, setInputGuard, setOnAgentInput } from '../platform/pointer-guard';
+import { withForegroundBurst, burstCount, resetBurstCount } from '../platform/foreground-burst';
 
 class FakeChild extends EventEmitter {
   stdin = new PassThrough();
@@ -133,5 +134,40 @@ describe('pointer-guard announces guarded inputs', () => {
     await expect(target.typeText('no')).rejects.toThrow('stopped');
     await expect(target.navigate('x')).rejects.toThrow('stopped');
     expect(seen).toEqual(['typeText', 'navigate']);
+  });
+});
+
+describe('quick takeovers (R2 bursts) on the pill', () => {
+  const USER = { processId: 10, handle: 500 };
+  const TARGET = { processId: 42, handle: 900 };
+  const burst = () => {
+    let fg: typeof USER = USER;
+    return withForegroundBurst({
+      getActiveWindow: async () => fg as never,
+      focusWindow: async () => { fg = TARGET; return true; },
+      restoreForeground: async () => { fg = USER; return true; },
+      userIdle: async () => ({ tick: 1, idleMs: 5000 }),
+      cursorPos: async () => ({ x: 0, y: 0 }),
+      mouseMove: async () => {},
+    }, { processId: 42 }, async () => 'ok');
+  };
+
+  it('says nothing at 0, then the count after each burst', async () => {
+    resetBurstCount();
+    controlBanner.touch();
+    controlBanner.setActivity('Typing in Edge');
+    await burst();
+    controlBanner.setActivity('Typing in Edge');
+    await burst();
+    controlBanner.setActivity('Typing in Edge');
+    await flush();
+    expect(last().child.written).toEqual(['ACTIVITY Typing in Edge', 'ACTIVITY Typing in Edge · 1 quick takeover', 'ACTIVITY Typing in Edge · 2 quick takeovers']);
+  });
+
+  it('the next session starts at 0', async () => {
+    resetBurstCount();
+    await burst();
+    controlBanner.pin(); controlBanner.unpin();   // the session ends
+    expect(burstCount()).toBe(0);
   });
 });

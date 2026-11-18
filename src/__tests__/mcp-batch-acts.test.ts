@@ -39,3 +39,15 @@ describe('bareStepName', () => {
     expect(bareStepName('mcp__computer-use__wait')).toBe('mcp__computer-use__wait');
   });
 });
+
+describe('batchActs, background acts', () => {
+  it('steps that arrive as a JSON string show the pill too', () => {
+    expect(batchActs(JSON.stringify([{ name: 'accessibility', arguments: { action: 'set_value', name: 'To', value: 'x', processId: 9 } }]))).toBe(true);
+  });
+  it('so do the granular names of by-name and page acts', async () => {
+    const { getAllTools } = await import('../tools/registry');
+    const names = getAllTools().map(t => t.name).filter(n => /^(set_value|invoke_element|toggle_element|select_element|cdp_click|cdp_type|cdp_select_option|cdp_scroll|cdp_switch_tab)$/.test(n));
+    expect(names.length).toBeGreaterThan(4);
+    expect(names.filter(n => !batchActs([{ name: n, arguments: {} }]))).toEqual([]);
+  });
+});

@@ -122,7 +122,9 @@ describe('set_field_value / invoke_element on a ref below the fold', () => {
     const { platform, ctx } = setup({}, { processId: 77, processName: 'calc', title: 'Calculator' });
     const res = await tool('set_field_value').execute({ ...ref, value: 'x' }, ctx);
     expect(res.success).toBe(false);
-    expect(res.text).toMatch(/window changed/);
+    // Its window is still there behind another app, but the element has no unique name: only a click at its bounds could
+    // reach it, and that would land on the app in front.
+    expect(res.text).toMatch(/not the one in front, so a click at its bounds would land on the window in front/);
     expect(platform.scrollIntoView).not.toHaveBeenCalled();
     expect(platform.mouseClick).not.toHaveBeenCalled();
   });
