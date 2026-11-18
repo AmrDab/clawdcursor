@@ -243,6 +243,17 @@ export function glowFlags(pillPid?: number): string[] {
 }
 
 /** The glow's colour: blue at a pause, the user's turn (owner, 2026-11-18; v1.5's paused glow); else the drawer's amber. */
+/**
+ * The window number a TARGET line gives the outline drawer for a window. macOS knows no window number for a window it
+ * lists: its handle is the process id (mac-ax.ts toWindow), which no window has, so the drawer found nothing and drew
+ * no outline at all (Mac run, 2026-11-18). There it is 0, the drawer's "the process's front window". A Windows handle is
+ * the window's own.
+ */
+export function outlineWindowNumber(handle: number | string | undefined, pid: number, platform: NodeJS.Platform = process.platform): number {
+  const n = Number(handle) || 0;
+  return platform !== 'win32' && n === pid ? 0 : n;
+}
+
 export function glowColorFlags(paused: boolean, platform: NodeJS.Platform): string[] {
   if (!paused) return [];
   return platform === 'win32' ? ['-Color', PAUSED_OUTLINE] : ['--color', PAUSED_OUTLINE];
@@ -352,9 +363,10 @@ class ControlBanner {
     // Every OS gets the same multi-window line. Windows and macOS draw a border per window; the Linux drawer reads the
     // first pair and ignores the rest (one outline there), so it degrades without breaking.
     const others = w
-      ? agentWindows().filter(a => Number(a.handle) && !isOwnUiPid(a.processId) && Number(a.handle) !== Number(w.handle)).map(a => ` ${Number(a.handle)} ${a.processId}`).join('')
+      ? agentWindows().filter(a => Number(a.handle) && !isOwnUiPid(a.processId) && Number(a.handle) !== Number(w.handle))
+        .map(a => ` ${outlineWindowNumber(a.handle, a.processId)} ${a.processId}`).join('')
       : '';
-    const line = w ? `TARGET ${Number(w.handle) || 0} ${w.processId}${others}` : 'TARGET';
+    const line = w ? `TARGET ${outlineWindowNumber(w.handle, w.processId)} ${w.processId}${others}` : 'TARGET';
     if (line === this.target) return;
     if (send(this.outlineChild, line)) this.target = line;
   }

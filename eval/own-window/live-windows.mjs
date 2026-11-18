@@ -304,7 +304,8 @@ async function run() {
   if (EXTERNAL) {
     fs.mkdirSync(EXTERNAL, { recursive: true });
     for (const f of ['done', 'start']) fs.rmSync(path.join(EXTERNAL, f), { force: true });
-    const env = { HOME: home, USERPROFILE: home, CLAWDCURSOR_CONSENT: 'true', CLAWD_TELEMETRY: '0', DO_NOT_TRACK: '1', CLAWD_NO_PAUSE: '1', ...(R.edge ? { CLAWD_AGENT_CDP_PORT: String(R.edge.port) } : {}) };
+    // No CLAWD_NO_PAUSE: the owner is at the screen for this run, and pause_for_user (the blue glow) is one of its steps.
+    const env = { HOME: home, USERPROFILE: home, CLAWDCURSOR_CONSENT: 'true', CLAWD_TELEMETRY: '0', DO_NOT_TRACK: '1', ...(R.edge ? { CLAWD_AGENT_CDP_PORT: String(R.edge.port) } : {}) };
     fs.writeFileSync(path.join(EXTERNAL, 'setup.json'), JSON.stringify({ cli, env, user: R.user, target: R.target, edge: R.edge }, null, 2));
     log(`EXTERNAL: setup written to ${EXTERNAL}\\setup.json; waiting for ${EXTERNAL}\\done`);
     // Measured from when agent B starts (<dir>/start holds that time): window launches before it are setup.

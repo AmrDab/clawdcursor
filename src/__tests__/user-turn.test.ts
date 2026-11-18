@@ -46,7 +46,8 @@ beforeEach(async () => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawd-turn-'));
   __setControlDirForTests(dir);
   __setForegroundReaderForTests(async () => EDGE);
-  Object.assign(turnTiming, { idleMs: 40, takeoverMs: 80, waitMs: 300, pollMs: 5, graceMs: 30 });
+  // waitMs long enough that a loaded machine never ends a wait before the test clicks Resume; one test shortens it.
+  Object.assign(turnTiming, { idleMs: 40, takeoverMs: 80, waitMs: 2000, pollMs: 5, graceMs: 30 });
   typing = false;
   userAt = 0;
   // The OS's idle time counts every process's input, the agent's own too (GetLastInputInfo).
@@ -217,7 +218,9 @@ describe('the pill\'s Pause', () => {
   it('a call held longer than one wait gets the waiting reply: call the same step again, do not quit; again, it goes on after Resume', async () => {
     const d = fakeDesktop();
     holdControl('pill');
+    turnTiming.waitMs = 300;
     const err = await d.mouseClick(2, 2).catch(e => e as Error);
+    turnTiming.waitMs = 2000;
     expect(err).toBeInstanceOf(Error);
     expect(err.message).toMatch(/^paused by the user — they have the desktop, and nothing was sent/);
     expect(err.message).toMatch(/call the same step again/);
@@ -261,12 +264,20 @@ describe('the pill\'s Pause', () => {
   });
 
   it('one tool call\'s waits share one budget: two held acts in a call end by takeover + wait, not twice that', async () => {
+    turnTiming.waitMs = 1000;   // the budget is 80 + 1000: the first act takes 1000 of it, the second only what is left
     const d = fakeDesktop();
     holdControl('pill');
-    const t0 = Date.now();
-    const errs = await withTurnBudget(async () => [await d.mouseClick(1, 1).catch(e => e as Error), await d.mouseClick(2, 2).catch(e => e as Error)]);
+    let second = 0;
+    const errs = await withTurnBudget(async () => {
+      const a = await d.mouseClick(1, 1).catch(e => e as Error);
+      const t1 = Date.now();
+      const b = await d.mouseClick(2, 2).catch(e => e as Error);
+      second = Date.now() - t1;
+      return [a, b];
+    });
     expect(errs.map(e => e.message)).toEqual([expect.stringMatching(/^paused by the user/), expect.stringMatching(/^paused by the user/)]);
-    expect(Date.now() - t0).toBeLessThan(turnTiming.takeoverMs + turnTiming.waitMs + 60);
+    // Without the shared budget the second would wait its own full 1000 ms, never less: a wide margin for a loaded machine.
+    expect(second).toBeLessThan(600);
     expect(d.sent).toEqual([]);
   });
 

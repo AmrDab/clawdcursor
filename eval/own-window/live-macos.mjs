@@ -87,7 +87,8 @@ async function run() {
 
   fs.mkdirSync(EXTERNAL, { recursive: true });
   for (const f of ['done', 'start']) fs.rmSync(path.join(EXTERNAL, f), { force: true });
-  const env = { HOME: home, CLAWDCURSOR_CONSENT: 'true', CLAWD_TELEMETRY: '0', DO_NOT_TRACK: '1', CLAWD_NO_PAUSE: '1', ...(chrome.pid ? { CLAWD_AGENT_CDP_PORT: String(chrome.port) } : {}) };
+  // No CLAWD_NO_PAUSE: the owner is at the screen for this run, and pause_for_user (the blue glow) is one of its steps.
+  const env = { HOME: home, CLAWDCURSOR_CONSENT: 'true', CLAWD_TELEMETRY: '0', DO_NOT_TRACK: '1', ...(chrome.pid ? { CLAWD_AGENT_CDP_PORT: String(chrome.port) } : {}) };
   fs.writeFileSync(path.join(EXTERNAL, 'setup.json'), JSON.stringify({ cli, env, user: { pid: u.value, file }, target: { pid: target.pid }, chrome: chrome.pid ? { pid: chrome.pid, port: chrome.port } : null }, null, 2));
   log(`EXTERNAL: setup written to ${EXTERNAL}/setup.json; waiting for ${EXTERNAL}/start, then ${EXTERNAL}/done`);
   while (!fs.existsSync(path.join(EXTERNAL, 'start'))) await sleep(200);

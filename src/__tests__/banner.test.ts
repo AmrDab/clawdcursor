@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
-import { controlBanner, outlineFlags, glowFlags, glowColorFlags } from '../core/banner';
+import { controlBanner, outlineFlags, glowFlags, glowColorFlags, outlineWindowNumber } from '../core/banner';
 import { stopControl, __setControlDirForTests, __setForegroundReaderForTests, isHeld, releaseHold } from '../core/control';
 import { guardInputMethods, setOwnUiPids } from '../platform/pointer-guard';
 import { withForegroundBurst } from '../platform/foreground-burst';
@@ -453,6 +453,22 @@ describe('the indicator has two modes', () => {
     expect(glowColorFlags(false, 'darwin')).toEqual([]);
     expect(glowColorFlags(true, 'win32')).toEqual(['-Color', '#3b82f6']);
     expect(glowColorFlags(true, 'darwin')).toEqual(['--color', '#3b82f6']);
+  });
+});
+
+// Mac run 2026-11-18: no outline ever drew on macOS. Its windows have no number to give, so their handle is the process
+// id (mac-ax.ts toWindow), and the drawer looked for a window numbered like the pid. 0 is its "the process's front window".
+describe('the window number a TARGET line gives the outline drawer', () => {
+  it('on macOS a handle that is only the process id is 0 (the process’s front window); a real window number is kept', () => {
+    expect(outlineWindowNumber(4242, 4242, 'darwin')).toBe(0);
+    expect(outlineWindowNumber(undefined, 4242, 'darwin')).toBe(0);
+    expect(outlineWindowNumber(1440, 4242, 'darwin')).toBe(1440);
+    expect(outlineWindowNumber(4242, 4242, 'linux')).toBe(0);
+  });
+  it('on Windows the handle is the window’s own (an HWND), whatever it equals', () => {
+    expect(outlineWindowNumber(0x5a0, 100, 'win32')).toBe(0x5a0);
+    expect(outlineWindowNumber(100, 100, 'win32')).toBe(100);
+    expect(outlineWindowNumber('1440', 100, 'win32')).toBe(1440);
   });
 });
 
