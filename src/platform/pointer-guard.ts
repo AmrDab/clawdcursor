@@ -230,7 +230,13 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
       await confirmCheck(m, args, target);
       announce(m);
       // `actedPid`: the process these acts go to (the CDP driver's browser), told once the act ran (a navigate may connect first).
-      try { return await f(...args); } finally { if (actedPid) await g.byProcess?.(await actedPid().catch(() => null)).catch(() => {}); }
+      try { return await f(...args); } finally {
+        if (actedPid) {
+          await g.byProcess?.(await actedPid().catch(() => null)).catch(() => {});
+          // The browser it went to is known only now: the pill and the outline follow it at once, not at the next act.
+          try { onAgentInput?.(m); } catch { /* cosmetic */ }
+        }
+      }
     });
   }
   // The agent's own focus and launches rebind the window it works in, nested or not (a navigate raises its browser).

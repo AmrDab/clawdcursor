@@ -341,7 +341,9 @@ const pidNames = new Map<number, { processName: string; appName?: string; handle
 /**
  * An act that went to a process, not to the window in front — a by-name act on a background window, a page act over CDP
  * (#365): the session log names that process's app (as on the pill), never the app that happens to be in front. A Store
- * app is named as the app its frame hosts. Nothing else changes: the window input is bound to stays where it is.
+ * app is named as the app its frame hosts. It is where the agent works now, so the outline goes round it and the pill names
+ * it (background mode: an agent that never touched the window in front still gets its frame, macOS run 2026-11-18). The
+ * window input is bound to (the lease) stays where it is.
  */
 async function byProcess(pid: number | null | undefined): Promise<void> {
   if (!pid || isOwnUiPid(pid)) return;
@@ -356,7 +358,8 @@ async function byProcess(pid: number | null | undefined): Promise<void> {
     }
   }
   acted = { processId: pid, processName: n?.processName || `pid ${pid}`, appName: n?.appName, actPid: pid };
-  remember({ ...acted, handle: n?.handle });
+  working = { ...acted, handle: n?.handle };
+  remember(working);
 }
 
 /**

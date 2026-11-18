@@ -112,6 +112,11 @@ func runWindow(_ kind: String) -> Never {
     c.label.frame = NSRect(x: 20, y: 110, width: 260, height: 24)
     w.contentView?.addSubview(c.field)
     if kind == "target" {
+        // AX names for agent B (the buttons are named by their titles): the field and the status label have no text of their own.
+        c.field.setAccessibilityLabel("ClawdField")
+        c.field.setAccessibilityIdentifier("ClawdField")
+        c.label.setAccessibilityLabel("ClawdStatus")
+        c.label.setAccessibilityIdentifier("ClawdStatus")
         let go = NSButton(title: "ClawdGo", target: c, action: #selector(Ctl.go))
         go.frame = NSRect(x: 20, y: 70, width: 120, height: 30)
         let rs = NSButton(title: "ClawdReset", target: c, action: #selector(Ctl.reset))

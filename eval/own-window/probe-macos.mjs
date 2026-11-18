@@ -277,7 +277,7 @@ function writeResults(status) {
 let abort;
 const aborted = new Promise((_, rej) => { abort = () => rej(new Error(fatal)); });
 const timer = setTimeout(() => { fatal = fatal ?? `hard timeout ${HARD_TIMEOUT_MS / 1000} s`; abort(); }, HARD_TIMEOUT_MS);
-process.on('SIGINT', () => { fatal = 'interrupted'; abort(); });
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { fatal = fatal ?? `interrupted (${sig})`; abort(); });
 
 async function run() {
   H = compileHelper(tmp);

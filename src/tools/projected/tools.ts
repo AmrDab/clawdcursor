@@ -201,26 +201,32 @@ export function buildUnifiedTools(): UnifiedTool[] {
           const aw = await ctx.platform.getActiveWindow().catch(() => null);
           const plan = resolveRef(refIds, ctx.uiMaps, Date.now(), 'click', aw);
           if (!plan.ok) return { success: false, text: `invoke_element ref rejected: ${plan.error}`, isError: true };
-          if (plan.via === 'name') {
-            // A ref to a ListItem / combo-item / checkbox may not support
-            // InvokePattern: the same activation ladder as the by-name path below.
-            const { res: refRes, used: refUsed } = await runActivationLadder(
-              (action) => ctx.platform.invokeElement({ name: plan.name, action }), ['click', 'select', 'toggle']);
-            if (!refRes.success && canClickAtBounds(refRes)) {
-              const fallback = await clickBoundsFallback(ctx, plan.name, refRes.bounds);
-              if (fallback) return { ...fallback, text: `${fallback.text} (via ${plan.element.id})` };
+          if (plan.via === 'name' && plan.background) {
+            // A ref into a window that is not in front: the by-name act below, addressed to that process (R1 window
+            // messages, CDP, the ladder), so the focus is not moved and no click lands on the window in front.
+            args = { ...args, name: plan.name, processId: plan.processId };
+          } else {
+            if (plan.via === 'name') {
+              // A ref to a ListItem / combo-item / checkbox may not support
+              // InvokePattern: the same activation ladder as the by-name path below.
+              const { res: refRes, used: refUsed } = await runActivationLadder(
+                (action) => ctx.platform.invokeElement({ name: plan.name, action }), ['click', 'select', 'toggle']);
+              if (!refRes.success && canClickAtBounds(refRes)) {
+                const fallback = await clickBoundsFallback(ctx, plan.name, refRes.bounds);
+                if (fallback) return { ...fallback, text: `${fallback.text} (via ${plan.element.id})` };
+              }
+              await sleep(150);
+              return { success: refRes.success, text: refRes.success ? `Invoked ${quoteScreenText(plan.name)} via a11y${refUsed !== 'click' ? ` (${refUsed})` : ''} (via ${plan.element.id}).`
+                // The reason, as the name path gives it: an ambiguous name comes with the list of what it could mean.
+                : `a11y invoke of ${plan.element.id} missed — ${missText(refRes.data)}.`, targetLabel: plan.name };
             }
+            const seen = await boundsToClick(ctx, plan, aw);
+            if (!seen.ok) return { success: false, text: `invoke_element ref rejected: ${seen.error}`, isError: true };
+            const [bx, by, bw, bh] = seen.bounds;
+            await ctx.platform.mouseClick(Math.round(bx + bw / 2), Math.round(by + bh / 2));
             await sleep(150);
-            return { success: refRes.success, text: refRes.success ? `Invoked ${quoteScreenText(plan.name)} via a11y${refUsed !== 'click' ? ` (${refUsed})` : ''} (via ${plan.element.id}).`
-              // The reason, as the name path gives it: an ambiguous name comes with the list of what it could mean.
-              : `a11y invoke of ${plan.element.id} missed — ${missText(refRes.data)}.`, targetLabel: plan.name };
+            return { success: true, text: `Clicked ${plan.element.id} at its bounds center${plan.offView ? ' (scrolled into view first)' : ''}.`, targetLabel: plan.element.id };
           }
-          const seen = await boundsToClick(ctx, plan, aw);
-          if (!seen.ok) return { success: false, text: `invoke_element ref rejected: ${seen.error}`, isError: true };
-          const [bx, by, bw, bh] = seen.bounds;
-          await ctx.platform.mouseClick(Math.round(bx + bw / 2), Math.round(by + bh / 2));
-          await sleep(150);
-          return { success: true, text: `Clicked ${plan.element.id} at its bounds center${plan.offView ? ' (scrolled into view first)' : ''}.`, targetLabel: plan.element.id };
         }
         // `automationId` is accepted for MCP backward-compat but the PlatformAdapter
         // invokeElement interface does not expose automationId filtering — it is used
@@ -318,31 +324,37 @@ export function buildUnifiedTools(): UnifiedTool[] {
           const aw = await ctx.platform.getActiveWindow().catch(() => null);
           const plan = resolveRef(refIds, ctx.uiMaps, Date.now(), 'fill', aw);
           if (!plan.ok) return { success: false, text: `set_field_value ref rejected: ${plan.error}`, isError: true };
-          if (plan.via === 'name') {
-            const before = await valueBefore(ctx, { name: plan.name });
-            const res = await ctx.platform.invokeElement({ name: plan.name, action: 'set-value', value: fillValue });
+          if (plan.via === 'name' && plan.background) {
+            // A ref into a window that is not in front: the by-name act below, addressed to that process (R1 window
+            // messages, CDP, the ladder), so the focus is not moved and no click lands on the window in front.
+            args = { ...args, name: plan.name, processId: plan.processId };
+          } else {
+            if (plan.via === 'name') {
+              const before = await valueBefore(ctx, { name: plan.name });
+              const res = await ctx.platform.invokeElement({ name: plan.name, action: 'set-value', value: fillValue });
+              await sleep(150);
+              if (!res.success) return { success: false, text: `Set of ${plan.element.id} failed.`, targetLabel: plan.name };
+              return setResult(ctx.platform, fillValue, plan.name, ` (via ${plan.element.id})`, { name: plan.name },
+                { before, type: () => typeIntoField(ctx, fillValue, plan.name, undefined, undefined) });
+            }
+            const seen = await boundsToClick(ctx, plan, aw);
+            if (!seen.ok) return { success: false, text: `set_field_value ref rejected: ${seen.error}`, isError: true };
+            const [bx, by, bw, bh] = seen.bounds;
+            await ctx.platform.mouseClick(Math.round(bx + bw / 2), Math.round(by + bh / 2));
+            // No select-all when the click put the focus on the page or a document itself, or on a list or button: there it
+            // selects the whole page or every item. A text field or text area takes it; an unread focus keeps the old way.
+            const fe = await (async () => ctx.platform.getFocusedElement())().catch(() => null);
+            const scope = selectAllScope(fe);
+            if (scope === 'other' || (scope === 'document' && !fe?.multiline)) {
+              return { success: false, text: `set_field_value: clicked ${plan.element.id}, but the focus is not in a text field, so nothing was typed. Find the field (find_field) and set it by its element_id.`, isError: true };
+            }
+            // Replace, don't append: a set_value that types after the old text
+            // left "old textnew" in the Save-As box (live Windows check).
+            await ctx.platform.keyPress('mod+a');
+            await ctx.platform.typeText(fillValue);
             await sleep(150);
-            if (!res.success) return { success: false, text: `Set of ${plan.element.id} failed.`, targetLabel: plan.name };
-            return setResult(ctx.platform, fillValue, plan.name, ` (via ${plan.element.id})`, { name: plan.name },
-              { before, type: () => typeIntoField(ctx, fillValue, plan.name, undefined, undefined) });
+            return setResult(ctx.platform, fillValue, plan.element.id, ` (via bounds + select-all + type${plan.offView ? ', scrolled into view first' : ''})`);
           }
-          const seen = await boundsToClick(ctx, plan, aw);
-          if (!seen.ok) return { success: false, text: `set_field_value ref rejected: ${seen.error}`, isError: true };
-          const [bx, by, bw, bh] = seen.bounds;
-          await ctx.platform.mouseClick(Math.round(bx + bw / 2), Math.round(by + bh / 2));
-          // No select-all when the click put the focus on the page or a document itself, or on a list or button: there it
-          // selects the whole page or every item. A text field or text area takes it; an unread focus keeps the old way.
-          const fe = await (async () => ctx.platform.getFocusedElement())().catch(() => null);
-          const scope = selectAllScope(fe);
-          if (scope === 'other' || (scope === 'document' && !fe?.multiline)) {
-            return { success: false, text: `set_field_value: clicked ${plan.element.id}, but the focus is not in a text field, so nothing was typed. Find the field (find_field) and set it by its element_id.`, isError: true };
-          }
-          // Replace, don't append: a set_value that types after the old text
-          // left "old textnew" in the Save-As box (live Windows check).
-          await ctx.platform.keyPress('mod+a');
-          await ctx.platform.typeText(fillValue);
-          await sleep(150);
-          return setResult(ctx.platform, fillValue, plan.element.id, ` (via bounds + select-all + type${plan.offView ? ', scrolled into view first' : ''})`);
         }
         const name = String(args.name ?? '');
         const value = String(args.value ?? '');

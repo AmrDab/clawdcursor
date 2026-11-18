@@ -60,7 +60,7 @@ export async function startChrome(dir) {
     '--disable-extensions', '--disable-sync', '--force-renderer-accessibility', `--remote-debugging-port=${port}`, `http://127.0.0.1:${pagePort}/`], { stdio: 'ignore' });
   child.on('error', () => {});
   const stop = async () => {
-    try { await cdp(port, [['Browser.close', {}]]); } catch { /* closing */ }
+    try { await Promise.race([cdp(port, [['Browser.close', {}]]), sleep(3000)]); } catch { /* closing */ }   // bounded: the kill below always runs
     await sleep(500);
     try { child.kill('SIGKILL'); } catch { /* gone */ }
     server.close();

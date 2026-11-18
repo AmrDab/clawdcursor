@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { agentWindows, isAgentWindow, workingWindow, __setForegroundReaderForTests, __setControlDirForTests } from '../core/control';
-import { guardInputMethods, setOwnUiPids } from '../platform/pointer-guard';
+import { guardInputMethods, setOwnUiPids, setOnAgentInput } from '../platform/pointer-guard';
 
 vi.mock('../core/banner', () => ({
   controlBanner: { overlayPids: () => [], showPaused: vi.fn(), showRunning: vi.fn(), canShow: () => true, whenCanShow: async () => true, touch: vi.fn() },
@@ -67,6 +67,24 @@ describe('the agent windows', () => {
     await d.invokeElement({ name: 'OK', processId: 300 });
     expect(isAgentWindow({ processId: 300 })).toBe(true);
     expect(isAgentWindow({ processId: 100 })).toBe(false);
+  });
+
+  it('...and the working window: background mode frames the agent\'s window though it never touched the one in front (macOS run 2026-11-18)', async () => {
+    const d = desktop();
+    expect(workingWindow()).toBeUndefined();
+    await d.invokeElement({ name: 'OK', processId: 300 });   // EDGE (100) stays in front throughout
+    expect(workingWindow()?.processId).toBe(300);
+  });
+
+  it('a page act over CDP: the browser becomes the working window, and the pill and outline hear it once it is known', async () => {
+    const told: (number | undefined)[] = [];
+    setOnAgentInput(() => told.push(workingWindow()?.processId));
+    try {
+      const cdp = guardInputMethods({ async click(_selector: string) { return true; } }, async () => 400);
+      await cdp.click('#send');
+      expect(workingWindow()?.processId).toBe(400);
+      expect(told.at(-1)).toBe(400);   // told again after the act, not only before it, when the browser was not known yet
+    } finally { setOnAgentInput(null); }
   });
 });
 

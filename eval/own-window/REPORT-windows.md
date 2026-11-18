@@ -36,6 +36,7 @@ accessibility invoke     image=False  route=CDP page act, focus not moved
 
 ### 3. Two-mode indicator (owner's design)
 - **Background work → outline** around the agent's own window(s) only (`scripts/window-outline.ps1`). Multi-window `TARGET` line now emitted on every OS.
+  **Correction (2026-11-18):** in pure background mode, as in this run (the agent never touched the window in front), the outline was never told which window to frame, so no frame was drawn. The Mac run found this; it is fixed after `60a0c497` (see REPORT-macos.md §6.1) and still needs a live re-check on Windows too.
 - **Foreground input / R2 burst → full-screen amber edge glow** (`scripts/edge-glow.ps1`), for the burst + a 1.5 s tail, then back to the outline.
 - **Pill** (`scripts/banner.ps1`) with Stop: always on top, draggable by its body, amber flash on appear, burst count shown, "Paused — your turn" while a burst is paused. Verified on-screen by pixel capture (the pill/glow are capture-excluded, so a 0x11→0x0 temp copy was grabbed).
 

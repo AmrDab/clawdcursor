@@ -434,6 +434,8 @@ function writeResults(status) {
 timer = setTimeout(() => { fatal = fatal ?? `hard timeout ${HARD_TIMEOUT_MS / 1000} s`; abort(); }, HARD_TIMEOUT_MS);
 let abort;
 const aborted = new Promise((_, rej) => { abort = () => rej(new Error(fatal)); });
+// Ctrl+C / a kill goes through cleanup() too (Node's default would exit at once and leave the temp Edge running).
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { fatal = fatal ?? `interrupted (${sig})`; abort(); });
 
 try {
   await Promise.race([run(), aborted]);

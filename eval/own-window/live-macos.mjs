@@ -119,8 +119,13 @@ async function run() {
   log(`cursor moved samples: ${row.cursorMovedSamples} (max ${row.cursorMaxDistPx} px; agent A's own moves count)`);
 }
 
-const timer = setTimeout(() => { console.error('hard timeout'); process.exitCode = 1; for (const c of cleanups.reverse()) { try { c(); } catch { /* closing */ } } process.exit(1); }, HARD_TIMEOUT_MS);
-try { await run(); } catch (e) { fatal = e instanceof Error ? e.message : String(e); }
+// Every exit (done, error, hard timeout, SIGINT / SIGTERM) goes through the one `finally` below: Chrome's stop() is async,
+// so it must be awaited there, never followed by an immediate process.exit.
+let abort;
+const aborted = new Promise((_, rej) => { abort = () => rej(new Error(fatal)); });
+const timer = setTimeout(() => { fatal = fatal ?? `hard timeout ${HARD_TIMEOUT_MS / 1000} s`; abort(); }, HARD_TIMEOUT_MS);
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { fatal = fatal ?? `interrupted (${sig})`; abort(); });
+try { await Promise.race([run(), aborted]); } catch (e) { fatal = fatal ?? (e instanceof Error ? e.message : String(e)); }
 finally {
   clearTimeout(timer);
   for (const c of cleanups.reverse()) { try { await c(); } catch { /* closing */ } }

@@ -153,6 +153,16 @@ calls tools over HTTP (`POST /call`, header `X-Bridge-Token` = contents of `brid
 `ClawdReset`) and to Chrome's page (`browser connect`, then field `Your name`, button `Send`). When B starts, write the time to the start file: `node -e "require('fs').writeFileSync('/tmp/cc-ext/start', String(Date.now()))"`;
 when both are finished, `POST /done` to the bridge and `touch /tmp/cc-ext/done`. The script then prints the focus steals (an agent window frontmost), cursor moves (agent A's own
 moves count), the agent effects and the text agent A typed, and writes `results/live-macos-<time>.jsonl` (meta, the step, all samples).
+Every exit (done, an error, the 480 s hard timeout, Ctrl+C / SIGTERM) runs the same cleanup: ClawdTarget, the user TextEdit and the temp Chrome (by its pid) are
+closed and the temp home with Chrome's profile is deleted.
+
+The bridge (both OSes; `live-windows.mjs --external` writes the same `setup.json` with `edge` for `chrome`) keeps agent B in the test's scope, always:
+only `accessibility` calls whose `processId` is `target.pid` or the browser's pid (`chrome.pid` / `edge.pid`; never `user.pid`; a call without `processId`
+and `focused`, which ignores it, are refused) and `browser` calls (the test's own CDP browser). Anything else (`window`, `system`, `computer` including
+screenshots, `batch`, ...) is answered HTTP 403 `out of scope for this test: <tool> <action> (...)` without reaching the server. Each call is one line in
+`<dir>/calls.jsonl`: `t`, `tool`, `action`, `image` (the result carried a screenshot), `route`, `error`, plus `blocked: true` for a refused call.
+`route` is the route note in the reply, `(R1 ...)` or `(CDP page act ...)`; `null` means the reply had no route note (an R0 act by name, or a `browser`
+call), not a failure.
 
 ### Send back
 
