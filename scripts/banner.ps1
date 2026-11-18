@@ -268,7 +268,7 @@ public class Orb : Control {
         double t = state == "paused" ? frozen : Now();
         count = 0;
         if (state == "listening") Wave(t); else Orbit(t);
-        Paint();
+        PaintDots();
     }
     // "working" (orbits.ts).
     void Orbit(double t) {
@@ -298,7 +298,7 @@ public class Orb : Control {
     // The dots, far to near, over the pill's colour: each pixel by how much of it the dot covers (drawn here, on
     // 400 pixels, and put on screen in one piece - forty anti-aliased GDI+ ellipses a frame cost far more). The tint is the
     // state's: amber at work, the pill's grey when paused, the pause's blue when it waits for the user.
-    void Paint() {
+    void PaintDots() {
         int R0 = 245, G0 = 158, B0 = 11;
         if (state == "paused") { R0 = 140; G0 = 146; B0 = 158; } else if (state == "listening") { R0 = 59; G0 = 130; B0 = 246; }
         int back = BackColor.ToArgb();
