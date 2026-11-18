@@ -157,9 +157,14 @@ Every exit (done, an error, the 480 s hard timeout, Ctrl+C / SIGTERM) runs the s
 closed and the temp home with Chrome's profile is deleted.
 
 The bridge (both OSes; `live-windows.mjs --external` writes the same `setup.json` with `edge` for `chrome`) keeps agent B in the test's scope, always:
-only `accessibility` calls whose `processId` is `target.pid` or the browser's pid (`chrome.pid` / `edge.pid`; never `user.pid`; a call without `processId`
-and `focused`, which ignores it, are refused) and `browser` calls (the test's own CDP browser). Anything else (`window`, `system`, `computer` including
-screenshots, `batch`, ...) is answered HTTP 403 `out of scope for this test: <tool> <action> (...)` without reaching the server. Each call is one line in
+allowlists of actions (`bridge-scope.mjs`), so anything not named is refused. `accessibility`: `read_tree`, `find`, `get_element`, `get_value`, `state`,
+`list_children`, `compile_ui` (only with `max_cost:"cheap"`: its OCR would read the user's window when the agent's is covered), `invoke`, `set_value`, each
+with a `processId` that is `target.pid` or the browser's pid (`chrome.pid` / `edge.pid`; never `user.pid`). Refused there: `focused`, `find_button` /
+`find_field` (they read the window in front whatever `processId` says), `focus`, `smart_*`. `browser`: `connect` (no host, URL or launch; a `port` only the
+test browser's), `page_context`, `read_text`, `click`, `type`, `select_option`, `wait_for`, `scroll`; no `navigate`, `evaluate` or tabs. `system`:
+`pause_for_user` only (the indicator's blue-glow state; it reads nothing). Anything else
+(`window`, `system`, `computer` including screenshots, `batch`, ...) is answered HTTP 403 `out of scope for this test: <tool> <action> (...)` without
+reaching the server. Each call is one line in
 `<dir>/calls.jsonl`: `t`, `tool`, `action`, `image` (the result carried a screenshot), `route`, `error`, plus `blocked: true` for a refused call.
 `route` is the route note in the reply, `(R1 ...)` or `(CDP page act ...)`; `null` means the reply had no route note (an R0 act by name, or a `browser`
 call), not a failure.

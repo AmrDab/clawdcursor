@@ -2,7 +2,7 @@
 // POST /call {"name":"accessibility","arguments":{...}} -> the tool result text.  GET /tools -> names + descriptions.
 // POST /done ends it. Every request sends header X-Bridge-Token: the contents of <dir>/bridge-ready.
 import fs from 'fs'; import path from 'path'; import http from 'http'; import crypto from 'crypto'; import { fileURLToPath, pathToFileURL } from 'url';
-import { allowedPids, outOfScope } from './bridge-scope.mjs';
+import { allowedPids, allowedPorts, outOfScope } from './bridge-scope.mjs';
 const dir = process.argv[2];
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const sdk = f => import(pathToFileURL(path.join(root, 'node_modules/@modelcontextprotocol/sdk/dist/esm', f)).href);
@@ -10,7 +10,7 @@ const { Client } = await sdk('client/index.js');
 const { StdioClientTransport } = await sdk('client/stdio.js');
 const s = JSON.parse(fs.readFileSync(path.join(dir, 'setup.json'), 'utf8'));
 // Scope, always on: agent B may call only accessibility addressed to this run's own pids, and browser (bridge-scope.mjs).
-const pids = allowedPids(s);
+const pids = allowedPids(s), ports = allowedPorts(s);
 const t = new StdioClientTransport({ command: process.execPath, args: [s.cli, 'mcp', '--compact'], env: { ...process.env, ...s.env }, cwd: s.env.HOME, stderr: 'pipe' });
 t.stderr?.on('data', () => {});
 const c = new Client({ name: 'agent-b', version: '1' }); await c.connect(t);
@@ -30,7 +30,7 @@ http.createServer(async (req, res) => {
     if (req.url === '/done') { fs.writeFileSync(path.join(dir, 'done'), '0'); res.end('ok'); setTimeout(async () => { await c.close().catch(() => {}); process.exit(0); }, 300); return; }
     if (req.url !== '/call') { res.statusCode = 404; res.end('not found'); return; }
     const { name, arguments: a } = JSON.parse(body);
-    const refused = outOfScope(name, a, pids);
+    const refused = outOfScope(name, a, pids, ports);
     if (refused) {   // never reaches the server; still one line in calls.jsonl
       fs.appendFileSync(path.join(dir, 'calls.jsonl'), JSON.stringify({ t: Date.now(), tool: name, action: a?.action ?? null, image: false, route: null, error: true, blocked: true }) + '\n');
       res.statusCode = 403; res.end(refused); return;

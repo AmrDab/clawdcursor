@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
-import { controlBanner, outlineFlags, glowFlags } from '../core/banner';
+import { controlBanner, outlineFlags, glowFlags, glowColorFlags } from '../core/banner';
 import { stopControl, __setControlDirForTests, __setForegroundReaderForTests } from '../core/control';
 import { guardInputMethods, setOwnUiPids } from '../platform/pointer-guard';
 import { withForegroundBurst } from '../platform/foreground-burst';
@@ -209,7 +209,8 @@ describe('the outline around the window the agent works in', () => {
     expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET']);
   });
 
-  it('the paused outline is spawned paused and blue on every OS; the running one with no flags (#392)', () => {
+  it('where no glow can be drawn (Linux) the pause is the blue outline; the running outline has no flags (#392)', () => {
+    controlBanner.__setGlowSpawnerForTests(() => { throw new Error('no glow drawer here'); });   // Linux: the pause is an outline
     const modes: unknown[] = [];
     controlBanner.__setOutlineSpawnerForTests(mode => { modes.push(mode); const c = new FakeChild(); outlines.push(c); return c as unknown as ChildProcess; });
     controlBanner.pin();
@@ -227,7 +228,8 @@ describe('the outline around the window the agent works in', () => {
     expect(outlines[0].written).toEqual(['TARGET 0 100']);
   });
 
-  it('a new outline process (the paused form) starts on the window the agent was working in', () => {
+  it('a new outline process (the paused form, Linux) starts on the window the agent was working in', () => {
+    controlBanner.__setGlowSpawnerForTests(() => { throw new Error('no glow drawer here'); });   // Linux: the pause is an outline
     controlBanner.pin();
     controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
     controlBanner.showPaused({ id: 1, message: 'Sign in', since: 0 }, () => {});
@@ -235,7 +237,8 @@ describe('the outline around the window the agent works in', () => {
     expect(live()[0].written).toEqual(['TARGET 1440 100']);
   });
 
-  it('a pause after the idle hide goes round the window the card names, not nothing', async () => {
+  it('a pause after the idle hide goes round the window the card names, not nothing (Linux)', async () => {
+    controlBanner.__setGlowSpawnerForTests(() => { throw new Error('no glow drawer here'); });   // Linux: the pause is an outline
     // The idle hide forgets the outline's window; the card still names the app the agent last worked in (control.ts).
     __setForegroundReaderForTests(async () => ({ processId: 100, processName: 'msedge', title: 'Inbox - Edge', handle: 0x5a0 }));
     try {
@@ -421,16 +424,35 @@ describe('the indicator has two modes', () => {
     expect(states(glows[0])).toEqual(['ON', 'OFF', 'ON', 'OFF']);
   });
 
-  it('the glow rides the pill: killed with it, never spawned in the paused form, spawned again after it', () => {
+  // Three states (owner, 2026-11-18): background work = the outline; foreground input = the amber glow; the user's turn
+  // (pause_for_user: sign-in, CAPTCHA, any step) = the full-screen BLUE glow and never an outline, as in v1.5.
+  it('a pause shows the full-screen blue glow, up at once, and no outline; Resume goes back to the outline and the hidden amber glow', () => {
+    const modes: unknown[] = [];
+    controlBanner.__setGlowSpawnerForTests(mode => { modes.push(mode); const c = new FakeChild(); glows.push(c); return c as unknown as ChildProcess; });
+    const liveOutlines = () => outlines.filter(o => !o.killed);
     controlBanner.pin();
+    controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
     controlBanner.showPaused({ id: 1, message: 'Sign in', since: 0 }, () => {});
-    expect(glows[0].killed).toBe(true);
-    expect(glows).toHaveLength(1);   // no glow while paused
+    expect(glows[0].killed).toBe(true);                                      // the running glow went with the running form
+    expect(modes[1]).toEqual({ paused: expect.objectContaining({ id: 1 }) });  // spawned paused: blue
+    expect(states(glows[1])).toEqual(['ON']);                                // up for the whole pause
+    expect(liveOutlines()).toEqual([]);                                      // and no outline
+    controlBanner.foreground();
+    controlBanner.burstEvent('pause');
+    vi.advanceTimersByTime(10 * TAIL);
+    expect(states(glows[1])).toEqual(['ON']);                                // nothing amber turns the blue glow off
     controlBanner.showRunning();
-    expect(glows).toHaveLength(2);
-    controlBanner.unpin();
     expect(glows[1].killed).toBe(true);
+    expect(modes[2]).toEqual({ paused: undefined });                         // amber again...
+    expect(states(glows[2])).toEqual([]);                                    // ...hidden until foreground input
+    expect(liveOutlines()[0].written).toEqual(['TARGET 1440 100']);          // the outline is back on the agent's window
+    controlBanner.unpin();
+    expect(glows[2].killed).toBe(true);
     expect(glowFlags(7)).toEqual(['-PillPid', '7']);
+    expect(glowColorFlags(false, 'win32')).toEqual([]);
+    expect(glowColorFlags(false, 'darwin')).toEqual([]);
+    expect(glowColorFlags(true, 'win32')).toEqual(['-Color', '#3b82f6']);
+    expect(glowColorFlags(true, 'darwin')).toEqual(['--color', '#3b82f6']);
   });
 });
 

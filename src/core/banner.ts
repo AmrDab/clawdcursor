@@ -234,9 +234,15 @@ export function outlineFlags(paused: boolean, platform: NodeJS.Platform): string
   return platform === 'win32' ? ['-Color', PAUSED_OUTLINE, '-Paused'] : ['--color', PAUSED_OUTLINE, '--paused'];
 }
 
-/** The glow drawer's flags on Windows: the pill's pid, so the glow stays under it (it never shows while paused). */
+/** The glow drawer's flags on Windows: the pill's pid, so the glow stays under it (and under the paused card). */
 export function glowFlags(pillPid?: number): string[] {
   return pillPid ? ['-PillPid', String(pillPid)] : [];
+}
+
+/** The glow's colour: blue at a pause, the user's turn (owner, 2026-11-18; v1.5's paused glow); else the drawer's amber. */
+export function glowColorFlags(paused: boolean, platform: NodeJS.Platform): string[] {
+  if (!paused) return [];
+  return platform === 'win32' ? ['-Color', PAUSED_OUTLINE] : ['--color', PAUSED_OUTLINE];
 }
 
 class ControlBanner {
@@ -300,12 +306,13 @@ class ControlBanner {
       psOpts({ stdio, windowsHide: true }));
   };
 
-  private glowSpawner: Spawner = () => {
+  private glowSpawner: Spawner = (mode) => {
     const stdio: ['pipe', 'pipe', 'ignore'] = ['pipe', 'pipe', 'ignore']; // stdin: ON / OFF / HIDE, and its EOF ends the glow
-    if (process.platform === 'darwin') return spawn(macOverlayBinary.cached(macScript())!, ['glow'], { stdio });
+    const color = glowColorFlags(!!mode.paused, process.platform);
+    if (process.platform === 'darwin') return spawn(macOverlayBinary.cached(macScript())!, ['glow', ...color], { stdio });
     if (process.platform !== 'win32') throw new Error('the full-screen glow is Windows and macOS only');
     const script = path.join(getPackageRoot(), 'scripts', 'edge-glow.ps1');
-    return spawn(powershellExe(), psArgs(script, glowFlags(this.child?.pid)),
+    return spawn(powershellExe(), psArgs(script, [...glowFlags(this.child?.pid), ...color]),
       psOpts({ stdio, windowsHide: true }));
   };
 
@@ -359,6 +366,7 @@ class ControlBanner {
    */
   foreground(burst?: boolean): void {
     if (burst !== undefined) this.bursts = Math.max(0, this.bursts + (burst ? 1 : -1));
+    if (this.paused) return;   // the blue paused glow is up, and stays up until Resume / End task
     if (this.glowTail) clearTimeout(this.glowTail);
     this.glowTail = null;
     send(this.glowChild, 'ON');
@@ -380,7 +388,7 @@ class ControlBanner {
       this.burstPaused = true;
       if (this.glowTail) clearTimeout(this.glowTail);
       this.glowTail = null;
-      send(this.glowChild, 'OFF');
+      if (!this.paused) send(this.glowChild, 'OFF');
       this.activityBeforePause = this.activity;
       this.activity = PAUSED_LABEL;
       if (!this.paused) send(this.child, `ACTIVITY ${PAUSED_LABEL}`);
@@ -467,7 +475,7 @@ class ControlBanner {
     this.onAnswer = onAnswer;
     this.onRefocus = onRefocus;
     // After an idle hide the outline has forgotten the window, but the card still names the app the agent worked in
-    // (control.ts): the blue outline goes round that same window.
+    // (control.ts): where the paused form is an outline (Linux, no glow drawer), the blue one goes round that same window.
     if (!this.working) this.working = workingWindow();
     this.clearIdleTimer();
     this.killChildren();
@@ -550,8 +558,16 @@ class ControlBanner {
     }
     this.installExitHook();
     this.spawnPill();
+    if (this.paused) {
+      // The user's turn (owner, 2026-11-18): the full-screen blue glow, never an outline. A frame round a window says "the
+      // agent works in there, carry on": the wrong message when it needs the user (a sign-in page framed invites them to
+      // take that window over). The outline stays only where no glow can be drawn (Linux).
+      this.spawnGlow();
+      if (!this.glowChild) this.spawnOutline();
+      return;
+    }
     this.spawnOutline();
-    if (!this.paused) this.spawnGlow();
+    this.spawnGlow();
   }
 
   /** The "control in progress" pill — also the BANNER_STOP / kill-switch source. */
@@ -641,12 +657,12 @@ class ControlBanner {
     if (this.working) this.setWorkingWindow(this.working);
   }
 
-  /** The full-screen glow — pure visual, click-through, starts hidden; `foreground()` raises it. Never in the paused form. */
+  /** The full-screen glow — pure visual, click-through. Running: amber, hidden until `foreground()` raises it. Paused: blue, up. */
   private spawnGlow(): void {
     if (this.glowChild) return;
     let child: ChildProcess;
     try {
-      child = this.glowSpawner({});
+      child = this.glowSpawner({ paused: this.paused ?? undefined });
     } catch {
       return; // cosmetic — never let it break control
     }
@@ -656,7 +672,7 @@ class ControlBanner {
     child.stdout?.on?.('data', d => { if (String(d).includes('GLOW_CAPTURABLE')) this.capturable = true; });
     child.on('error', () => { if (this.glowChild === child) { this.glowChild = null; this.publish(); } });
     child.on('exit', () => { if (this.glowChild === child) { this.glowChild = null; this.publish(); } });
-    if (this.bursts > 0 || this.glowTail) send(child, 'ON'); // respawned mid-foreground
+    if (this.paused || this.bursts > 0 || this.glowTail) send(child, 'ON'); // paused, or respawned mid-foreground
   }
 
   // Neither overlay may outlive its owner — an orphaned "control in progress"

@@ -50,7 +50,7 @@ describe('macOS overlay: pill, outline, glow', () => {
   });
 
   it('banner.ts spawns the glow, and sends the ghost and the multi-target line, on darwin too', () => {
-    expect(banner).toMatch(/platform === 'darwin'\) return spawn\(macOverlayBinary\.cached\(macScript\(\)\)!, \['glow'\]/);
+    expect(banner).toMatch(/platform === 'darwin'\) return spawn\(macOverlayBinary\.cached\(macScript\(\)\)!, \['glow', \.\.\.color\]/);   // blue at a pause
     expect(banner).toMatch(/const others = w\s*\n\s*\? agentWindows\(\)/);   // the multi-window line is cross-platform now
     expect(banner).toContain("if (process.platform === 'win32' || process.platform === 'darwin') send(this.outlineChild, `GHOST");
   });
