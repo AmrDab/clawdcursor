@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { claudeEvents, codexEvents, paint, renderEvent, shortResult, verdictOf, type TraceEvent } from '../src/trace';
+import { addUsage, claudeEvents, codexEvents, openaiUsage, paint, renderEvent, shortResult, usageLine, verdictOf, type TraceEvent } from '../src/trace';
 import { withoutImages } from '../src/runlog';
 
 /** Lines recorded from a real `clawdcursor task` run (the system_time test), trimmed to the fields that matter. */
@@ -37,7 +37,7 @@ describe('Codex --json -> trace', () => {
   const events = lines('codex-stream.jsonl').flatMap(codexEvents);
 
   it('reads the messages and the call once with its result', () => {
-    expect(events.map(e => e.kind)).toEqual(['text', 'call', 'result', 'text']);
+    expect(events.map(e => e.kind)).toEqual(['text', 'call', 'result', 'text', 'usage']);
     expect(events[1]).toEqual({ kind: 'call', id: 'item_1', tool: 'system', action: 'system_time', args: '' });
     expect(events[2]).toMatchObject({ kind: 'result', id: 'item_1', ok: true });
     expect(verdictOf((events[3] as Extract<TraceEvent, { kind: 'text' }>).text)).toBe('PASS');
@@ -79,5 +79,38 @@ describe('the run log', () => {
     const data = 'A'.repeat(4000);
     expect(withoutImages({ content: [{ type: 'text', text: 'x' }, { type: 'image', data, mimeType: 'image/png' }, { type: 'image', source: { type: 'base64', data } }] }))
       .toEqual({ content: [{ type: 'text', text: 'x' }, { type: 'image', bytes: 3000 }, { type: 'image', bytes: 3000 }] });
+  });
+});
+
+describe('usage', () => {
+  it('Claude Code: the result line (real shape) gives tokens and the cost, then the final message', () => {
+    const evs = lines('claude-result-usage.jsonl').flatMap(claudeEvents);
+    expect(evs.map(e => e.kind)).toEqual(['usage', 'final']);
+    expect(evs[0]).toEqual({ kind: 'usage', in: 146, out: 24343, cacheRead: 5123771, cacheWrite: 140823, usd: 1.1081566 });
+  });
+
+  it('Claude Code: a result line without usage gives none', () => {
+    expect(claudeEvents(JSON.stringify({ type: 'result', subtype: 'success', result: 'x' })).map(e => e.kind)).toEqual(['final']);
+  });
+
+  it('Codex: turn.completed gives the uncached input, the output and the cache read', () => {
+    const usage = lines('codex-stream.jsonl').flatMap(codexEvents).find(e => e.kind === 'usage');
+    expect(usage).toEqual({ kind: 'usage', in: 41818 - 36608, out: 199, cacheRead: 36608 });
+    expect(codexEvents(JSON.stringify({ type: 'turn.completed' }))).toEqual([]);
+  });
+
+  it('an OpenAI-compatible usage object: cached tokens come out of the input', () => {
+    expect(openaiUsage({ prompt_tokens: 1000, completion_tokens: 50, prompt_tokens_details: { cached_tokens: 400 } }))
+      .toEqual({ kind: 'usage', in: 600, out: 50, cacheRead: 400 });
+    expect(openaiUsage({ prompt_tokens: 10, completion_tokens: 2 })).toEqual({ kind: 'usage', in: 10, out: 2 });
+    expect(openaiUsage(undefined)).toBeNull();
+  });
+
+  it('sums events, and prints the dollar only when a runner gave one', () => {
+    let t = addUsage(null, { in: 10, out: 5, cacheRead: 100 });
+    t = addUsage(t, { in: 20, out: 7, cacheRead: 200, cacheWrite: 3 });
+    expect(t).toEqual({ in: 30, out: 12, cacheRead: 300, cacheWrite: 3 });
+    expect(usageLine(t)).toBe('tokens: 30 in · 12 out · 300 cached');
+    expect(usageLine({ in: 146, out: 24343, cacheRead: 5123771, usd: 1.1081566 })).toBe('tokens: 146 in · 24,343 out · 5,123,771 cached · $1.11');
   });
 });

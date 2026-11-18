@@ -14,6 +14,10 @@ All notable changes to Clawd Cursor will be documented in this file.
   screenshot), as `smart_click` does, instead of failing; it says so in the result. The same when every element it
   matched only contains the name ("New to NX?" for "New"). Not with `within`. An ambiguous invoke's next step names the
   element (controlType, within) instead of a coordinate click.
+- **`clawdcursor task` reports tokens (and cost when the runner gives it).** A run ends with one more line, for example
+  `tokens: 146 in · 24,343 out · 5,123,771 cached · $1.11`, and the same numbers are in the run log's `end` record and
+  at the top of `clawdcursor logs --run`. Claude Code reports tokens and a cost; Codex and the API runners report
+  tokens only (the cost is left out, not guessed). A run that reported nothing prints no line.
 - **A host app can draw the pill itself.** With `CLAWD_PILL_CMD` (a JSON array: the command and its arguments),
   clawdcursor starts that command in place of its own pill, with the same arguments, environment and stdin/stdout lines;
   if it cannot start, the built-in pill is used. `CLAWD_OWN_UI_PIDS` (comma-separated pids) names the host's processes
@@ -65,6 +69,10 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **The skill says what to do when a task is beyond the agent:** hand it to a stronger model from the same provider
   (a Sonnet or Opus subagent) or raise the reasoning effort, instead of giving up or asking the user; a sign-in or
   a step only the user can take is still `pause_for_user`. Easy desktop work can run on a cheaper subagent.
+- **The API runner caches its prompt and defaults to Claude Haiku 5.5.** `--with anthropic` marks its system prompt, tool
+  list and newest message for the API's prompt cache, so a long run re-reads its first turns at a fraction of the
+  input price. Without `--model` (or a model set by `doctor --setup`) it now starts on the cheapest model,
+  `claude-haiku-5-5`, instead of `claude-opus-5-5`.
 - **The HTTP daemon answers only to `Host: 127.0.0.1:<port>` or `localhost:<port>`**; any other Host header gets 403.
   A page whose DNS name was rebound to 127.0.0.1 could load the dashboard and read the pause message. An SSH tunnel to
   the daemon must use the daemon's own port on the local end (`ssh -L 3847:127.0.0.1:3847 ...`).
