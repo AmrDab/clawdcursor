@@ -16,12 +16,14 @@ import { ocrEngine } from '../platform/ocr-engine';
 import { screenLockedMessage } from '../platform/mac-ax';
 import { getBrowserProcessNames } from '../platform/browser-config';
 import { ocrPointToClickPoint, windowOcrRegion } from '../platform/coord-scale';
-import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys, EMPTY_AFTER_TYPING, selectAllScope } from './paste-guard';
+import { pasteChoice, CLIPBOARD_HELD_REFUSAL, waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys, EMPTY_AFTER_TYPING, selectAllScope } from './paste-guard';
 import { wrapUntrustedScreenContent, screenJson, quoteScreenText } from '../core/untrusted-screen-content';
 import { ensureVisible } from '../core/sense/ui-map-visible';
 import { locateFieldByLabel } from '../core/sense/ui-map-field';
 import { unguarded } from '../platform/pointer-guard';
 import { isGuardRefusal } from '../core/control';
+import { foreignWindowRefusal } from './click-owner';
+import { wakeForNameSearch } from './name-search-help';
 import { untrusted, missText, structuredMissFields, targetOf, targetText } from '../core/miss-text';
 
 
@@ -40,6 +42,21 @@ const KEY_NAME_ALIASES: Record<string, string[]> = {
   '=': ['Equals'], '.': ['Decimal separator', 'Decimal'], ',': ['Decimal separator', 'Decimal'],
   '%': ['Percent'],
 };
+
+/**
+ * The page's name when the focus is on a web page itself, not in the field `target` names; null otherwise. A page named
+ * like the target is what was asked for, and one with no name is not judged. macOS reports a web page (AXWebArea) as
+ * "Document" (mac-ax.ts) and a text view as "Edit", so there a Document is a page (Mac, 2026-11-17: Chrome's page read as
+ * "Document", and the text still went to it). Elsewhere a Document is also a text editor's (Notepad, Word), where typed
+ * text goes: only a WebArea is judged. `platform`: the adapter's; none, none judged by that rule.
+ */
+export function focusStayedOnPage(el: { name?: string; controlType?: string } | null | undefined, target: string, platform?: string): string | null {
+  const role = String(el?.controlType ?? '').replace(/^AX/, '').toLowerCase();
+  if (!el || !(role === 'webarea' || (platform === 'darwin' && role === 'document'))) return null;
+  const lc = (s: string | undefined) => (s ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const n = lc(el.name), t = lc(target);
+  return n === '' || n.includes(t) || t.includes(n) ? null : el.name!;
+}
 
 /** Control types that take typed text, across UIA / AX / AT-SPI names. */
 const EDITABLE_TYPE = /edit|entry|textfield|textarea|text field|text area|combo|password|document/i;
@@ -290,9 +307,9 @@ export function getSmartTools(): ToolDefinition[] {
         // The window an OCR match must fall in: the caller's process when one is
         // named (live macOS: processId=Calculator, yet the menu-bar clock was
         // clicked), else the focused window.
-        let scopeWin: { bounds?: { x: number; y: number; width: number; height: number } } | null = activeWin;
+        let scopeWin: { title?: string; processName?: string; bounds?: { x: number; y: number; width: number; height: number } } | null = activeWin;
         if (processId && activeWin?.processId !== processId) {
-          const wins: Array<{ processId: number; isMinimized?: boolean; bounds: { x: number; y: number; width: number; height: number } }> =
+          const wins: Array<{ processId: number; title?: string; processName?: string; isMinimized?: boolean; bounds: { x: number; y: number; width: number; height: number } }> =
             await Promise.resolve(ctx.a11y.getWindows?.(true)).catch(() => []) ?? [];
           scopeWin = wins
             .filter(w => w.processId === processId && !w.isMinimized && w.bounds?.width > 0 && w.bounds?.height > 0)
@@ -300,6 +317,15 @@ export function getSmartTools(): ToolDefinition[] {
         }
         // Set when OCR matched only outside the caller's window and was refused.
         let ocrRefused = false;
+        // A click point in another app's window (a system dialog on top of the target) is refused, not clicked.
+        const clickTargetPid = processId || activeWin?.processId;
+        // The focused window when it is the target, else the caller's window found above.
+        const targetWin = activeWin && activeWin.processId === clickTargetPid ? activeWin : processId ? scopeWin : null;
+        const clickTargetName = targetWin
+          ? (targetWin.title ? `${quoteScreenText(targetWin.title)} (${targetWin.processName || 'process ' + clickTargetPid})` : targetWin.processName)
+          : undefined;
+        const foreignRefusal = (x: number, y: number, label: string) =>
+          foreignWindowRefusal(ctx.platform, x, y, clickTargetPid, label, clickTargetName);
 
         // ── Step 1: OCR + a11y in parallel ──
         // OCR finds text coordinates, a11y tries invoke — a successful invoke wins over an OCR match.
@@ -527,6 +553,7 @@ export function getSmartTools(): ToolDefinition[] {
         const a11yPromise: Promise<A11yHit | null> = (async (): Promise<A11yHit | null> => {
           if (emptyA11y) return null;
           try {
+            await wakeForNameSearch({ getActiveWindow: async () => activeWin }, processId);
             const aliases = KEY_NAME_ALIASES[target.trim().toLowerCase()] ?? [];
             // The Windows bridge THROWS on "not found" (others return a miss):
             // with key-name aliases to try, treat that as a miss, not the end.
@@ -650,6 +677,8 @@ export function getSmartTools(): ToolDefinition[] {
           const { x: cx, y: cy } = ocrPointToClickPoint(
             m.x, m.y, ctx.desktop.getDpiRatio?.() || 1, process.platform,
           );
+          const ocrForeign = await foreignRefusal(cx, cy, m.text);
+          if (ocrForeign) return { text: ocrForeign, isError: true };
           try {
             await ctx.desktop.mouseClick(cx, cy);
           } catch (err: any) {
@@ -705,6 +734,8 @@ export function getSmartTools(): ToolDefinition[] {
               confidence: null,
             });
           }
+          const boundsForeign = await foreignRefusal(a.clickPoint.x, a.clickPoint.y, a.text ?? target);
+          if (boundsForeign) return { text: boundsForeign, isError: true };
           try {
             await ctx.desktop.mouseClick(a.clickPoint.x, a.clickPoint.y);
           } catch (err: any) {
@@ -906,6 +937,19 @@ export function getSmartTools(): ToolDefinition[] {
           if (!focused) {
             return { text: `Could not find element "${target}" to focus before typing${whyNot ? ` — ${whyNot}` : ''}`, isError: true };
           }
+
+          // Mac bench 2026-11-17: "Answer", scrolled out of view at the end of a long page, took the focus by name, yet the
+          // page kept it: the text went to the page, and the reply said it went into "Answer".
+          let page: string | null = null;
+          try { page = focusStayedOnPage(await ctx.a11y.getFocusedElement(), target, ctx.platform?.platform); } catch { /* unread: no evidence */ }
+          if (page !== null) {
+            return {
+              text: `smart_type "${target}": nothing was typed — the focus stayed on the page${page ? ` ${quoteScreenText(page)}` : ''}, not in that field: ` +
+                `the element exists but is not visible on screen, or did not take the focus. ` +
+                `accessibility {"action":"set_value","name":${JSON.stringify(target)},"value":"<text>"} sets it without the focus.`,
+              isError: true,
+            };
+          }
         }
 
         // Select-all only where it takes just the field's text: over a page it turned the page blue, and in TextEdit it wiped
@@ -924,7 +968,11 @@ export function getSmartTools(): ToolDefinition[] {
         ctx.desktop.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
         // Short text: real keystrokes, the user's clipboard never touched. Longer text is pasted (below).
         const privateTyping = ctx.platform?.typingIsPrivate?.() !== false;
-        const viaKeys = typesAsKeys(text) && privateTyping;
+        // A clipboard of an image or a file cannot be put back after a paste: type the text instead, or refuse.
+        const choice = typesAsKeys(text) && privateTyping ? 'keys'
+          : pasteChoice(text, { nonTextClipboard: await ctx.platform?.clipboardHoldsNonText?.().catch(() => false) ?? false, privateTyping });
+        if (choice === 'refuse') return { text: CLIPBOARD_HELD_REFUSAL, isError: true };
+        const viaKeys = choice === 'keys';
         // Remember the user's clipboard: what we type — a password, say — must not stay on it afterwards (#243), and a
         // refused paste must not leave it there either.
         let prior: string | null = null;
@@ -963,7 +1011,7 @@ export function getSmartTools(): ToolDefinition[] {
         // macOS: a modal dialog of another app may have had the keyboard — say where the text went.
         const warn = ctx.desktop.takeInputWarning?.();
         // The verdict sits inside the leading "(…)", before the target name and window title: content cannot pose as it.
-        const how = `${viaKeys ? 'keys' : 'paste'}${rb.result === 'match' ? ', read back ✓' : ''}`;
+        const how = `${viaKeys ? 'keys' : 'paste'}${!viaKeys && prior !== null ? ', clipboard restored' : ''}${rb.result === 'match' ? ', read back ✓' : ''}`;
         const fieldShows = rb.value !== undefined
           ? ` It shows: ${wrapUntrustedScreenContent(rb.value.length > 80 ? `${rb.value.slice(0, 79)}…` : rb.value)}` : '';
         // A field that can be read and is still empty may have got none of it (#377), or be a hidden input the app empties

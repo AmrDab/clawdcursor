@@ -772,6 +772,37 @@ function Cmd-ActivateAtPoint {
     }
 }
 
+# ── Command: window-at-point ──────────────────────────────────────────────────
+# Read-only twin of activate-at-point: who owns the window a user SEES at (x, y)
+# (physical virtual-desktop pixels), without raising anything. smart_click uses it
+# to refuse a click that would land in another app's window (a system dialog over
+# the target). A denylisted self/host window or no window answers processId 0 = unknown.
+function Cmd-WindowAtPoint {
+    param($cmd)
+    $hwnd = [ScreenPM]::WindowAt([int]$cmd.x, [int]$cmd.y)
+    if ($hwnd -eq [IntPtr]::Zero) { return @{ success=$true; processId=0 } }
+    $root = [Win32UIA]::GetAncestor($hwnd, 2)
+    if ($root -eq [IntPtr]::Zero) { $root = $hwnd }
+    $procId = 0
+    [void][Win32UIA]::GetWindowThreadProcessId($root, [ref]$procId)
+    $name = "unknown"; $title = ""
+    try { $name = [System.Diagnostics.Process]::GetProcessById($procId).ProcessName } catch {}
+    # A Store app's frame belongs to ApplicationFrameHost, one process for every Store app. Window lists keep that as
+    # the window's processId and name the app by its CoreWindow child (Get-HostedApp: hostedProcessId), so a caller may
+    # target either: report both, and the click check accepts a match on either.
+    $hosted = 0; $hostedName = ''
+    $cls = ''; try { $cls = [ScreenPM]::ClassOf($root) } catch {}
+    $app = Get-HostedApp $root $cls ([int]$procId)
+    if ($app) { $hosted = $app.processId; $hostedName = $app.processName }
+    try {
+        $el = [System.Windows.Automation.AutomationElement]::FromHandle($root)
+        if ($el) { $title = $el.Current.Name }
+    } catch {}
+    if (Test-ForegroundDenylisted $name $title) { return @{ success=$true; processId=0 } }
+    if ($hosted) { return @{ success=$true; processId=$procId; processName=$name; title=$title; hostedProcessId=$hosted; hostedProcessName=$hostedName } }
+    return @{ success=$true; processId=$procId; processName=$name; title=$title }
+}
+
 # -- Command: pid-at-point -----------------------------------------------------
 # The process of the top-level window a click at (x, y) would land on (physical virtual-desktop pixels; the pointer's
 # own position when no point is given). 0 when no window is there. Reads only: nothing is raised or moved. A host
@@ -2125,6 +2156,7 @@ while ($true) {
             "get-focused-element"   { Cmd-GetFocusedElement }
             "get-page-text"         { Cmd-GetPageText $cmd }
             "activate-at-point"     { Cmd-ActivateAtPoint $cmd }
+            "window-at-point"       { Cmd-WindowAtPoint $cmd }
             "pid-at-point"          { Cmd-PidAtPoint $cmd }
             "list-displays"         { Cmd-ListDisplays }
             "move-cursor"           { Cmd-MoveCursor $cmd }

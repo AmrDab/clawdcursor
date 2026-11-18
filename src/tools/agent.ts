@@ -25,7 +25,8 @@ export function getAgentTools(): ToolDefinition[] {
         'Hand the desktop to the user for a step only they can do (sign in, a password or 2FA code, a CAPTCHA, a choice only they can make, a step your own rules won\'t let you take such as creating an account, downloading a private key or entering a secret, a plan limit or upgrade wall — never click Upgrade / Subscribe yourself) instead of stopping, turning the task down or asking them to come back to this chat. ' +
         'Ask for that ONE step only — e.g. "Sign in to Glama" — and do everything before and after it yourself (navigating, filling forms, clicking through): keep the user on screen as briefly as possible. ' +
         'A step your rules forbid is handed over as wide as your rules draw it; do the rest they allow. When a secret must go into a field or a terminal prompt, put the cursor there and ask only for the paste ("Paste your app-specific password into the Terminal, press Enter, then click Resume"), naming where it goes: never into the prompt\'s own reply box, whose text reaches you; afterwards pass the saved key\'s file path or keychain profile name, never the secret. ' +
-        'For a sign-in, a code or a CAPTCHA, pass `done_when` (what shows once their step is done, e.g. [{"type":"element_exists","name":"Sign out"}]) so the prompt clears and you continue the moment they finish, with no Resume click; it must be false now. ' +
+        'For a sign-in, a code or a CAPTCHA, pass `done_when` (what shows once their step is done, e.g. [{"type":"element_exists","name":"Sign out"}]) so the prompt clears and you continue the moment they finish, with no Resume click; it must be false now, and must not be text the prompt itself shows (your message, Resume / End task). ' +
+        'Types and their fields: element_exists {name}, element_value_contains {name, value}, window_title_contains {value}, app_running {name}, file_exists {path}, ocr_contains {value}. ' +
         'Never use done_when for a confirmation or a choice: a page can make it true by itself, so only the user\'s click counts there. ' +
         'Shows an on-screen prompt: your message, Resume / End task. ' +
         'While you are driving the desktop, the user is watching the screen, not your chat: ask them on this prompt (use `choices` when there are options), not in your own chat. ' +
@@ -52,9 +53,9 @@ export function getAgentTools(): ToolDefinition[] {
         },
         done_when: {
           type: 'array',
-          description: 'Optional, for sign-in / code / CAPTCHA steps: conditions that become true once the user has done their step (same types as expect: element_exists, element_value_contains, window_title_contains — any open window —, app_running, file_exists, ocr_contains). Checked every 1.5 s (ocr_contains: 5 s); when all hold, the pause resumes by itself. Rejected if already true now. Set on the first call; a re-call keeps the first one.',
+          description: 'Optional, for sign-in / code / CAPTCHA steps: conditions that become true once the user has done their step. Each is {type, fields}: element_exists {name}; element_value_contains {name, value}; window_title_contains {value} (any open window); app_running {name}; file_exists {path}; ocr_contains {value}. Example: [{"type":"element_exists","name":"Sign out"}]. It must be false now (rejected if already true), and must not be text the prompt itself shows (your message, Resume / End task). Checked every 1.5 s (ocr_contains: 5 s); when all hold, the pause resumes by itself. Set on the first call; a re-call keeps the first one.',
           required: false,
-          items: { type: 'object', properties: { type: { type: 'string' } }, required: ['type'] },
+          items: { type: 'object', properties: { type: { type: 'string' }, name: { type: 'string' }, value: { type: 'string' }, path: { type: 'string' } }, required: ['type'] },
         },
         timeout: { type: 'number', description: 'Max seconds to wait for the answer before returning {status:"waiting"} (default 45, clamped 1–50). The prompt stays up.', required: false },
       },

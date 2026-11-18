@@ -124,6 +124,12 @@ function makeCtx(clicks: Array<{ x: number; y: number }>): AgentToolContext {
   };
 }
 
+async function withPlatform<T>(platform: NodeJS.Platform, run: () => Promise<T>): Promise<T> {
+  const real = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  Object.defineProperty(process, 'platform', { ...real, value: platform });
+  try { return await run(); } finally { Object.defineProperty(process, 'platform', real); }
+}
+
 describe('click tool coordinate space', () => {
   const click = buildUnifiedTools().find(t => t.name === 'click')!;
 
@@ -181,7 +187,7 @@ describe('click tool coordinate space', () => {
     (ctx.platform.getActiveWindow as any) = vi.fn(() => n++ === 0
       ? Promise.resolve({ title: 'Device Activation - Microsoft Edge', processName: 'msedge', processId: 1, handle: 10, bounds: { x: 0, y: 0, width: 1, height: 1 }, isMinimized: false })
       : Promise.resolve({ title: 'Claude', processName: 'claude', processId: 2, handle: 20, bounds: { x: 0, y: 0, width: 1, height: 1 }, isMinimized: false }));
-    const r = await click.execute({ x: 100, y: 100 }, ctx);
+    const r = await withPlatform('win32', () => click.execute({ x: 100, y: 100 }, ctx));
     expect(r.text).toMatch(/FOCUS NOT CONFIRMED/);
     expect(r.text).not.toMatch(/Windows foreground-lock/);   // the same words on every OS (#379)
   });
@@ -217,5 +223,47 @@ describe('click tool coordinate space', () => {
     });
     const r = await click.execute({ x: 100, y: 100 }, ctx);  // getActiveWindow returns 'Edge' both times
     expect(r.text).not.toMatch(/FOCUS NOT CONFIRMED/);
+  });
+});
+
+// The click activated the app it hit: another app in front is the click working, not focus theft.
+describe('click: another app in front after the click', () => {
+  const click = buildUnifiedTools().find(t => t.name === 'click')!;
+  const win = (processId: number, processName: string, title: string) => ({ title, processName, processId, bounds: { x: 0, y: 0, width: 1, height: 1 }, isMinimized: false });
+  function ctxWith(atPoint: unknown) {
+    const ctx = makeCtx([]);
+    let n = 0;
+    (ctx.platform.getActiveWindow as any) = vi.fn(() => Promise.resolve(n++ === 0 ? win(1, 'Notcho', 'Notcho') : win(2, 'Calculator', 'Calculator')));
+    if (atPoint !== undefined) (ctx.platform as any).windowAtPoint = vi.fn(async () => atPoint);
+    return ctx;
+  }
+
+  it('the front app owns the clicked point: no warning, on macOS and Windows', async () => {
+    for (const p of ['darwin', 'win32'] as const) {
+      const ctx = ctxWith({ processId: 2, processName: 'Calculator' });
+      const r = await withPlatform(p, () => click.execute({ x: 100, y: 100 }, ctx));
+      expect(r.text).not.toMatch(/FOCUS NOT CONFIRMED|another app is now in front/);
+      expect((ctx.platform as any).windowAtPoint).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('macOS, the point belongs to a third app (or is unknown): says who is in front, with no foreground-lock wording', async () => {
+    for (const at of [{ processId: 3, processName: 'Finder' }, undefined]) {
+      const r = await withPlatform('darwin', () => click.execute({ x: 100, y: 100 }, ctxWith(at)));
+      expect(r.text).toContain('another app is now in front: Calculator; check before typing');
+      expect(r.text).not.toMatch(/FOCUS NOT CONFIRMED|foreground-lock|OS kept another window/);
+    }
+  });
+
+  it('Windows keeps its wording when the front app does not own the point', async () => {
+    const r = await withPlatform('win32', () => click.execute({ x: 100, y: 100 }, ctxWith({ processId: 3 })));
+    expect(r.text).toMatch(/FOCUS NOT CONFIRMED/);
+  });
+
+  it('a failed activation is still reported even when the point is owned by the front app', async () => {
+    const ctx = ctxWith({ processId: 2 });
+    (ctx.platform.mouseClick as any) = vi.fn(async () => ({ activated: false, title: 'Calculator', processName: 'Calculator' }));
+    const r = await withPlatform('win32', () => click.execute({ x: 100, y: 100 }, ctx));
+    expect(r.text).toMatch(/FOCUS NOT CONFIRMED/);
   });
 });
