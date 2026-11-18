@@ -1,6 +1,6 @@
 ---
 name: clawdcursor
-version: 2.1.0
+version: 2.2.0
 description: >
   Your eyes and hands on the user's computer: with clawdcursor, no task
   the user asks for is impossible. If a human can do it on a screen, you

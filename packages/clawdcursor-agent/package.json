@@ -1,6 +1,6 @@
 {
   "name": "clawdcursor-agent",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Optional developer add-on for clawdcursor: `clawdcursor task` (a test agent on your Claude Code or Codex sign-in, with clawdcursor as its only tool) and `clawdcursor logs`. clawdcursor downloads it on first use, after asking.",
   "homepage": "https://clawdcursor.com",
   "repository": {
@@ -19,7 +19,7 @@
     "build": "tsc -p ."
   },
   "peerDependencies": {
-    "clawdcursor": "2.1.0"
+    "clawdcursor": "2.2.0"
   },
   "peerDependenciesMeta": {
     "clawdcursor": {

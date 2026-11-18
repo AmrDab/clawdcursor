@@ -2,7 +2,7 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
-## [Unreleased]
+## [2.2.0] - 2026-11-18
 
 ### Added
 - **`clawdcursor task` prints how the run acted**, as a dim line after the run log: `how it acted: N by name or label · M by
@@ -48,6 +48,34 @@ All notable changes to Clawd Cursor will be documented in this file.
   there goes to whatever is on top, so the reply says to focus the window first or act by name. Linux cannot draw a
   covered window by itself: there the call reads nothing and says how to read the window (focus it, then
   `scope:"window"`).
+- **The agent never types or moves the mouse while the user's hands are on it** (Windows, macOS; #453). Every real
+  input (keys, typing, clicks, drags, pointer moves, bringing a window to the front, launching an app) waits until the
+  user has been idle 1 s; background acts (by name, window messages, page acts) do not wait. If the user takes over,
+  nothing more is sent; after 5 s it carries on if they are idle, else it waits for Resume on the pill. A call that
+  waits returns within one tool call's budget (under 60 s) with `PAUSED` "paused by the user ... call the same step
+  again": an agent re-calls the step and does not give up. Linux cannot read idle time, so nothing waits there.
+- **Canvas and CAD apps are told to press labelled controls by label, not by pixel.** `read_tree` says so after an
+  opaque area, and also for a window whose toolbars are only named panes (a CAD ribbon). The server instructions and the
+  canvas hint keep the screenshot for picks inside the drawn area, and after three clicks by coordinates with none by
+  name, one note says a visible label is pressed with `smart_click`.
+- **A refused act in the wrong foreground window says to focus yours and send the same call again**, with no screenshot.
+- **Agents are told they can do any task on the screen, and to use clawdcursor without being asked.** The skill, the
+  server instructions, `llms.txt` and the plugin listing now lead with five rules: you can open and operate any app, see
+  the screen, and you should not ask the user to do a step you can do or say you can't reach their desktop. They no
+  longer open with "FALLBACK ONLY": an API, CLI or file edit that does the same job is still preferred as cheaper, but a
+  task is never declined for lack of one. The blanket "ask before email, banking, messaging or password managers" rule
+  is gone (the user's request is the permission); asking first before an irreversible action the user did not ask for
+  stays.
+- **The skill says what to do when a task is beyond the agent:** hand it to a stronger model from the same provider
+  (a Sonnet or Opus subagent) or raise the reasoning effort, instead of giving up or asking the user; a sign-in or
+  a step only the user can take is still `pause_for_user`. Easy desktop work can run on a cheaper subagent.
+- **The API runner caches its prompt and defaults to Claude Haiku 5.5.** `--with anthropic` marks its system prompt, tool
+  list and newest message for the API's prompt cache, so a long run re-reads its first turns at a fraction of the
+  input price. Without `--model` (or a model set by `doctor --setup`) it now starts on the cheapest model,
+  `claude-haiku-5-5`, instead of `claude-opus-5-5`.
+- **The HTTP daemon answers only to `Host: 127.0.0.1:<port>` or `localhost:<port>`**; any other Host header gets 403.
+  A page whose DNS name was rebound to 127.0.0.1 could load the dashboard and read the pause message. An SSH tunnel to
+  the daemon must use the daemon's own port on the local end (`ssh -L 3847:127.0.0.1:3847 ...`).
 
 ### Fixed
 - **The window outline never appeared on macOS** (#453): a macOS window's handle is its process id, and the drawer
@@ -131,36 +159,6 @@ All notable changes to Clawd Cursor will be documented in this file.
   already was; the granular name was refused.
 - **`--debug` help says "No effect"** (like `--no-llm`): nothing reads it, and it said it saved screenshots. The
   `start` / `serve` deprecation warnings no longer say "Removed in v0.10"; both still work as aliases of `agent`.
-
-### Changed
-- **The agent never types or moves the mouse while the user's hands are on it** (Windows, macOS; #453). Every real
-  input (keys, typing, clicks, drags, pointer moves, bringing a window to the front, launching an app) waits until the
-  user has been idle 1 s; background acts (by name, window messages, page acts) do not wait. If the user takes over,
-  nothing more is sent; after 5 s it carries on if they are idle, else it waits for Resume on the pill. A call that
-  waits returns within one tool call's budget (under 60 s) with `PAUSED` "paused by the user ... call the same step
-  again": an agent re-calls the step and does not give up. Linux cannot read idle time, so nothing waits there.
-- **Canvas and CAD apps are told to press labelled controls by label, not by pixel.** `read_tree` says so after an
-  opaque area, and also for a window whose toolbars are only named panes (a CAD ribbon). The server instructions and the
-  canvas hint keep the screenshot for picks inside the drawn area, and after three clicks by coordinates with none by
-  name, one note says a visible label is pressed with `smart_click`.
-- **A refused act in the wrong foreground window says to focus yours and send the same call again**, with no screenshot.
-- **Agents are told they can do any task on the screen, and to use clawdcursor without being asked.** The skill, the
-  server instructions, `llms.txt` and the plugin listing now lead with five rules: you can open and operate any app, see
-  the screen, and you should not ask the user to do a step you can do or say you can't reach their desktop. They no
-  longer open with "FALLBACK ONLY": an API, CLI or file edit that does the same job is still preferred as cheaper, but a
-  task is never declined for lack of one. The blanket "ask before email, banking, messaging or password managers" rule
-  is gone (the user's request is the permission); asking first before an irreversible action the user did not ask for
-  stays.
-- **The skill says what to do when a task is beyond the agent:** hand it to a stronger model from the same provider
-  (a Sonnet or Opus subagent) or raise the reasoning effort, instead of giving up or asking the user; a sign-in or
-  a step only the user can take is still `pause_for_user`. Easy desktop work can run on a cheaper subagent.
-- **The API runner caches its prompt and defaults to Claude Haiku 5.5.** `--with anthropic` marks its system prompt, tool
-  list and newest message for the API's prompt cache, so a long run re-reads its first turns at a fraction of the
-  input price. Without `--model` (or a model set by `doctor --setup`) it now starts on the cheapest model,
-  `claude-haiku-5-5`, instead of `claude-opus-5-5`.
-- **The HTTP daemon answers only to `Host: 127.0.0.1:<port>` or `localhost:<port>`**; any other Host header gets 403.
-  A page whose DNS name was rebound to 127.0.0.1 could load the dashboard and read the pause message. An SSH tunnel to
-  the daemon must use the daemon's own port on the local end (`ssh -L 3847:127.0.0.1:3847 ...`).
 
 ### Internal
 - **The code is untangled** (no change to the tools agents see: `initialize` and `tools/list` are byte-identical on
