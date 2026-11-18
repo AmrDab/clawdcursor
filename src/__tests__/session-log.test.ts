@@ -191,7 +191,7 @@ describe('how a server ended', () => {
     expect(readSession(s.file!).calls).toHaveLength(1);  // the end line is not a call
     const log = dayLog();
     expect(log.some(r => r.msg === 'tool.done' && r.meta.tool === 'window' && r.meta.ms === 12 && r.meta.outcome === 'ok')).toBe(true);
-    expect(log.some(r => r.msg === 'mcp.exit' && r.level === 'warn' && r.meta.cutOff.tool === 'batch')).toBe(true);
+    expect(log.some(r => r.msg === 'mcp.exit' && r.level === 'warn' && r.meta.cutOff?.tool === 'batch')).toBe(true);   // ?.: the day-log folder is shared with other files' lines
   });
 
   it('end is idempotent: a second end writes nothing', () => {
