@@ -5,7 +5,9 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { viaLadder, type LadderPlatform } from '../platform/ladder';
-import { resetBurstCount, burstTiming } from '../platform/foreground-burst';
+import { resetBurstCount, setUserTurns } from '../platform/foreground-burst';
+
+const HELD = 'paused by the user — they have the desktop';
 
 const USER = { processId: 10, handle: 500 };
 const TARGET = { processId: 42, handle: 900 };
@@ -27,7 +29,17 @@ function windows(over: Partial<{ idleMs: number; deliver: unknown }> = {}) {
   return { s, log, notes, platform };
 }
 
-beforeEach(() => { resetBurstCount(); burstTiming.maxWaitMs = 100; burstTiming.pollMs = 10; });
+// The user's turn (core/control.ts registers the real one): a user still at the keyboard holds the step.
+// Set before each test: a test that loads the tool layer loads control.ts, which registers the real one.
+let idleNow = () => true;
+beforeEach(() => {
+  resetBurstCount();
+  idleNow = () => true;
+  setUserTurns({
+    idle: async () => idleNow(),
+    takeover: async () => { if (!idleNow()) throw new Error(`${HELD}, and nothing was sent.`); },
+  });
+});
 
 describe('viaLadder, Windows', () => {
   it('R1: a verified window message does the step; focus is never touched', async () => {
@@ -73,21 +85,19 @@ describe('viaLadder, Windows', () => {
     expect(notes).toEqual([]);
   });
 
-  it('the user never idle: R3, with the words for the agent to ask them', async () => {
-    const { log, notes, platform } = windows({ idleMs: 50 });
-    const r = await viaLadder(platform, 42, { r2: async () => 'never' });
-    expect(r.rung).toBe('R3');
+  it('the user keeps working: the held waiting reply (call the step again), not R3, and nothing is focused', async () => {
+    const { s, log, platform } = windows({ idleMs: 50 });
+    idleNow = () => s.idleMs >= 1000;
+    await expect(viaLadder(platform, 42, { r2: async () => 'never' })).rejects.toThrow(HELD);
     expect(log).toEqual([]);
-    expect(notes[0]).toMatch(/^R3: .*pause_for_user/);
   });
 
-  it('the user acts mid-burst and never settles: paused, then R3, and their window is left alone', async () => {
-    const { s, log, notes, platform } = windows();
-    burstTiming.pauseMaxMs = 60;
-    const r = await viaLadder(platform, 42, { r2: async act => { await act(async () => { log.push('first'); }); s.tick += 500; s.idleMs = 10; await act(async () => { log.push('second'); }); return 'x'; } });
-    expect(r.rung).toBe('R3');
+  it('the user acts mid-burst and keeps working: held, and their window is left alone', async () => {
+    const { s, log, platform } = windows();
+    idleNow = () => s.idleMs >= 1000;
+    const run = viaLadder(platform, 42, { r2: async act => { await act(async () => { log.push('first'); }); s.tick += 500; s.idleMs = 10; await act(async () => { log.push('second'); }); return 'x'; } });
+    await expect(run).rejects.toThrow(HELD);
     expect(log).toEqual(['focus', 'first', 'restore 500', 'cursor']);
-    expect(notes[0]).toMatch(/^R3: .*pause_for_user/);
   });
 
   it('no pid: the step acts on the window in front, as it always did', async () => {

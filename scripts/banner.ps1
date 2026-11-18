@@ -14,7 +14,10 @@
 #     until the user gives it back.
 #   - Parent kills this process to hide the banner.
 #   - stdin: "HIDE <ms>" steps aside for an agent's click; "ACTIVITY <text>" replaces
-#     the activity text (the first one comes in CLAWD_BANNER_ACTIVITY).
+#     the activity text (the first one comes in CLAWD_BANNER_ACTIVITY); "HELD ON" / "HELD OFF"
+#     swaps the Pause button for Resume and back.
+#   - Pause → prints "BANNER_PAUSE": the parent holds every act of the agent's until
+#     Resume → "BANNER_RESUME" (src/core/control.ts). The pill stays up either way.
 #   - PAUSED mode (env CLAWD_BANNER_MODE=paused, set by src/core/pause-gate.ts
 #     via banner.ts): the agent handed the desktop to the user. A card with a blue
 #     outline, "Waiting for you" (· the app from CLAWD_BANNER_APP), the
@@ -93,6 +96,8 @@ public class NoActivateBannerForm : Form {
     // the app under it (it sits where browsers keep their tab strip and address bar), then comes back on its own.
     // ...and "ACTIVITY <text>": what the agent is doing now ("Typing in Edge"), raised on the UI thread.
     public event Action<string> ActivityChanged;
+    // ...and "HELD ON" / "HELD OFF": the user holds the agent (Pause), so the button offers Resume; and back.
+    public event Action<bool> HeldChanged;
     System.Windows.Forms.Timer reshow;
     public void StartStdinCommands() {
         var t = new System.Threading.Thread(() => {
@@ -106,6 +111,9 @@ public class NoActivateBannerForm : Form {
                     } else if (line.StartsWith("ACTIVITY ") && ActivityChanged != null) {
                         string text = line.Substring(9);
                         try { BeginInvoke((Action)(() => ActivityChanged(text))); } catch { }
+                    } else if ((line == "HELD ON" || line == "HELD OFF") && HeldChanged != null) {
+                        bool on = line == "HELD ON";
+                        try { BeginInvoke((Action)(() => HeldChanged(on))); } catch { }
                     }
                 }
                 Environment.Exit(0);   // stdin closed: the parent is gone, and a pill must not outlive it
@@ -581,7 +589,7 @@ if ($env:CLAWD_BANNER_MODE -eq 'paused') {
 }
 
 # ── RUNNING: desktop control in progress ─────────────────────────────────────
-# [dot] ClawdCursor  Typing in Edge  0:42  [Stop]
+# [dot] ClawdCursor  Typing in Edge  0:42  [Pause] [Stop]
 $form.Height = 38
 
 function New-PillLabel([string]$text, [string]$font, [float]$size, $color) {
@@ -613,7 +621,25 @@ Set-Round $stop 6
 $stop.Add_MouseEnter({ $stop.BackColor = [System.Drawing.Color]::FromArgb(92, 38, 42) })
 $stop.Add_MouseLeave({ $stop.BackColor = [System.Drawing.Color]::FromArgb(64, 30, 33) })
 
-$form.Controls.AddRange(@($dot, $brand, $activity, $elapsed, $stop))
+# Pause: the agent waits, background work included, until Resume here (owner, 2026-11-18). The parent decides: it answers
+# "HELD ON" and the button becomes Resume. Only a line on stdout: the pill stays.
+$holdIdle = [System.Drawing.Color]::FromArgb(58, 62, 72)
+$holdHover = [System.Drawing.Color]::FromArgb(78, 84, 96)
+$resumeIdle = [System.Drawing.Color]::FromArgb(37, 99, 235)
+$resumeHover = [System.Drawing.Color]::FromArgb(59, 130, 246)
+$hold = New-PillLabel 'Pause' 'Segoe UI Semibold' 9 ([System.Drawing.Color]::White)
+$hold.AutoSize  = $false
+$hold.TextAlign = 'MiddleCenter'
+$hold.BackColor = $holdIdle
+$hold.Size      = New-Object System.Drawing.Size(60, 24)
+$hold.Cursor    = [System.Windows.Forms.Cursors]::Hand
+$hold.Tag       = 'BANNER_PAUSE'
+Set-Round $hold 6
+$hold.Add_MouseEnter({ $hold.BackColor = if ($hold.Tag -eq 'BANNER_RESUME') { $resumeHover } else { $holdHover } })
+$hold.Add_MouseLeave({ $hold.BackColor = if ($hold.Tag -eq 'BANNER_RESUME') { $resumeIdle } else { $holdIdle } })
+$hold.Add_Click({ [Console]::Out.WriteLine([string]$hold.Tag); [Console]::Out.Flush() })
+
+$form.Controls.AddRange(@($dot, $brand, $activity, $elapsed, $hold, $stop))
 
 function Update-Layout {
     $x = 12
@@ -621,6 +647,7 @@ function Update-Layout {
     $brand.Location = New-Object System.Drawing.Point($x, 11);        $x += $brand.PreferredWidth + 4
     $activity.Location = New-Object System.Drawing.Point($x, 10);     $x += $activity.PreferredWidth + 6
     $elapsed.Location = New-Object System.Drawing.Point($x, 11);      $x += $elapsed.PreferredWidth + 10
+    $hold.Location = New-Object System.Drawing.Point($x, 7);          $x += $hold.Width + 6
     $stop.Location = New-Object System.Drawing.Point($x, 7);          $x += $stop.Width + 7
     $form.Width = $x
     # Every time, not only on a new width: the work may have moved to another monitor.
@@ -629,6 +656,11 @@ function Update-Layout {
 Update-Layout
 
 $form.add_ActivityChanged([Action[string]]{ param($t) $activity.Text = $t; Update-Layout })
+$form.add_HeldChanged([Action[bool]]{
+    param($on)
+    if ($on) { $hold.Text = 'Resume'; $hold.Tag = 'BANNER_RESUME'; $hold.BackColor = $resumeIdle }
+    else     { $hold.Text = 'Pause';  $hold.Tag = 'BANNER_PAUSE';  $hold.BackColor = $holdIdle }
+})
 
 # The clock counts from when the pill appeared (the orb moves by itself).
 $clock = [System.Diagnostics.Stopwatch]::StartNew()

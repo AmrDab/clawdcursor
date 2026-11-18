@@ -1,14 +1,18 @@
 /**
- * Rung R2: a short foreground burst. Only when the user has been idle; saves the user's foreground window and cursor,
+ * Rung R2: a short foreground burst. Only when the user is idle; saves the user's foreground window and cursor,
  * focuses the target, runs the acts, puts both back. The user always wins: input of theirs mid-burst ends it without
- * touching their window. Our own synthetic input moves GetLastInputInfo too, so it is told apart by re-baselining after
- * each of the burst's own acts.
+ * touching their window, and it is their turn (core/control.ts takeover, faked here): idle again, the step runs again;
+ * still working, the call throws the held waiting reply. Our own synthetic input moves GetLastInputInfo too, so it is
+ * told apart by re-baselining after each of the burst's own acts.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { withForegroundBurst, burstCount, resetBurstCount, burstTiming, setOnBurst, type Burst } from '../platform/foreground-burst';
+import { withForegroundBurst, burstCount, resetBurstCount, setOnBurst, setUserTurns, inForegroundBurst, type Burst } from '../platform/foreground-burst';
 
 const USER = { processId: 10, handle: 500 };
 const TARGET = { processId: 42, handle: 900 };
+
+const HELD = 'paused by the user — they have the desktop';
+let takeovers = 0;
 
 function fake(opts: { idleMs?: number } = {}) {
   const log: string[] = [];
@@ -18,7 +22,21 @@ function fake(opts: { idleMs?: number } = {}) {
     tick: 1000,
     idleMs: opts.idleMs ?? 5000,
     focusOk: true,
+    /** The user is still working when the takeover looks again: held, and the call returns the waiting reply. */
+    keepsWorking: false,
   };
+  // The user's turn as control.ts decides it: idle after 1 s without input; a takeover goes on once they are idle.
+  setUserTurns({
+    idle: async () => s.idleMs >= 1000,
+    takeover: async () => {
+      takeovers++;
+      for (; ;) {
+        if (s.keepsWorking) throw new Error(`${HELD}, and nothing was sent.`);
+        if (s.idleMs >= 1000) return;
+        await new Promise(r => setTimeout(r, 10));
+      }
+    },
+  });
   const platform = {
     getActiveWindow: async () => s.fg as never,
     focusWindow: async (q: { processId?: number }) => { log.push(`focus ${q.processId}`); if (s.focusOk) s.fg = TARGET; return s.focusOk; },
@@ -30,7 +48,8 @@ function fake(opts: { idleMs?: number } = {}) {
   return { s, log, platform };
 }
 
-beforeEach(() => { resetBurstCount(); burstTiming.maxWaitMs = 200; burstTiming.pollMs = 20; burstTiming.pauseMaxMs = 400; burstTiming.maxResumes = 3; });
+beforeEach(() => { resetBurstCount(); takeovers = 0; });
+afterEach(() => setUserTurns({ idle: async () => true, takeover: async () => undefined }));
 
 describe('withForegroundBurst', () => {
   it('focuses the target, runs the acts, and puts the foreground and the cursor back', async () => {
@@ -44,19 +63,30 @@ describe('withForegroundBurst', () => {
     expect(burstCount()).toBe(1);
   });
 
-  it('waits for the user to be idle, then gives up (R3) without focusing anything', async () => {
-    const { log, platform } = fake({ idleMs: 100 });
-    const r = await withForegroundBurst(platform, { processId: 42 }, async () => 'never');
-    expect(r).toEqual({ ran: false, reason: 'user-busy' });
+  it('the user busy at the start: their turn first; still working, the held waiting reply, and nothing was focused', async () => {
+    const { s, log, platform } = fake({ idleMs: 100 });
+    s.keepsWorking = true;
+    await expect(withForegroundBurst(platform, { processId: 42 }, async () => 'never')).rejects.toThrow(HELD);
+    expect(takeovers).toBe(1);
     expect(log).toEqual([]);
     expect(burstCount()).toBe(0);
+    expect(inForegroundBurst()).toBe(false);
   });
 
-  it('starts once the user has been idle long enough', async () => {
+  it('the user busy at the start, idle once their turn is over: the burst goes on', async () => {
     const { s, platform } = fake({ idleMs: 100 });
     setTimeout(() => { s.idleMs = 1500; }, 60);
     const r = await withForegroundBurst(platform, { processId: 42 }, async () => 'ok');
     expect(r).toMatchObject({ ran: true, value: 'ok' });
+    expect(takeovers).toBe(1);
+  });
+
+  it('says a burst is running while it runs, so the input guard does not wait for idle again inside it', async () => {
+    const { platform } = fake();
+    let inside = false;
+    await withForegroundBurst(platform, { processId: 42 }, async b => { await b.act(async () => { inside = inForegroundBurst(); }); });
+    expect(inside).toBe(true);
+    expect(inForegroundBurst()).toBe(false);
   });
 
   it('is not a burst when the target is already in front (the user is in the agent\'s window)', async () => {
@@ -70,31 +100,29 @@ describe('withForegroundBurst', () => {
 
   it('our own input is not the user\'s; theirs pauses the burst and gives their window back at once', async () => {
     const { s, log, platform } = fake();
-    burstTiming.pauseMaxMs = 80;
-    const r = await withForegroundBurst(platform, { processId: 42 }, async b => {
+    const run = withForegroundBurst(platform, { processId: 42 }, async b => {
       await b.act(async () => { s.tick += 3; log.push('own'); });   // our SendInput moved the tick: fine
-      s.tick += 200; s.idleMs = 10;                                  // the user typed and is still at it
+      s.tick += 200; s.idleMs = 10; s.keepsWorking = true;          // the user typed and is still at it
       const second = await b.act(async () => { log.push('second'); });
       return second.done;
     });
-    expect(r).toEqual({ ran: false, reason: 'paused-out' });
+    await expect(run).rejects.toThrow(HELD);
     expect(log).toEqual(['focus 42', 'own', 'restore 500', 'cursor 5,6']);   // no second act; the user is not touched again
   });
 
   it('the user switching windows mid-burst also pauses it, and their choice of window is not undone', async () => {
     const { s, log, platform } = fake();
-    burstTiming.pauseMaxMs = 80;
-    const r = await withForegroundBurst(platform, { processId: 42 }, async b => {
-      s.fg = { processId: 77, handle: 700 }; s.idleMs = 10;
+    const run = withForegroundBurst(platform, { processId: 42 }, async b => {
+      s.fg = { processId: 77, handle: 700 }; s.idleMs = 10; s.keepsWorking = true;
       return (await b.act(async () => { log.push('act'); })).done;
     });
-    expect(r).toEqual({ ran: false, reason: 'paused-out' });
+    await expect(run).rejects.toThrow(HELD);
     expect(log).toEqual(['focus 42']);
   });
 
   describe('pause and resume', () => {
     const seen: string[] = [];
-    beforeEach(() => { seen.length = 0; setOnBurst(e => seen.push(e)); burstTiming.pauseMaxMs = 400; });
+    beforeEach(() => { seen.length = 0; setOnBurst(e => seen.push(e)); });
     afterEach(() => setOnBurst(null));
     // A whole-value step: clear the field, then write the value.
     const stepOf = (s: { tick: number; idleMs: number }, field: { v: string }, interfere?: () => void) => {
@@ -138,32 +166,28 @@ describe('withForegroundBurst', () => {
       expect(s.fg).toBe(USER);
     });
 
-    it('(c) the user never settles: R3 once the budget is spent, and they are left in control', async () => {
+    it('(c) the user keeps working: held, the call throws the waiting reply, and they are left in control', async () => {
       const { s, log, platform } = fake();
-      burstTiming.pauseMaxMs = 100;
-      const r = await withForegroundBurst(platform, { processId: 42 }, stepOf(s, { v: '' }, () => { s.tick += 99; s.idleMs = 10; }));
-      expect(r).toEqual({ ran: false, reason: 'paused-out' });
+      const run = withForegroundBurst(platform, { processId: 42 }, stepOf(s, { v: '' }, () => { s.tick += 99; s.idleMs = 10; s.keepsWorking = true; }));
+      await expect(run).rejects.toThrow(HELD);
       expect(log.filter(l => l === 'focus 42')).toHaveLength(1);   // never focused again
       expect(s.fg).toBe(USER);
       expect(seen).toEqual(['start', 'pause', 'end']);
+      expect(inForegroundBurst()).toBe(false);
     });
 
-    it('resume waits for the longer idle (4 s), not the 1 s a burst starts on', async () => {
+    it('every interruption is the user\'s turn again: no cap on resumes, the hold is the limit', async () => {
       const { s, log, platform } = fake();
-      const run = withForegroundBurst(platform, { processId: 42 }, stepOf(s, { v: '' }, () => { s.tick += 99; s.idleMs = 10; }));
-      await new Promise(r => setTimeout(r, 40));
-      s.idleMs = 2000;   // idle enough to start a burst, not to resume one
-      await new Promise(r => setTimeout(r, 60));
-      expect(log.filter(l => l === 'focus 42')).toHaveLength(1);
-      s.idleMs = 4000;
-      expect(await run).toMatchObject({ ran: true, value: true });
-    });
-
-    it('a user who interrupts again and again is given up on after maxResumes', async () => {
-      const { s, platform } = fake();
-      burstTiming.maxResumes = 1;
-      const step = async (b: Burst) => { await b.act(async () => { s.tick += 1; }); s.tick += 99; return (await b.act(async () => 1)).done; };
-      expect(await withForegroundBurst(platform, { processId: 42 }, step)).toEqual({ ran: false, reason: 'paused-out' });
+      let runs = 0;
+      const step = async (b: Burst) => {
+        runs++;
+        await b.act(async () => { s.tick += 1; });
+        if (runs <= 2) { s.tick += 99; s.idleMs = 10; setTimeout(() => { s.idleMs = 5000; }, 30); }
+        return (await b.act(async () => 1)).done;
+      };
+      expect(await withForegroundBurst(platform, { processId: 42 }, step)).toMatchObject({ ran: true, value: true });
+      expect(takeovers).toBe(2);
+      expect(log.filter(l => l === 'focus 42')).toHaveLength(3);
     });
 
     it('(d) the target window is not the same one on resume: R3, not a blind continue', async () => {

@@ -1,7 +1,8 @@
 /**
  * One ladder for a step that by-name access (R0) could not do, in one place (own-window plan):
  *   R1  input addressed to the window (deliverToWindow): native controls, no focus, no cursor. Only where a step offers it.
- *   R2  a foreground burst (foreground-burst.ts): the user idle, their window and cursor put back.
+ *   R2  a foreground burst (foreground-burst.ts): the user idle, their window and cursor put back. A user who keeps
+ *       working holds the step (core/control.ts takeover): the call returns the held waiting reply, not R3.
  *   R3  the user: `why` says so; the tool result tells the agent to pause_for_user.
  * Every result names the rung and whether focus moved (`noteRoute`, which the tool result carries). A platform without the
  * Windows pieces keeps today's path: bring the window to the front, then act.
@@ -55,10 +56,8 @@ export async function viaLadder<T>(
     try { return { value: await step.r2(act) }; } catch (e) { if (e instanceof Yielded) return null; throw e; }
   }, opts);
   if (!burst.ran) {
-    const paused = burst.reason === 'paused-out' || burst.reason === 'target-changed' || burst.reason === 'no-replay';
-    const why = burst.reason === 'user-busy' ? 'the user is at the keyboard'
-      : burst.reason === 'paused-out' ? 'the step was paused for the user, who kept using the computer'
-      : burst.reason === 'target-changed' ? 'the step was paused for the user and its window was gone or changed when they were done'
+    const paused = burst.reason === 'target-changed' || burst.reason === 'no-replay';
+    const why = burst.reason === 'target-changed' ? 'the step was paused for the user and its window was gone or changed when they were done'
       : burst.reason === 'no-replay' ? 'the step was paused for the user, and a click by position is not safe to repeat once they have moved things'
       : 'its window would not come to the front';
     note(`R3: ${why}, so ${paused ? 'it was given up and their window left alone' : 'nothing was done'}; ${ASK}`);

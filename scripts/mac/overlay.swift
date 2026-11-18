@@ -8,7 +8,9 @@
 //                  what the agent is doing (env CLAWD_BANNER_ACTIVITY, then
 //                  "ACTIVITY <text>" lines on stdin), the time since it appeared
 //                  and a Stop button; Stop or a double-click prints BANNER_STOP.
-//                  stdin also takes "HIDE <ms>". Paused (env CLAWD_BANNER_MODE=paused):
+//                  Pause prints BANNER_PAUSE (the parent holds the agent); "HELD ON" on
+//                  stdin turns it into Resume (BANNER_RESUME), "HELD OFF" back. The pill
+//                  stays up for both. stdin also takes "HIDE <ms>". Paused (env CLAWD_BANNER_MODE=paused):
 //                  a card with a blue outline, "waiting for you" (+ the app from
 //                  CLAWD_BANNER_APP), the instruction from CLAWD_BANNER_MESSAGE, and
 //                  Resume / Something else / End task -> prints BANNER_RESUME /
@@ -373,6 +375,11 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         NSApp.terminate(nil)
     }
 
+    /// The running pill's Pause / Resume: one line on stdout, and the pill stays (the parent answers HELD ON / HELD OFF).
+    @objc func holdClicked(_ sender: FirstClickButton) {
+        emit(sender.line)
+    }
+
     /// A flat rounded button; a click prints `line` (see answer) unless the caller changes the action.
     func makeButton(_ text: String, _ line: String, frame: NSRect, color: NSColor, textColor: NSColor = .white,
                     fontSize: CGFloat = 13, semibold: Bool = true, radius: CGFloat = 8, left: Bool = false) -> FirstClickButton {
@@ -406,19 +413,20 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         return OrbView(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
     }
 
-    // The running pill: [orb] ClawdCursor  <activity>  m:ss  [Stop]
+    // The running pill: [orb] ClawdCursor  <activity>  m:ss  [Pause] [Stop]
     var runDot: NSView?
     var userMoved = false   // the user dragged the pill: layoutRunning keeps it where it was dropped
     var runActivity: NSTextField?
     var runClock: NSTextField?
     var runBrand: NSTextField?
     var runStop: NSButton?
+    var runHold: FirstClickButton?
     var runStart = Date()
 
     /// Lays the row out left to right, sizes the pill to it and puts it back at the top centre.
     func layoutRunning() {
         guard let panel = pillPanel, let dot = runDot, let brand = runBrand, let act = runActivity,
-              let clock = runClock, let stop = runStop else { return }
+              let clock = runClock, let hold = runHold, let stop = runStop else { return }
         let rowH: CGFloat = 38
         func place(_ l: NSTextField, _ x: CGFloat, _ maxWidth: CGFloat) -> CGFloat {
             l.sizeToFit()
@@ -433,6 +441,8 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         x += place(brand, x, 200) + 6
         x += place(act, x, 360) + 8
         x += place(clock, x, 100) + 12
+        hold.frame = NSRect(x: x, y: 7, width: 60, height: 24)
+        x += 60 + 6
         stop.frame = NSRect(x: x, y: 7, width: 52, height: 24)
         x += 52 + 7
         let width = ceil(x)
@@ -450,6 +460,16 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         guard let act = runActivity else { return }
         act.stringValue = text
         layoutRunning()
+    }
+
+    /// "HELD ON": the user holds the agent, so the button offers Resume (blue); "HELD OFF": Pause again.
+    func setHeld(_ on: Bool) {
+        guard let hold = runHold else { return }
+        let text = on ? "Resume" : "Pause"
+        hold.line = on ? "BANNER_RESUME" : "BANNER_PAUSE"
+        hold.layer?.backgroundColor = (on ? rgb(37, 99, 235) : rgb(58, 62, 72)).cgColor
+        hold.attributedTitle = NSAttributedString(string: text, attributes: [
+            .foregroundColor: NSColor.white, .font: NSFont.systemFont(ofSize: 11, weight: .semibold)])
     }
 
     func updateClock() {
@@ -503,6 +523,9 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 } else if line.hasPrefix("ACTIVITY ") {
                     let text = String(line.dropFirst(9))
                     DispatchQueue.main.async { self?.setActivity(text) }
+                } else if line == "HELD ON" || line == "HELD OFF" {
+                    let on = line == "HELD ON"
+                    DispatchQueue.main.async { self?.setHeld(on) }
                 } else if line == "TARGET" || line.hasPrefix("TARGET ") {
                     // Pairs after the word: <window number or 0> <pid>.
                     let parts = line.split(separator: " ")
@@ -744,8 +767,13 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             clock.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
             let stop = makeButton("Stop", "BANNER_STOP", frame: NSRect(x: 0, y: 7, width: 52, height: 24),
                                   color: rgb(64, 30, 33), textColor: rgb(252, 165, 165), fontSize: 11, radius: 6)
+            // Pause: the agent waits, background work included, until Resume here (owner, 2026-11-18).
+            let hold = makeButton("Pause", "BANNER_PAUSE", frame: NSRect(x: 0, y: 7, width: 60, height: 24),
+                                  color: rgb(58, 62, 72), fontSize: 11, radius: 6)
+            hold.action = #selector(holdClicked(_:))
+            runHold = hold
             let orb = makeOrb()
-            let rowViews: [NSView] = [orb, brand, activity, clock, stop]
+            let rowViews: [NSView] = [orb, brand, activity, clock, hold, stop]
             rowViews.forEach { content.addSubview($0) }
             runDot = orb
             runBrand = brand

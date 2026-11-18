@@ -13,7 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import { controlBanner, outlineFlags, glowFlags, glowColorFlags } from '../core/banner';
-import { stopControl, __setControlDirForTests, __setForegroundReaderForTests } from '../core/control';
+import { stopControl, __setControlDirForTests, __setForegroundReaderForTests, isHeld, releaseHold } from '../core/control';
 import { guardInputMethods, setOwnUiPids } from '../platform/pointer-guard';
 import { withForegroundBurst } from '../platform/foreground-burst';
 import type { ChildProcess } from 'child_process';
@@ -453,6 +453,72 @@ describe('the indicator has two modes', () => {
     expect(glowColorFlags(false, 'darwin')).toEqual([]);
     expect(glowColorFlags(true, 'win32')).toEqual(['-Color', '#3b82f6']);
     expect(glowColorFlags(true, 'darwin')).toEqual(['--color', '#3b82f6']);
+  });
+});
+
+// The user's turn (owner, 2026-11-18): Pause on the pill holds the agent until Resume there; a takeover says "your turn".
+// No glow while they work: the blue one is for pause_for_user alone.
+describe('the pill\'s Pause and Resume', () => {
+  const states = (g: FakeChild) => g.written.filter(l => l === 'ON' || l === 'OFF');
+  /** A line on the pill's stdout, delivered (readline reads it on a later tick). */
+  const fromPill = (c: FakeChild, line: string) => new Promise<void>(resolve => {
+    c.stdout.write(`${line}\n`);
+    setImmediate(resolve);
+    vi.advanceTimersByTime(0);
+  });
+  afterEach(() => releaseHold('test'));
+
+  it('Pause holds the agent: the pill says Paused and offers Resume, no glow, and it stays up past the idle hide; Resume goes on', async () => {
+    controlBanner.touch();
+    controlBanner.setActivity('Typing in Edge');
+    await fromPill(spawned[0], 'BANNER_PAUSE');
+    expect(isHeld()).toBe(true);
+    expect(spawned[0].written).toEqual(expect.arrayContaining(['ACTIVITY Paused', 'HELD ON']));
+    controlBanner.foreground();                       // nothing turns the glow on while they hold it
+    expect(states(glows[0])).not.toContain('ON');
+    controlBanner.setActivity('Clicking in Edge');    // shown once it is the agent's turn again, not over "Paused"
+    expect(spawned[0].written.filter(l => l.startsWith('ACTIVITY ')).at(-1)).toBe('ACTIVITY Paused');
+    vi.advanceTimersByTime(120_000);
+    expect(spawned[0].killed).toBe(false);            // its Resume is the way back: never hidden while held
+    await fromPill(spawned[0], 'BANNER_RESUME');
+    expect(isHeld()).toBe(false);
+    expect(spawned[0].written.slice(-2)).toEqual(['ACTIVITY Clicking in Edge', 'HELD OFF']);
+    vi.advanceTimersByTime(31_000);
+    expect(spawned[0].killed).toBe(true);             // back to the agent: the idle hide counts again
+  });
+
+  it('both pills have it: Pause prints BANNER_PAUSE, HELD ON makes it Resume (BANNER_RESUME), and a click never closes the pill', () => {
+    const read = (...p: string[]) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', ...p), 'utf8');
+    const ps = read('banner.ps1');
+    expect(ps).toMatch(/\$hold\.Tag\s+= 'BANNER_PAUSE'/);
+    expect(ps).toMatch(/\$hold\.Tag = 'BANNER_RESUME'/);
+    expect(ps).toMatch(/line == "HELD ON" \|\| line == "HELD OFF"/);
+    expect(ps).toMatch(/\$hold\.Add_Click\(\{ \[Console\]::Out\.WriteLine/);   // a line only: Send-Line would close the pill
+    const swift = read('mac', 'overlay.swift');
+    expect(swift).toMatch(/makeButton\("Pause", "BANNER_PAUSE"/);
+    expect(swift).toMatch(/hold\.line = on \? "BANNER_RESUME" : "BANNER_PAUSE"/);
+    expect(swift).toMatch(/line == "HELD ON" \|\| line == "HELD OFF"/);
+    expect(swift).toMatch(/@objc func holdClicked\(_ sender: FirstClickButton\) \{\s*emit\(sender\.line\)\s*\}/);
+  });
+
+  it('a pill shown again while held offers Resume at once', async () => {
+    controlBanner.touch();
+    await fromPill(spawned[0], 'BANNER_PAUSE');
+    controlBanner.showPaused({ id: 7, message: 'Pick one', since: 0 }, () => {});
+    controlBanner.showRunning();
+    expect(spawned.at(-1)!.written).toContain('HELD ON');
+  });
+
+  it('a takeover says "your turn" with the glow down, and its end gives the agent\'s label back', () => {
+    controlBanner.pin();
+    controlBanner.setActivity('Typing in Edge');
+    controlBanner.foreground();
+    controlBanner.holdEvent('takeover');
+    expect(states(glows[0])).toEqual(['ON', 'OFF']);
+    expect(spawned[0].written.at(-1)).toBe('ACTIVITY Paused — your turn');
+    expect(spawned[0].written).not.toContain('HELD ON');   // no Resume button: it goes on by itself if they stop
+    controlBanner.holdEvent('resumed');
+    expect(spawned[0].written.at(-1)).toBe('ACTIVITY Typing in Edge');
   });
 });
 

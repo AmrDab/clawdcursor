@@ -16,6 +16,7 @@
  *    working in. A change right after the agent's own focus-moving input (a click, Return, a shortcut) or focus call is
  *    its own doing; a change after a gap — a wait, a pause between calls — is the user's.
  */
+import { AsyncLocalStorage } from 'async_hooks';
 import { fenceActive, fenceCheck, fenceInput, isFenceRefusal } from './fence';
 import { freshHostedAppOf, isFrameHost } from '../platform/frame-host';
 import { appLabel } from './app-label';
@@ -24,7 +25,8 @@ import { quoteScreenText } from './untrusted-screen-content';
 import * as path from 'path';
 import { DATA_DIR } from '../paths';
 import { logger } from './observability/logger';
-import { setInputGuard, isOwnUiPid, type WindowQuery } from '../platform/pointer-guard';
+import { setInputGuard, isOwnUiPid, ownInputAt, type WindowQuery } from '../platform/pointer-guard';
+import { inForegroundBurst, setUserTurns } from '../platform/foreground-burst';
 import { windowTextIncludes } from '../platform/window-text';
 import { aiHostKind, sameApp } from './ai-hosts';
 
@@ -34,17 +36,21 @@ const stopFile = () => (dir ? path.join(dir, 'stopped.json') : null);
 /** Only where the stop file cannot be written: then this process at least stays stopped. Otherwise the file is the truth. */
 let stoppedHere = false;
 
-export function __setControlDirForTests(d: string | null): void { dir = d; stoppedHere = false; resetBinding(); }
+export function __setControlDirForTests(d: string | null): void { dir = d; stoppedHere = false; held = null; resumedAt = 0; resetBinding(); }
 
 /** The user took control back. Every clawdcursor process sees it; it survives a restart. */
 export function stopControl(by: string): void {
   logger.warn('control.stop', { by, pid: process.pid });
   const file = stopFile();
-  if (!file || !dir) { stoppedHere = true; return; }
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(file, JSON.stringify({ by, pid: process.pid, at: Date.now() }));
-  } catch { stoppedHere = true; }
+  if (!file || !dir) stoppedHere = true;
+  else {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(file, JSON.stringify({ by, pid: process.pid, at: Date.now() }));
+    } catch { stoppedHere = true; }
+  }
+  // A stop ends a hold: the waiting acts are refused as stopped now.
+  if (held) { held = null; tell('resumed'); }
 }
 
 /** Read on every call, never cached: another process's stop, or resume, must reach this one at once. */
@@ -57,12 +63,14 @@ export function isStopped(): boolean {
 /**
  * Only the user gives control back: a Resume click on a pause prompt, `clawdcursor resume`, or starting the daemon. The
  * window binding is kept: if the user left another app in front, the agent's next input is refused until it focuses its own.
+ * It ends a hold too (the pill's Pause).
  */
 export function resumeControl(by: string): void {
   logger.info('control.resume', { by, pid: process.pid });
   stoppedHere = false;
   const file = stopFile();
   if (file) { try { fs.rmSync(file, { force: true }); } catch { /* gone */ } }
+  releaseHold(by);
 }
 
 // The tool's own name, not one surface's call syntax: tool text is renamed per surface (compact.ts toCompactNames), and a
@@ -83,6 +91,145 @@ export async function sleepUnlessStopped(ms: number): Promise<boolean> {
     await new Promise(r => setTimeout(r, Math.min(left, 250)));
   }
 }
+
+// ── The user's turn (owner, 2026-11-18) ──
+//
+// Real input (a key, a click, a drag, a move, a focus, a launch: anything that takes the user's mouse, keyboard or front
+// window) waits until the user is idle: the agent never moves the mouse or types while their hands are on it. When they
+// take over (busy when the agent wants to start, or their input in the middle of a foreground burst), nothing more is
+// sent; after `takeoverMs` it carries on by itself if they are idle, and if they are still working clawdcursor is HELD
+// until they click Resume on the pill (or Stop). The pill's Pause holds it too. While held every act waits, background
+// ones included, `waitMs` per call; then the call returns the HELD waiting reply and the agent calls the same step again.
+// Reads are not held.
+
+/**
+ * idleMs: no input for this long is idle; takeoverMs: how long a takeover waits before it looks again; waitMs: how long
+ * one call waits while held (some hosts time a tool call out at 60 s); graceMs: input this soon after the pill's Resume
+ * is the user's hand leaving it. Tests shorten them.
+ */
+export const turnTiming = { idleMs: 1000, takeoverMs: 5000, waitMs: 50_000, pollMs: 200, graceMs: 1500 };
+/** The agent's own input ends a moment before its clock reads it (the read itself takes a few ms). */
+const OWN_SLACK_MS = 100;
+
+let held: { by: string; since: number } | null = null;
+/** When the user last clicked Resume on the pill. */
+let resumedAt = 0;
+
+/** takeover: the user's turn, waiting `takeoverMs`; held: until their Resume; resumed: the agent's turn again. */
+export type HoldEvent = 'takeover' | 'held' | 'resumed';
+let onHold: ((e: HoldEvent) => void) | null = null;
+/** The indicator (banner.ts): the pill says "Paused", shows Resume while held, and the glow is down. */
+export function setOnHold(f: ((e: HoldEvent) => void) | null): void { onHold = f; }
+const tell = (e: HoldEvent) => { try { onHold?.(e); } catch { /* cosmetic */ } };
+
+export function isHeld(): boolean { return held !== null; }
+
+/** The user holds clawdcursor: the pill's Pause, or a takeover they kept working through. Every act waits until releaseHold. */
+export function holdControl(by: string): void {
+  if (held || isStopped()) return;
+  held = { by, since: Date.now() };
+  logger.info('control.hold', { by, pid: process.pid });
+  tell('held');
+}
+
+/** The user's Resume on the pill: the waiting acts go on, and their click on it is not a takeover. */
+export function releaseHold(by: string): void {
+  if (!held) return;
+  held = null;
+  resumedAt = Date.now();
+  logger.info('control.release', { by, pid: process.pid });
+  tell('resumed');
+}
+
+// Not a guard refusal's "Do not retry": the agent must call the same step again, as with pause_for_user's waiting reply.
+const heldText = (since: number) =>
+  'paused by the user — they have the desktop, and nothing was sent. Waiting is normal: call the same step again to keep ' +
+  'waiting; it runs the moment they click Resume on the pill. Do not end the task, give up or act some other way meanwhile ' +
+  `(waitedSec: ${Math.round((Date.now() - since) / 1000)}).`;
+
+type Idle = { tick: number; idleMs: number } | null;
+// Off under the test runner unless a test sets a reader. Null: this OS cannot tell (Linux), and then nothing waits.
+let readIdle: () => Promise<Idle> = process.env.VITEST ? async () => null : async () => {
+  const { getPlatform } = await import('../platform');
+  const p = await getPlatform();
+  return (await p.userIdle?.()) ?? null;
+};
+export function __setIdleReaderForTests(f: (() => Promise<Idle>) | null): void {
+  readIdle = f ?? (async () => null);
+}
+
+/**
+ * Is the user idle: no input for idleMs, or none since the agent's own last input (the OS counts ours too) or since the
+ * user's Resume click, with a little grace. Unreadable: idle, since it cannot be told.
+ */
+async function userIsIdle(): Promise<boolean> {
+  const i = await readIdle().catch(() => null);
+  if (!i || i.idleMs >= turnTiming.idleMs) return true;
+  const last = Date.now() - i.idleMs;   // the latest the last input can have been
+  return last <= ownInputAt() + OWN_SLACK_MS || last <= resumedAt + turnTiming.graceMs;
+}
+
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+/**
+ * One tool call's share of waiting for the user (mcp-server.ts runs every call in it): all its waits together, a burst's
+ * takeover at the start and another after an interruption included, end by takeoverMs + waitMs from the call's start, so
+ * the call returns its waiting reply before a host's 60 s limit, never acting later for a call the host gave up on.
+ */
+const callBudget = new AsyncLocalStorage<{ until: number }>();
+export function withTurnBudget<R>(fn: () => R): R {
+  return callBudget.run({ until: Date.now() + turnTiming.takeoverMs + turnTiming.waitMs }, fn);
+}
+const byDeadline = (until: number) => Math.min(until, callBudget.getStore()?.until ?? Infinity);
+
+/** While held: wait, up to waitMs, for the user's Resume. Throws the waiting reply when it does not come, or STOPPED. */
+async function waitWhileHeld(): Promise<void> {
+  const until = byDeadline(Date.now() + turnTiming.waitMs);
+  while (held) {
+    stopCheck();
+    if (Date.now() >= until) throw new Error(heldText(held.since));
+    await sleep(turnTiming.pollMs);
+  }
+  stopCheck();
+}
+
+/**
+ * The user took over: busy when the agent wanted to start, or their input in the middle of a burst (whose window and
+ * cursor are already theirs again). Nothing is sent. After takeoverMs: idle → resolves, the step goes on; still working
+ * → held until their Resume. Throws the waiting reply, or STOPPED.
+ */
+export async function takeover(): Promise<void> {
+  if (!held) {
+    tell('takeover');
+    try {
+      movedAt = 0;   // a window that comes up meanwhile is the user's doing, not the agent's
+      for (const until = byDeadline(Date.now() + turnTiming.takeoverMs); !held && Date.now() < until;) {
+        stopCheck();
+        await sleep(Math.min(turnTiming.pollMs, Math.max(0, until - Date.now())));
+      }
+      stopCheck();
+      if (!held && await userIsIdle()) return;
+      holdControl('takeover');
+    } finally {
+      // Not held (idle again, or stopped): the agent's turn again as far as the pill goes, never "your turn" left up.
+      if (!held) tell('resumed');
+    }
+  }
+  await waitWhileHeld();
+}
+
+/**
+ * Before an act: wait while held; before real input also wait for the user to be idle (a takeover when they are not).
+ * Not inside a foreground burst, which keeps the same rule itself (foreground-burst.ts).
+ */
+async function turn(real: boolean): Promise<void> {
+  if (inForegroundBurst()) return;
+  if (held) await waitWhileHeld();
+  if (real && !(await userIsIdle())) await takeover();
+}
+
+// A hold counts as busy: the burst then waits in takeover() for the Resume, and never starts under the pill's Pause.
+setUserTurns({ idle: async () => !held && await userIsIdle(), takeover });
 
 // ── The window the agent is working in ──
 
@@ -239,6 +386,7 @@ async function notOwnUi(processId?: number): Promise<void> {
 /** One foreground read per input, before it. */
 async function before(): Promise<void> {
   stopCheck();
+  await turn(true);
   let now = await readForeground().catch(() => null);
   // The fence (CLAWD_FENCE_PIDS): with no foreground to check, nothing is sent.
   if (!now) await fenceInput(null);
@@ -281,12 +429,12 @@ const AI_HOST_REFUSAL = (n: string, kind: 'list' | 'ancestor') =>
   "If this assistant's window IS your target, focus it with window focus and retry.";
 
 /**
- * Is this error one of the guard's refusals (stopped, foreground changed, an AI assistant in front, held by confirm mode)? A tool that catches
+ * Is this error one of the guard's refusals (stopped, paused by the user, foreground changed, an AI assistant in front, held by confirm mode)? A tool that catches
  * errors from the input layer to try another way must let these through unchanged: the call was refused, it did not fail.
  */
 export function isGuardRefusal(err: unknown): boolean {
   const m = err instanceof Error ? err.message : String(err);
-  return m.startsWith('stopped by the user') || m.startsWith('foreground changed: ') || isFenceRefusal(err)
+  return m.startsWith('stopped by the user') || m.startsWith('paused by the user') || m.startsWith('foreground changed: ') || isFenceRefusal(err)
     || / is clawdcursor's own on-screen control — /.test(m)
     || m.startsWith('held: confirm mode') || m.startsWith('not confirmed: confirm mode')
     || /^the window in front is .+ — nothing was sent. Focus your target window first/.test(m);
@@ -313,6 +461,7 @@ const openedBy = (now: Foreground): boolean => sameApp(openedName, now.processNa
  */
 async function byName(processId?: number): Promise<void> {
   stopCheck();
+  await turn(false);
   const now = await readForeground().catch(() => null);
   // The fence: the process named, else the window in front, must be inside it. Checked before the background-process return below.
   let decided: number | undefined;
@@ -433,7 +582,7 @@ function settle(): void {
   movedAt = 0;
 }
 
-setInputGuard({ stopCheck, before, done, focused, launched, byName, byProcess, notOwnUi });
+setInputGuard({ stopCheck, turn, before, done, focused, launched, byName, byProcess, notOwnUi });
 
 /**
  * What an act that just ran went to, for the session log: the app's name as on the pill, the VERIFIED process (`actPid`)

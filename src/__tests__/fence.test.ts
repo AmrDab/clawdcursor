@@ -124,15 +124,14 @@ describe('with CLAWD_FENCE_PIDS unset, nothing changes', () => {
     expect(await desk.mouseDown()).toBe('down');
   });
 
-  it('the pointer methods of a driver are the originals, and so is a window list', () => {
-    class Driver { async mouseMove() {} async mouseMoveRelative() {} async mouseUp() {} async mouseDragStepped() {} async getWindows() { return []; } }
+  it('a release still goes straight through, and a window list is the original', async () => {
+    let ups = 0;
+    class Driver { async mouseMove() {} async mouseMoveRelative() {} async mouseUp() { ups++; } async mouseDragStepped() {} async getWindows() { return []; } }
     const d = guardInputMethods(new Driver());
-    // Methods the input guard itself does not wrap (a release; every other pointer method stops): with no fence nothing
-    // else may wrap them either.
-    for (const m of ['mouseUp'] as const) {
-      expect(Object.prototype.hasOwnProperty.call(d, m), m).toBe(false);
-      expect(d[m]).toBe(Driver.prototype[m]);
-    }
+    // A release is never refused, held or fenced off; its one wrapper notes it as the agent's own input, so the idle check
+    // (core/control.ts) does not read the end of a drag as the user (2026-11-18).
+    await d.mouseUp();
+    expect(ups).toBe(1);
     expect(fenceWindowList(d, 'getWindows', open).getWindows).toBe(Driver.prototype.getWindows);
   });
 

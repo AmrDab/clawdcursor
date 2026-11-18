@@ -11,6 +11,7 @@ import { isBrowserProcess } from '../platform/browser-config';
 import { windowTextIncludes } from '../platform/window-text';
 import { narrowedScopeNote } from './scope-note';
 import { untrusted } from '../core/miss-text';
+import { isGuardRefusal } from '../core/control';
 import { copyAllText } from '../platform/copy-all-text';
 import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, CUT_VALUE_NEXT_STEP, cdpBrowserPid, cdpStepFor, nameMissHint, shownValue, shownHelp } from './blind-hints';
 import { wrapUntrustedScreenContent, screenJson, quoteScreenText } from '../core/untrusted-screen-content';
@@ -494,7 +495,7 @@ export function getA11yTools(): ToolDefinition[] {
         if (!target) return { text: `No window found matching: ${processName || processId || title}` };
 
         // Focus first (required for minimize shortcut), then minimize
-        await ctx.a11y.focusWindow(undefined, target.processId).catch(() => {});
+        await ctx.a11y.focusWindow(undefined, target.processId).catch((e: unknown) => { if (isGuardRefusal(e)) throw e; });
         await new Promise(r => setTimeout(r, 200));
         const minimizeKey = process.platform === 'darwin' ? 'cmd+m' : 'super+down';
         await ctx.desktop.keyPress(minimizeKey);

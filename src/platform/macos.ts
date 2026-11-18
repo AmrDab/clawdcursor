@@ -330,6 +330,12 @@ export class MacOSAdapter implements PlatformAdapter {
     return this.ax.activeWindow();
   }
 
+  /** The user's idle time (the HID system's, ax-helper `idle`): real input waits for it (core/control.ts). */
+  async userIdle(): Promise<{ tick: number; idleMs: number } | null> {
+    const ms = (await this.ax.idleMs?.().catch(() => null)) ?? null;
+    return ms === null ? null : { tick: Date.now() - ms, idleMs: ms };
+  }
+
   /** Why the last focusWindow returned false, when more is known than "no match". Taken once. */
   private focusFailure: string | null = null;
   takeFocusFailure(): string | null {

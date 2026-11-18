@@ -10,6 +10,7 @@
 import type { PlatformAdapter } from './types';
 import { missText, untrusted } from '../core/miss-text';
 import { quoteScreenText } from '../core/untrusted-screen-content';
+import { isGuardRefusal } from '../core/control';
 
 export type ByNameAction = 'focus' | 'set-value' | 'toggle' | 'select';
 
@@ -109,7 +110,8 @@ export async function ensureInFront(platform: Pick<PlatformAdapter, 'getActiveWi
     return !w || w.guessed ? undefined : w.processId === pid || w.hostedProcessId === pid;
   };
   if (await front()) return true;
-  await platform.focusWindow({ processId: pid }).catch(() => false);
+  // Paused or stopped by the user is the answer, not "would not come to the front".
+  await platform.focusWindow({ processId: pid }).catch(e => { if (isGuardRefusal(e)) throw e; return false; });
   await new Promise(r => setTimeout(r, 150));
   return (await front()) !== false;
 }

@@ -1670,8 +1670,17 @@ func cmdPageText() -> Never {
     emit(["ok": true, "text": String(text.prefix(maxChars)), "source": "AXWebArea", "elapsedMs": elapsedMs()])
 }
 
+/// Milliseconds since the user's last keyboard or mouse event (the HID system's state): the idle check before the agent's
+/// real input (src/core/control.ts). No permission needed.
+func cmdIdle() -> Never {
+    guard let anyInput = CGEventType(rawValue: ~0) else { fail("failed", "no event type for any input") }
+    let s = CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: anyInput)
+    emit(["ok": true, "idleMs": Int((max(0, s) * 1000).rounded())])
+}
+
 switch command {
 case "frontmost": cmdFrontmost()
+case "idle": cmdIdle()
 case "windows": cmdWindows()
 case "active": cmdActive()
 case "apps": cmdApps()
@@ -1682,5 +1691,5 @@ case "invoke": cmdInvoke()
 case "type": cmdType()
 case "focus": cmdFocus()
 case "pagetext": cmdPageText()
-default: fail("failed", "usage: ax-helper windows|active|frontmost|apps|focused|tree|find|invoke|type|focus|pagetext [options] (got \"\(command)\")")
+default: fail("failed", "usage: ax-helper windows|active|frontmost|idle|apps|focused|tree|find|invoke|type|focus|pagetext [options] (got \"\(command)\")")
 }

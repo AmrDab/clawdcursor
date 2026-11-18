@@ -2,7 +2,8 @@
  * Control banner — the on-screen "desktop control in progress" indicators:
  *   - the pill: topmost, never-focused; a small dotted orb (a pulsing dot on Linux), what the agent is doing
  *     ("Typing in Edge", sent as `ACTIVITY <text>` on its stdin), the time since
- *     it appeared, and a Stop button (a double-click anywhere stops too).
+ *     it appeared, a Pause button (BANNER_PAUSE: the user holds the agent, control.ts; `HELD ON` makes it Resume) and a
+ *     Stop button (a double-click anywhere stops too).
  *   - the outline: a thin, click-through amber border around the window the
  *     agent is working in (control.ts workingWindow), and nothing else: no fill,
  *     nothing on the rest of the screen, nothing at all while no window is known.
@@ -56,7 +57,7 @@ import { macOverlayBinary } from '../platform/mac-swift-binary';
 import { setBeforePointerPress, setBeforeCapture, setOwnUiPids, isOwnUiPid, setOnAgentInput, setOnAgentPoint, GUARDED_METHODS } from '../platform/pointer-guard';
 import type { PauseAnswer, PauseInfo } from './pause-gate';
 import { publishOverlayState, foreignOverlayState } from './overlay-state';
-import { agentWindows, isStopped, workingIn, workingWindow } from './control';
+import { agentWindows, holdControl, isStopped, releaseHold, setOnHold, workingIn, workingWindow, type HoldEvent } from './control';
 import { appLabel } from './app-label';
 import { burstCount, resetBurstCount, setOnBurst, type BurstEvent } from '../platform/foreground-burst';
 import { logger } from './observability/logger';
@@ -66,8 +67,10 @@ const IDLE_HIDE_MS = 30_000;
 const DODGE_MS = 1_500;
 const DODGE_SETTLE_MS = 90;
 const PAUSED_OUTLINE = '#3b82f6'; // blue — "your turn"
-/** What the pill says while an R2 burst is paused for the user. */
+/** What the pill says while it is the user's turn: an R2 burst paused for them, or a takeover waiting to see if they are done. */
 const PAUSED_LABEL = 'Paused — your turn';
+/** ...and while they hold it (the pill's Pause, or they kept working): Resume on the pill continues. */
+const HELD_LABEL = 'Paused';
 
 /** How long the full-screen glow stays up after the last foreground input, or after a foreground burst ends. */
 const FOREGROUND_TAIL_MS = 1_500;
@@ -367,6 +370,7 @@ class ControlBanner {
   foreground(burst?: boolean): void {
     if (burst !== undefined) this.bursts = Math.max(0, this.bursts + (burst ? 1 : -1));
     if (this.paused) return;   // the blue paused glow is up, and stays up until Resume / End task
+    if (this.turnLabel) return; // the user's turn: no glow while they work
     if (this.glowTail) clearTimeout(this.glowTail);
     this.glowTail = null;
     send(this.glowChild, 'ON');
@@ -376,29 +380,52 @@ class ControlBanner {
   }
 
   private burstPaused = false;
-  private activityBeforePause = '';
+  /** The user's turn from control.ts: a takeover waiting to see if they are done, or a hold until their Resume. */
+  private userHold: 'takeover' | 'held' | null = null;
+  /** What the pill says for the user's turn, or null while it is the agent's. */
+  private turnLabel: string | null = null;
+  private activityBeforeTurn = '';
 
   /**
-   * An R2 burst's life as the indicator shows it. pause (the user interfered): the glow goes OFF now, no tail, the pill stays
-   * and says so; resume: the glow and the pill's label come back; end after a pause: the glow is already down.
+   * The user's turn as the pill shows it (owner, 2026-11-18): "Paused — your turn" while a burst is paused for them or a
+   * takeover waits, "Paused" with a Resume button while they hold it. The glow goes OFF at once, no tail: a pulsing screen
+   * while they work is the interruption they complained about. The blue glow stays for pause_for_user alone.
    */
-  burstEvent(e: BurstEvent): void {
-    if (e === 'start' || (e === 'end' && !this.burstPaused)) return this.foreground(e === 'start');
-    if (e === 'pause') {
-      this.burstPaused = true;
+  private refreshTurn(): void {
+    const label = this.userHold === 'held' ? HELD_LABEL : (this.burstPaused || this.userHold) ? PAUSED_LABEL : null;
+    if (label === this.turnLabel) return;
+    if (label && !this.turnLabel) {
+      this.activityBeforeTurn = this.activity;
       if (this.glowTail) clearTimeout(this.glowTail);
       this.glowTail = null;
       if (!this.paused) send(this.glowChild, 'OFF');
-      this.activityBeforePause = this.activity;
-      this.activity = PAUSED_LABEL;
-      if (!this.paused) send(this.child, `ACTIVITY ${PAUSED_LABEL}`);
-      return;
     }
-    this.burstPaused = false;
-    this.activity = this.activityBeforePause;
+    this.activity = label ?? this.activityBeforeTurn;
+    this.turnLabel = label;
     if (!this.paused) send(this.child, `ACTIVITY ${this.activity || 'Working'}`);
+  }
+
+  /**
+   * An R2 burst's life as the indicator shows it. pause (the user interfered): the user's turn; resume: the glow and the
+   * pill's label come back; end after a pause: the glow is already down.
+   */
+  burstEvent(e: BurstEvent): void {
+    if (e === 'start' || (e === 'end' && !this.burstPaused)) return this.foreground(e === 'start');
+    this.burstPaused = e === 'pause';
+    this.refreshTurn();
     if (e === 'resume') this.foreground(); // glow back on (bursts > 0, so no tail)
-    else this.bursts = Math.max(0, this.bursts - 1);
+    else if (e === 'end') this.bursts = Math.max(0, this.bursts - 1);
+  }
+
+  /** The user's turn from control.ts (takeover, hold, resumed): the pill's label, and Pause or Resume on it. */
+  holdEvent(e: HoldEvent): void {
+    const wasHeld = this.userHold === 'held';
+    this.userHold = e === 'resumed' ? null : e;
+    this.refreshTurn();
+    const isHeldNow = this.userHold === 'held';
+    if (wasHeld !== isHeldNow && !this.paused) send(this.child, isHeldNow ? 'HELD ON' : 'HELD OFF');
+    // Held, the pill stays up (its Resume is the way back, touch); back to the agent, the idle hide counts again.
+    if (wasHeld && !isHeldNow && this.child && !this.pinned && !this.paused) this.touch();
   }
 
   /** The ghost cursor: the outline draws a small pointer here (screen pixels, Windows; points, top-left origin, macOS) for about a second and a half. */
@@ -414,6 +441,7 @@ class ControlBanner {
     if (!base) return;
     const n = burstCount(); // R2 foreground bursts this session (D1: allowed when the user is idle, counted and shown)
     const line = n ? `${base} · ${n} quick takeover${n > 1 ? 's' : ''}` : base;
+    if (this.turnLabel) { this.activityBeforeTurn = line; return; }   // shown once it is the agent's turn again
     if (line === this.activity) return;
     this.activity = line;
     if (!this.paused) send(this.child, `ACTIVITY ${line}`);
@@ -514,13 +542,14 @@ class ControlBanner {
   touch(idleMs: number = IDLE_HIDE_MS): void {
     if (!this.enabled || isStopped()) return; // after a stop, a refused call must not bring the pill back
     this.show();
-    if (this.pinned || this.paused) return; // a pin / pending pause owns visibility
+    if (this.pinned || this.paused || this.userHold === 'held') return; // a pin / pending pause / the user's hold owns visibility
     this.clearIdleTimer();
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null;
       // A call still in flight (a batch inside a 30 s wait) has control: hiding now told the user it was done (#294).
       if (this.holds > 0) { this.idleWhileHeld = true; return; }
-      if (!this.pinned && !this.paused) this.forceHide();
+      // Held: the pill's Resume is the user's way back, so it stays.
+      if (!this.pinned && !this.paused && this.userHold !== 'held') this.forceHide();
     }, idleMs);
     this.idleTimer.unref?.();
   }
@@ -590,6 +619,7 @@ class ControlBanner {
     }
     this.child = child;
     this.publish();
+    if (!this.paused && this.userHold === 'held') send(child, 'HELD ON');   // a pill shown again while held offers Resume
     const started = Date.now();
     let spoke = false;
     // A write to a pill that already exited is EPIPE on this stream — never an uncaught error.
@@ -601,7 +631,13 @@ class ControlBanner {
         spoke = true;
         try {
           if (msg === 'BANNER_STOP') { this.onStopRequested?.(); return; }
-          if (forPause === undefined || this.paused?.id !== forPause) return;
+          // The running pill's Pause / Resume (owner, 2026-11-18): holds every act until Resume, then goes on, no chat step.
+          if (forPause === undefined) {
+            if (msg === 'BANNER_PAUSE') holdControl('pill');
+            else if (msg === 'BANNER_RESUME') releaseHold('pill');
+            return;
+          }
+          if (this.paused?.id !== forPause) return;
           // Esc in the reply box: give the keyboard back to the user's window (the pill names its app when it knows).
           const refocus = /^BANNER_REFOCUS(?: (\d+))?$/.exec(msg);
           if (refocus) { this.onRefocus?.(refocus[1] ? Number(refocus[1]) : undefined); return; }
@@ -756,6 +792,9 @@ class ControlBanner {
     this.idleWhileHeld = false;
     this.bursts = 0;
     this.burstPaused = false;
+    this.userHold = null;
+    this.turnLabel = null;
+    this.activityBeforeTurn = '';
     this.hostPillOff = false;
   }
 }
@@ -777,5 +816,6 @@ setOnAgentInput(method => {
 });
 // ...and every R2 burst, for its whole length.
 setOnBurst(e => controlBanner.burstEvent(e));
+setOnHold(e => controlBanner.holdEvent(e));
 // Captures: the overlay is never in one — it excludes itself where the OS can, and steps aside where it cannot.
 setBeforeCapture(() => controlBanner.beforeCapture());

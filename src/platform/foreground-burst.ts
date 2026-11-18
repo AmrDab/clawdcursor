@@ -1,8 +1,9 @@
 /**
  * Rung R2 of the own-window ladder: a short foreground burst, only when R0 and R1 cannot do the step. Waits until the user
- * has been idle, saves their foreground window and cursor, focuses the target, runs the acts, puts both back. The user
- * always wins: input of theirs mid-burst PAUSES it (their window and cursor come back at once, the step stops), and once they
- * have been idle again the step is run again from the start with the target re-focused. Never fought for the foreground.
+ * is idle, saves their foreground window and cursor, focuses the target, runs the acts, puts both back. The user always
+ * wins: input of theirs mid-burst PAUSES it (their window and cursor come back at once, the step stops) and it is their
+ * turn (core/control.ts takeover): idle again after 5 s, the step is run again from the start with the target re-focused;
+ * still working, it is held until they click Resume on the pill. Never fought for the foreground.
  */
 import type { WindowInfo } from './types';
 import { unguarded } from './pointer-guard';
@@ -19,10 +20,17 @@ export interface BurstPlatform {
 export type BurstTarget = { processId?: number; handle?: number; processName?: string; title?: string };
 
 /**
- * How long the user must have been idle, how long to wait for that, and how often to look. Tests shorten the last two.
- * `resumeIdleMs`: how long the user must be idle before a paused burst resumes; `pauseMaxMs`: the most time one burst may spend paused for the user in all; `maxResumes`: the most times it resumes.
+ * The user's turn, one rule for every input (core/control.ts, which registers it): `idle` — is the user idle now (their
+ * input, not ours); `takeover` — they took over: resolves when the step may go on, throws (held until their Resume, or
+ * stopped) when it may not. With none registered, nothing waits.
  */
-export const burstTiming = { idleMs: 1000, maxWaitMs: 5000, pollMs: 200, resumeIdleMs: 4000, pauseMaxMs: 90_000, maxResumes: 3 };
+export interface UserTurns { idle(): Promise<boolean>; takeover(): Promise<void> }
+let turns: UserTurns = { idle: async () => true, takeover: async () => undefined };
+export function setUserTurns(t: UserTurns): void { turns = t; }
+
+let active = 0;
+/** A burst is running: its inputs keep the user's turn themselves, so the input guard does not wait for idle again. */
+export const inForegroundBurst = (): boolean => active > 0;
 
 let bursts = 0;
 /** Foreground bursts run since the task began (the pill / status shows it). */
@@ -40,8 +48,8 @@ export interface Burst {
    * Run one of the burst's own inputs (every input of the burst goes through here: one that does not reads as the user's).
    * Skipped (`done: false`) when the user has typed, moved the mouse or switched windows since the last act: GetLastInputInfo
    * counts our synthetic input too, so the baseline is taken again right after each act of ours. The caller then returns
-   * at once; the burst pauses for the user and calls `fn` AGAIN once they are idle, so `fn` must be safe to run again
-   * from the start (whole-value, idempotent steps).
+   * at once; it is the user's turn, and the burst calls `fn` AGAIN once it is the agent's again, so `fn` must be safe to
+   * run again from the start (whole-value, idempotent steps).
    */
   act<R>(f: () => Promise<R>): Promise<{ done: true; value: R } | { done: false }>;
 }
@@ -49,14 +57,13 @@ export type BurstResult<T> =
   /** restored: the user's window and cursor are verified back (false when they took over, `yielded`). */
   | { ran: true; value: T; yielded: boolean; restored: boolean }
   /**
-   * user-busy: never idle in time; no-focus: the target did not come to the front; paused-out: paused for the user, who did
-   * not settle within the budget; target-changed: paused, and the target window is gone or no longer the same one;
-   * no-replay: paused during a step that is not safe to run again (a fixed-coordinate click), so it is not redone. Either
-   * way: R3, pause_for_user, and the user's window and cursor are theirs.
+   * no-focus: the target did not come to the front; target-changed: paused, and the target window is gone or no longer
+   * the same one; no-replay: paused during a step that is not safe to run again (a fixed-coordinate click), so it is not
+   * redone. Either way: R3, and the user's window and cursor are theirs. (A user who keeps working is not a result: the
+   * takeover throws the held waiting reply, and the agent calls the step again.)
    */
-  | { ran: false; reason: 'user-busy' | 'no-focus' | 'paused-out' | 'target-changed' | 'no-replay' };
+  | { ran: false; reason: 'no-focus' | 'target-changed' | 'no-replay' };
 
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const same = (w: WindowInfo | null, t: BurstTarget) =>
   !!w && ((t.handle !== undefined && Number(w.handle) === t.handle) || (t.processId !== undefined && (w.processId === t.processId || w.hostedProcessId === t.processId)));
 
@@ -69,12 +76,20 @@ export async function withForegroundBurst<T>(p: BurstPlatform, target: BurstTarg
   // The user is already in the agent's window: nothing to take, nothing to give back.
   if (same(before, target)) return { ran: true, value: await fn({ act: async f => ({ done: true, value: await f() }) }), yielded: false, restored: false };
 
-  for (const until = Date.now() + burstTiming.maxWaitMs; ;) {
-    const idle = await p.userIdle().catch(() => null);
-    if (idle && idle.idleMs >= burstTiming.idleMs) break;
-    if (!idle || Date.now() + burstTiming.pollMs > until) return { ran: false, reason: 'user-busy' };
-    await sleep(burstTiming.pollMs);
+  // The user is at the keyboard: their turn first. Throws while they hold it; nothing has been taken.
+  if (!await turns.idle()) {
+    await turns.takeover();
+    before = await p.getActiveWindow().catch(() => null);   // they may have moved to another window meanwhile
   }
+  active++;
+  try {
+    return await burstRun(p, target, fn, replay, before);
+  } finally {
+    active--;
+  }
+}
+
+async function burstRun<T>(p: BurstPlatform, target: BurstTarget, fn: (b: Burst) => Promise<T>, replay: boolean, before: WindowInfo | null): Promise<BurstResult<T>> {
   let cursor = await p.cursorPos().catch(() => null);
   const focused = await p.focusWindow(target);
   const now = await p.getActiveWindow().catch(() => null);
@@ -117,19 +132,12 @@ export async function withForegroundBurst<T>(p: BurstPlatform, target: BurstTarg
       return { done: true, value };
     },
   };
-  /** Paused: wait for the user to be idle again within the budget, then re-focus the same target. Null: resumed; else why not. */
-  let pausedMs = 0;
-  let resumes = 0;
-  const settle = async (): Promise<'paused-out' | 'target-changed' | null> => {
-    const t0 = Date.now();
-    for (; ;) {
-      const idle = await p.userIdle().catch(() => null);
-      if (idle && idle.idleMs >= burstTiming.resumeIdleMs) break;
-      if (!idle || pausedMs + Date.now() + burstTiming.pollMs - t0 > burstTiming.pauseMaxMs) return 'paused-out';
-      await sleep(burstTiming.pollMs);
-    }
-    pausedMs += Date.now() - t0;
-    if (++resumes > burstTiming.maxResumes) return 'paused-out';
+  /**
+   * Paused: the user's turn (takeover: after 5 s, idle → go on; still working → held until their Resume, which throws the
+   * waiting reply meanwhile), then re-focus the same target. Null: resumed; else why not.
+   */
+  const settle = async (): Promise<'target-changed' | null> => {
+    await turns.takeover();
     const usersNow = await p.getActiveWindow().catch(() => null);
     const cursorNow = await p.cursorPos().catch(() => null);
     const focused = await p.focusWindow(target).catch(() => false);
@@ -147,7 +155,7 @@ export async function withForegroundBurst<T>(p: BurstPlatform, target: BurstTarg
   };
   let value: T;
   let restored = false;
-  let gaveUp: 'paused-out' | 'target-changed' | 'no-replay' | null = null;
+  let gaveUp: 'target-changed' | 'no-replay' | null = null;
   try {
     for (; ;) {
       value = await fn(burst);

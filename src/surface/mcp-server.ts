@@ -17,7 +17,7 @@ import { getAllTools, getCompactSurface } from '../tools/registry';
 import { controlBanner } from '../core/banner';
 import { osKeysGuide } from '../platform/keys';
 import { enableHostAncestry } from '../core/ai-hosts';
-import { actedIn, actRecord } from '../core/control';
+import { actedIn, actRecord, withTurnBudget } from '../core/control';
 import { logger } from '../core/observability/logger';
 import { COMPOUND_ROUTE_INDEX, compactCall } from '../tools/compact-routes';
 
@@ -327,7 +327,8 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         const acted = () => actRecord(wasIn);
         const releasePill = controlBanner.hold();  // the call has control until it returns, waits included
         sessionLog.running(tool.name, action, clientInfo());
-        const run = await withSteps(tool.name, action, () => inMcpSession(sessionStartedAt ?? started, () => tool.handler(params, ctx)));  // where the call's time went
+        // withTurnBudget: the call's waits for the user (control.ts) end before a host's 60 s call limit.
+        const run = await withSteps(tool.name, action, () => inMcpSession(sessionStartedAt ?? started, () => withTurnBudget(() => tool.handler(params, ctx))));  // where the call's time went
         releasePill();
         if (!run.ok) {
           // A handler throw (e.g. projected tools' toolContextToAgent when the
