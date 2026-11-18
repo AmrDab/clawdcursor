@@ -69,6 +69,23 @@ describe('pause_for_user', () => {
     expect(JSON.parse((await third).text).status).toBe('ended');
   });
 
+  // Hetzner sign-up, 2026-11-18: three 50 s waits, then the agent said "three prompts went unanswered" and ended the
+  // task while the user was still filling in the form.
+  it('a waiting reply keeps the agent waiting: minutes are normal, it says how long, and only the user ends the pause', async () => {
+    const msg = 'Sign up, then click Resume';
+    const first = JSON.parse((await pauseForUser.handler({ message: msg, timeout: 1 }, noCtx)).text);
+    expect(first.status).toBe('waiting');
+    expect(first.next).toMatch(/several minutes/);
+    expect(first.next).toMatch(/not a refusal/);
+    expect(first.next).toMatch(/Do not give up, end the task/);
+    const second = JSON.parse((await pauseForUser.handler({ message: msg, timeout: 1 }, noCtx)).text);
+    expect(second.status).toBe('waiting');
+    expect(first.waitedSec).toBeGreaterThanOrEqual(1);
+    expect(second.waitedSec).toBeGreaterThan(first.waitedSec);   // counted from when the prompt came up, across re-calls
+    expect(pauseGate.current()?.message).toBe(msg);
+    pauseGate.answer('end');
+  });
+
   it('"Something else" on the pill: {status:"replied", reply} with "follow it"', async () => {
     const call = pauseForUser.handler({ message: 'Sign in to Stripe', timeout: 5 }, noCtx);
     setTimeout(() => pauseGate.answer('reply', 'user', 'Use the test account instead'), 50);
