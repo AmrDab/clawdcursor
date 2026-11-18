@@ -594,6 +594,13 @@ public static class ScreenPM {
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
   [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr h, int i);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  // Draws ONE window into a DC by itself: with PW_RENDERFULLCONTENT (2), its content even where other windows cover it.
+  [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
+  [DllImport("user32.dll")] public static extern IntPtr GetWindowDpiAwarenessContext(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr SendMessageTimeout(IntPtr h, uint msg, IntPtr w, IntPtr l, uint flags, uint ms, out IntPtr result);
+  // PrintWindow waits for the window's thread: a hung or busy app would stall this bridge. A WM_NULL that it answers within
+  // `ms` (SMTO_BLOCK | SMTO_ABORTIFHUNG) says it is pumping its messages.
+  public static bool Responds(IntPtr h, uint ms) { IntPtr r; return SendMessageTimeout(h, 0, IntPtr.Zero, IntPtr.Zero, 0x3, ms, out r) != IntPtr.Zero; }
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int a, out int v, int s);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int a, out RECT v, int s);
   // WindowFromPoint takes a POINT BY VALUE: declared as (int x, int y) on x64
@@ -685,6 +692,52 @@ function Cmd-CaptureRect {
         $ms = New-Object System.IO.MemoryStream
         $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
         return @{ success = $true; width = $w; height = $h; png = [Convert]::ToBase64String($ms.ToArray()) }
+    } finally { [ScreenPM]::Restore($prev) }
+}
+
+# ── Command: capture-window ───────────────────────────────────────────────────
+# One window of a process, drawn by itself: PrintWindow with PW_RENDERFULLCONTENT renders the window's own content, so
+# a window behind others is read without what covers it, and nothing is raised or focused. The pid's largest normal
+# window (not a topmost / tool window), not minimized: a minimized window draws only its title bar. Physical pixels
+# (per-monitor aware): x, y is where the window's top-left is on the virtual desktop.
+function Cmd-CaptureWindow {
+    param($cmd)
+    Add-Type -AssemblyName System.Drawing
+    $prev = [ScreenPM]::Aware()
+    try {
+        $best = $null; $bestArea = 0; $bestRect = $null
+        $candidates = Get-PidWindowCandidates ([int]$cmd.pid)   # returned as one array (`return ,$found`): assigned, not wrapped
+        foreach ($c in @($candidates)) {
+            if ($null -eq $c -or $c.Aux -or [ScreenPM]::IsIconic($c.Handle)) { continue }
+            $r = New-Object ScreenPM+RECT
+            if (-not [ScreenPM]::GetWindowRect($c.Handle, [ref]$r)) { continue }
+            $area = [int64]($r.R - $r.L) * [int64]($r.B - $r.T)
+            if ($area -gt $bestArea) { $best = $c.Handle; $bestArea = $area; $bestRect = $r }
+        }
+        if ($null -eq $best) { return @{ success = $false; reason = 'no-window' } }
+        # The window draws at its OWN size: a DPI-unaware app's window is smaller than its physical rect. Sized in the
+        # window's DPI context; the physical rect above says where it is, and the caller scales between the two.
+        $own = $bestRect
+        $ctx = [ScreenPM]::GetWindowDpiAwarenessContext($best)
+        if ($ctx -ne [IntPtr]::Zero) {
+            $was = [ScreenPM]::SetThreadDpiAwarenessContext($ctx)
+            try { $o = New-Object ScreenPM+RECT; if ([ScreenPM]::GetWindowRect($best, [ref]$o)) { $own = $o } }
+            finally { if ($was -ne [IntPtr]::Zero) { [void][ScreenPM]::SetThreadDpiAwarenessContext($was) } }
+        }
+        $iw = $own.R - $own.L; $ih = $own.B - $own.T
+        if ($iw -le 0 -or $ih -le 0) { return @{ success = $false; reason = 'no-window' } }
+        if (-not [ScreenPM]::Responds($best, 1000)) { return @{ success = $false; reason = 'not-responding' } }
+        $bmp = New-Object System.Drawing.Bitmap $iw, $ih
+        $g = [System.Drawing.Graphics]::FromImage($bmp)
+        $drawn = $false
+        try { $dc = $g.GetHdc(); try { $drawn = [ScreenPM]::PrintWindow($best, $dc, 2) } finally { $g.ReleaseHdc($dc) } } finally { $g.Dispose() }
+        if (-not $drawn) { $bmp.Dispose(); return @{ success = $false; reason = 'not-drawn' } }
+        $title = ''
+        try { $title = [System.Windows.Automation.AutomationElement]::FromHandle($best).Current.Name } catch {}
+        $ms = New-Object System.IO.MemoryStream
+        $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
+        return @{ success = $true; x = $bestRect.L; y = $bestRect.T; width = $bestRect.R - $bestRect.L; height = $bestRect.B - $bestRect.T
+                  imageWidth = $iw; imageHeight = $ih; title = $title; handle = [int64]$best; png = [Convert]::ToBase64String($ms.ToArray()) }
     } finally { [ScreenPM]::Restore($prev) }
 }
 
@@ -2162,6 +2215,7 @@ while ($true) {
             "move-cursor"           { Cmd-MoveCursor $cmd }
             "get-cursor"            { Cmd-GetCursor }
             "capture-rect"          { Cmd-CaptureRect $cmd }
+            "capture-window"        { Cmd-CaptureWindow $cmd }
             "ocr"                   { Cmd-Ocr $cmd }
             "ping"                  { @{ pong=$true } }
             default                 { @{ error="Unknown command: $($cmd.cmd)" } }

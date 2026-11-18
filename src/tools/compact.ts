@@ -439,6 +439,7 @@ export function getCompactTools(): ToolDefinition[] {
       parameters: buildCompoundSchema(SYSTEM_ACTIONS, {
         timeout: 'pause_for_user: max seconds to wait for the user before returning {status:"waiting"} (default 45, clamped 1–50); the prompt stays up, re-call with the same message.',
         text: 'clipboard_write: the text to put on the clipboard (it overwrites the user\'s clipboard).',
+        processId: 'ocr: read only this process\'s window, drawn by itself: even where other windows cover it, and without focusing it (Windows, macOS).',
       }),
       category: 'orchestration',
       safetyTier: 1,

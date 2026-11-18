@@ -31,7 +31,9 @@ import type {
   WaitForElementQuery,
   WindowState,
   WindowAtPoint,
+  WindowCapture,
 } from './types';
+import { captureWindowViaHelper } from './native-helper';
 import { waitForLaunchedWindow, buildAppPredicate } from './launch-poll';
 import { checkSecureInput, secureInputMessage, type SecureInputState } from './mac-secure-input';
 import { getPackageRoot } from '../paths';
@@ -310,6 +312,26 @@ export class MacOSAdapter implements PlatformAdapter {
   }
 
   // ─── WINDOWS ──────────────────────────────────────────────────────
+
+  /**
+   * The pid's largest on-screen window, by itself: ax-helper finds its CGWindowID (no permission needed), and the
+   * screenshot helper captures that window alone, under its own Screen Recording grant (a refusal throws).
+   */
+  async captureWindowOf(pid: number): Promise<WindowCapture | null> {
+    const win = await this.ax.windowOf?.(pid);
+    if (!win) return null;
+    const shot = await captureWindowViaHelper(win.id);
+    try {
+      return {
+        png: fs.readFileSync(shot.path),
+        bounds: { x: win.x, y: win.y, width: win.width, height: win.height },
+        pixelsPerUnit: win.width > 0 ? shot.width / win.width : 1,
+        title: win.title ?? win.processName ?? '',
+      };
+    } finally {
+      try { fs.unlinkSync(shot.path); } catch { /* a temp file */ }
+    }
+  }
 
   /**
    * Every titled window. A failure (timeout, locked screen) THROWS: it used to

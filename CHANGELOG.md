@@ -23,6 +23,14 @@ All notable changes to Clawd Cursor will be documented in this file.
   if it cannot start, the built-in pill is used. `CLAWD_OWN_UI_PIDS` (comma-separated pids) names the host's processes
   whose windows are clawdcursor's own controls, never a target. The outline stays built-in. With neither set, nothing
   changes. The line protocol is in [docs/pill-host.md](docs/pill-host.md).
+- **`system ocr` with `processId` reads that app's window by itself, even behind other windows.** It reads the
+  process's largest window, not minimized, from the window's own pixels, so the text of the windows on top of it is not
+  in the read. Nothing is raised or focused. Windows draws it with `PrintWindow` (at the window's own DPI, after
+  checking that the app responds); macOS captures it with the screenshot helper's single-window mode (ScreenCaptureKit),
+  found by its window number, so the signed helper app is unchanged. The rows say where the text is on screen; a click
+  there goes to whatever is on top, so the reply says to focus the window first or act by name. Linux cannot draw a
+  covered window by itself: there the call reads nothing and says how to read the window (focus it, then
+  `scope:"window"`).
 
 ### Fixed
 - **A field or button scrolled out of view at the end of a long page (macOS).** Chrome gives such an element a frame of

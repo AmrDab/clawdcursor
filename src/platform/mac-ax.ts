@@ -542,6 +542,11 @@ export interface MacAx {
    * another app, which the error names — throws `MacAxError`. System Events cannot do this when two processes share a name.
    */
   focusWindow(pid: number, title?: string): Promise<FocusedWindow | null>;
+  /**
+   * The largest on-screen window of `pid` (covered or not, not minimized): its CGWindowID and bounds in points. Null: the
+   * pid has none. Throws when the helper cannot answer.
+   */
+  windowOf?(pid: number): Promise<{ id: number; x: number; y: number; width: number; height: number; title?: string; processName?: string } | null>;
   /** The frontmost app per NSWorkspace, plus whether the screen is locked. */
   frontmost(): Promise<FrontmostInfo>;
   /**
@@ -803,6 +808,16 @@ export function createMacAx(deps: MacAxDeps): MacAx {
         what,
       );
       return { elements: flattenAxTree(out?.uiTree, pid), truncated: false };
+    },
+
+    async windowOf(pid: number) {
+      const reply = await viaHelper(['window-of', '--pid', String(pid), '--timeout-ms', String(HELPER_LIST_DEADLINE_MS)],
+        HELPER_LIST_DEADLINE_MS + HELPER_GRACE_MS, 'window lookup');
+      if (reply === null) throw new Error('the accessibility helper could not look the window up');
+      const w = reply.window;
+      if (!w || typeof w.id !== 'number') return null;
+      return { id: w.id, x: Number(w.x), y: Number(w.y), width: Number(w.width), height: Number(w.height),
+        ...(typeof w.title === 'string' ? { title: w.title } : {}), ...(typeof w.processName === 'string' ? { processName: w.processName } : {}) };
     },
 
     async frontmost(): Promise<FrontmostInfo> {
