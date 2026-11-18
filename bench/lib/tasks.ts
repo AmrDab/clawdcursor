@@ -98,7 +98,17 @@ function lookup(root: unknown, dotted: string): unknown {
   return v;
 }
 
-const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+/**
+ * JSON with every object's keys sorted. A fixture's state is compared by value: the macOS native fixture writes a Swift
+ * dictionary, whose key order changes from run to run (selfcheck failed 4 runs in 6 on order alone, Mac 2026-11-17).
+ */
+export function canonical(v: unknown): string {
+  return JSON.stringify(v, (_k, x: unknown) => x !== null && typeof x === 'object' && !Array.isArray(x)
+    ? Object.fromEntries(Object.entries(x as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+    : x);
+}
+
+const same = (a: unknown, b: unknown) => canonical(a) === canonical(b);
 
 function compare(v: unknown, c: Comparison): boolean {
   if ('exists' in c && (v !== undefined && v !== null) !== c.exists) return false;
@@ -109,8 +119,7 @@ function compare(v: unknown, c: Comparison): boolean {
   if (c.lte !== undefined && !(typeof v === 'number' && v <= c.lte)) return false;
   if (c.sameMembers !== undefined) {
     if (!Array.isArray(v) || v.length !== c.sameMembers.length) return false;
-    const key = (x: unknown) => JSON.stringify(x);
-    if (!same(v.map(key).sort(), c.sameMembers.map(key).sort())) return false;
+    if (!same(v.map(canonical).sort(), c.sameMembers.map(canonical).sort())) return false;
   }
   return true;
 }

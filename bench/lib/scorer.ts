@@ -82,7 +82,7 @@ function units(calls: LogCall[]): Unit[] {
   return calls.flatMap((c): Unit[] => c.steps?.length ? c.steps : [c]);
 }
 
-const NO_EFFECT_POINTER = new Set(['hover', 'move', 'move_relative', 'mouse_up']);
+const NO_EFFECT_POINTER = new Set(['hover', 'move', 'mouse_move', 'move_relative', 'mouse_up']);
 const KEYBOARD = new Set(['type', 'key', 'key_press']);
 const BROWSER_ACTS = new Set(['click', 'type', 'select_option']);
 

@@ -36,10 +36,18 @@ export const isActing = (c: Pick<LogCall, 'cls'>) => c.cls === 'act-name' || c.c
 
 type Unit = Pick<LogCall, 'tool' | 'action' | 'cls'>;
 
-/** Actions that touch no window: waiting, reading the clock, moving the pointer without pressing, connecting. */
+/**
+ * Actions that touch no window: waiting, reading the clock, moving the pointer without pressing, connecting.
+ * `mouse_move` is the compact surface's name for hover (Mac run 2026-11-17: a bare move stopped the run as a privacy breach).
+ */
 const NO_TARGET = new Set(['wait', 'wait_for', 'connect', 'report', 'system_time', 'shortcuts_list', 'build_uri', 'detect_webview',
-  'pause_for_user', 'hover', 'move', 'move_relative']);
+  'pause_for_user', 'hover', 'move', 'mouse_move', 'move_relative']);
 const KEYS = new Set(['type', 'key', 'key_press', 'key_down', 'key_up']);
+/**
+ * Letting go of a button or key the agent holds. clawdcursor never refuses a release and records no app for it, so it
+ * is judged by where the focus is (the fence keeps the pointer itself in the fixture window).
+ */
+const RELEASES = new Set(['mouse_up', 'key_up']);
 
 /** Does this call do something to a window or an app? Anything acting that is not known to be harmless counts. */
 export function hasTarget(u: Unit): boolean {
@@ -48,6 +56,7 @@ export function hasTarget(u: Unit): boolean {
 
 /** Input, or an act on an element by name: the session log names the app of every one of these that hit the window in front. */
 export function isInput(u: Unit): boolean {
+  if (u.tool === 'computer' && RELEASES.has(u.action ?? '')) return false;
   return u.cls === 'act-name' || u.cls === 'act-coords' || (u.tool === 'computer' && KEYS.has(u.action ?? ''));
 }
 
