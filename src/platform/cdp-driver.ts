@@ -434,6 +434,31 @@ export class CDPDriver {
   }
 
   /**
+   * open_app's way into clawdcursor's own browser: when the browser on AGENT_CDP_PORT runs and is `want`, give it a
+   * window if it has none (a macOS browser keeps running after its last window closes) and return its pid, for the
+   * caller to focus by pid. Asked for by name, the OS raised the user's own copy of the same browser instead, with their
+   * profile and sign-ins (macOS, 2026-11-18). Null when nothing runs there, it is the other browser, or the driver is on
+   * a browser the user put on the wire (that connection is left alone). Launches nothing.
+   */
+  async showOwnBrowser(want: 'chrome' | 'edge'): Promise<number | null> {
+    if (this.connectionMode === 'attached' && await this.isConnected()) return null;
+    const ask = (p: string, method = 'GET'): Promise<any> =>
+      fetch(`http://127.0.0.1:${AGENT_CDP_PORT}${p}`, { method, signal: AbortSignal.timeout(1500) })
+        .then(r => (r.ok ? r.json() : null), () => null);
+    const version = await ask('/json/version');
+    if (!version?.webSocketDebuggerUrl) return null;
+    // The agent's browser is Edge or Chrome (agentBrowserConnectOptions); Edge names itself "Edg/" in its user agent.
+    const kind = /\bEdg\//.test(`${version.Browser ?? ''} ${version['User-Agent'] ?? ''}`) ? 'edge' : 'chrome';
+    if (kind !== want) return null;
+    const targets = await ask('/json/list');
+    if (!Array.isArray(targets) || !targets.some(t => t?.type === 'page')) {
+      if (!(await ask('/json/new?about:blank', 'PUT'))) return null;
+    }
+    if (!(await this.isConnected()) && !(await this.connect(AGENT_CDP_PORT))) return null;
+    return this.getBrowserPid();
+  }
+
+  /**
    * Stamp the dedicated instance's blank tab so the WINDOW is identifiable in
    * the taskbar / Alt-Tab as the agent's, not a second personal browser. The
    * 2026-06-11 incident started exactly this way: an unlabeled agent instance

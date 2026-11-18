@@ -251,7 +251,13 @@ export function getExtraTools(): ToolDefinition[] {
         if (!ctx.platform) return needPlatform('open_url');
         const u = String(url);
         if (!/^https?:\/\//i.test(u)) {
-          return { text: 'open_url: url must start with http:// or https://', isError: true };
+          // Kept: file: and other schemes go through open_file / open_uri, the openers marked destructive. Without a next
+          // step an agent opened Chrome by name for a local page and landed in the user's own browser (macOS, 2026-11-18).
+          return {
+            text: 'open_url: url must start with http:// or https://. For a local page (file://) use browser {"action":"navigate","url":...}: ' +
+              'clawdcursor\'s own browser opens it; open_file opens a file in its default app.',
+            isError: true,
+          };
         }
         try {
           if (ctx.platform.platform === 'darwin') {

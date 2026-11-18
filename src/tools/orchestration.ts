@@ -5,7 +5,7 @@
 import { execFile } from 'child_process';
 import { quoteScreenText } from '../core/untrusted-screen-content';
 import { promisify } from 'util';
-import type { ToolDefinition } from './types';
+import type { ToolDefinition, ToolContext, ToolResult } from './types';
 import { agentBrowserConnectOptions } from '../platform/browser-config';
 import { resolveAlias, appNameRefusal, startedNoWindowText, notConfirmedText, startMenuNote } from '../platform/app-aliases';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../core/control';
@@ -22,6 +22,24 @@ async function commandExists(cmd: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** clawdcursor's own browser is Edge or Chrome (agentBrowserConnectOptions): which of them an app is, if either. */
+function ownBrowserKind(processNames: readonly string[] | undefined): 'chrome' | 'edge' | null {
+  if (processNames?.includes('chrome')) return 'chrome';
+  if (processNames?.includes('msedge')) return 'edge';
+  return null;
+}
+
+/** Bring clawdcursor's own browser (by its pid, never by app name) to the front, and say whose browser it is. */
+async function focusOwnBrowser(ctx: ToolContext, rawName: string, pid: number): Promise<ToolResult> {
+  const platform = ctx.platform!;
+  const raised = await platform.focusWindow({ processId: pid }).catch(() => false);
+  ctx.a11y.invalidateCache();
+  const front = raised ? await platform.getActiveWindow().catch(() => null) : null;
+  const whose = `clawdcursor's own "${rawName}" (its own profile, not the user's; the user's own copy, if open, was not touched)`;
+  if (front?.processId === pid) return { text: `Opened ${whose} (pid=${pid}, window=${quoteScreenText(front.title)})` };
+  return { text: `Opened a window in ${whose} (pid=${pid}), but could not bring it to the front: window {"action":"focus","processId":${pid}}` };
 }
 
 export function getOrchestrationTools(): ToolDefinition[] {
@@ -60,6 +78,12 @@ export function getOrchestrationTools(): ToolDefinition[] {
               launchName = alias.executable?.replace(/\.exe$/i, '') ?? rawName;
             }
           }
+          // Chrome or Edge while clawdcursor's own copy of it runs: open_app stays in that copy. By name, the OS raised the
+          // user's copy instead (their profile and sign-ins) while the reply named the agent's windowless pid (macOS,
+          // 2026-11-18). The user's copy is opened only when it is the one that runs.
+          const own = ownBrowserKind(alias?.processNames);
+          const ownPid = own ? await ctx.cdp?.showOwnBrowser?.(own).catch(() => null) : null;
+          if (ownPid) return focusOwnBrowser(ctx, rawName, ownPid);
           try {
             const res = await ctx.platform.launchApp(launchName, {
               nameOnly: !alias,   // a name we do not know: only an installed app is started (never a URI, a file or a search hit)
