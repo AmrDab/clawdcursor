@@ -5,6 +5,15 @@ All notable changes to Clawd Cursor will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **`clawdcursor task` prints how the run acted**, as a dim line after the run log: `how it acted: N by name or label · M by
+  coordinates · S screenshots` (`smart_click` counts as by name or label). `clawdcursor logs --run` shows it in its header,
+  and the run log's `end` line carries the same three counts.
+
+### Changed
+- **An invoke by a name the accessibility tree does not have presses the matching visible label itself** (OCR, no
+  screenshot), as `smart_click` does, instead of failing; it says so in the result. The same when every element it
+  matched only contains the name ("New to NX?" for "New"). Not with `within`. An ambiguous invoke's next step names the
+  element (controlType, within) instead of a coordinate click.
 - **A host app can draw the pill itself.** With `CLAWD_PILL_CMD` (a JSON array: the command and its arguments),
   clawdcursor starts that command in place of its own pill, with the same arguments, environment and stdin/stdout lines;
   if it cannot start, the built-in pill is used. `CLAWD_OWN_UI_PIDS` (comma-separated pids) names the host's processes
@@ -41,6 +50,11 @@ All notable changes to Clawd Cursor will be documented in this file.
   `start` / `serve` deprecation warnings no longer say "Removed in v0.10"; both still work as aliases of `agent`.
 
 ### Changed
+- **Canvas and CAD apps are told to press labelled controls by label, not by pixel.** `read_tree` says so after an
+  opaque area, and also for a window whose toolbars are only named panes (a CAD ribbon). The server instructions and the
+  canvas hint keep the screenshot for picks inside the drawn area, and after three clicks by coordinates with none by
+  name, one note says a visible label is pressed with `smart_click`.
+- **A refused act in the wrong foreground window says to focus yours and send the same call again**, with no screenshot.
 - **The HTTP daemon answers only to `Host: 127.0.0.1:<port>` or `localhost:<port>`**; any other Host header gets 403.
   A page whose DNS name was rebound to 127.0.0.1 could load the dashboard and read the pause message. An SSH tunnel to
   the daemon must use the daemon's own port on the local end (`ssh -L 3847:127.0.0.1:3847 ...`).

@@ -160,8 +160,9 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       // The OS is read once, here, when the server starts: the agent knows from its first message which keys to send.
       osKeysGuide() +
       'A surface with no names and no text (a drawing canvas, whiteboard, CAD viewport or map; read_tree says "Opaque area") ' +
-      'is where a screenshot is the right tool: plan every stroke from one screenshot, send them in ONE batch ' +
+      'is where a screenshot is the right tool, inside that area only: plan every stroke from one screenshot, send them in ONE batch ' +
       '(click with path, drag_path), then check with ONE screenshot_region of only the changed area, max_edge 512. ' +
+      'The toolbars, fields and dialogs around it are still pressed by name (invoke) or by visible label (smart_click), not by pixel. ' +
       'Roadblocks only the user can clear (sign-in, 2FA, CAPTCHA, a step that needs their confirmation): call system {action:"pause_for_user", message} — ' +
       'ask for that ONE step only ("Sign in to Glama") and do everything before and after it yourself; for a sign-in, code or CAPTCHA, done_when ' +
       '(what shows on screen once they are done) ends the pause the moment they finish, with no Resume click — never for a confirmation or a choice. Never type or guess credentials. ' +
@@ -192,8 +193,15 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
     : `[clawdcursor] ${n === 1 ? 'A screenshot before any text was read.' : `${n} screenshots in a row with no text read.`} Cheaper and exact: compile_ui / smart_read (names + positions), copy_all_text (exact page text); act by name with invoke_element / smart_click — coordinate clicks are the fallback.`;
   // The last blind read found nothing to act on in the window (an empty tree, an opaque area): the advice above cannot be followed there.
   const CANVAS_HINT = compact
-    ? '[clawdcursor] The last text read found nothing to act on here, so a screenshot is right: send all remaining strokes in ONE batch (computer click with path, drag_path), then ONE computer screenshot_region of only the changed area with max_edge 512.'
-    : '[clawdcursor] The last text read found nothing to act on here, so a screenshot is right: send all remaining strokes in ONE batch (mouse_click with path, mouse_drag_stepped), then ONE desktop_screenshot_region of only the changed area with max_edge 512.';
+    ? '[clawdcursor] The last text read found nothing to act on in the drawn area, so a screenshot is right for picks INSIDE it: send all remaining strokes in ONE batch (computer click with path, drag_path), then ONE computer screenshot_region of only the changed area with max_edge 512. A toolbar button, field or dialog button with a visible label is pressed with accessibility smart_click target "<label>", no screenshot.'
+    : '[clawdcursor] The last text read found nothing to act on in the drawn area, so a screenshot is right for picks INSIDE it: send all remaining strokes in ONE batch (mouse_click with path, mouse_drag_stepped), then ONE desktop_screenshot_region of only the changed area with max_edge 512. A toolbar button, field or dialog button with a visible label is pressed with smart_click target "<label>", no screenshot.';
+  // A CAD run (2026-11-16) made 73 coordinate clicks, ~58 on labelled buttons, and 7 accessibility calls: after 3 coordinate clicks with no
+  // click by name since, say once that a label is pressed by name. A batch is act-other and is not counted.
+  const COORD_CLICK_HINT = compact
+    ? '[clawdcursor] 3 clicks by coordinates and none by name. A button, tab, menu or field with a visible label: accessibility smart_click {"target":"<label>"} presses it with no screenshot; keep x,y for points with no label, like inside a canvas.'
+    : '[clawdcursor] 3 clicks by coordinates and none by name. A button, tab, menu or field with a visible label: smart_click {"target":"<label>"} presses it with no screenshot; keep x,y for points with no label, like inside a canvas.';
+  let coordClicks = 0;
+  let coordNudged = false;
   let blindFoundNothing = false;
   let nudgedThisStreak = false;
   const clientInfo = () => (server as unknown as { server?: { getClientVersion?: () => { name?: string; version?: string } | undefined } })
@@ -378,6 +386,12 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         if (cls === 'vision' && !result.isError && !nudgedThisStreak && (blindFoundNothing || firstBlind || streak >= 3)) {
           nudgedThisStreak = true;
           result = { ...result, text: `${result.text}\n\n${blindFoundNothing ? CANVAS_HINT : VISION_STREAK_HINT(streak)}` };
+        }
+        if (cls === 'act-name') coordClicks = 0;
+        // Clicks only (click, double_click, mouse_click…): a scroll, hover or drag at x,y has no label to press instead.
+        else if (cls === 'act-coords' && /click$/.test(action ?? tool.name) && !result.isError && ++coordClicks >= 3 && !coordNudged) {
+          coordNudged = true;
+          result = { ...result, text: `${result.text}\n\n${COORD_CLICK_HINT}` };
         }
         const content: McpContentBlock[] = [];
         if (result.image) {
