@@ -79,7 +79,11 @@ export async function cdp(port, steps) {
   const ws = new WebSocket(tabs.find(t => t.type === 'page' && t.url.startsWith('http://127.0.0.1')).webSocketDebuggerUrl);
   await new Promise((res, rej) => { ws.onopen = res; ws.onerror = () => rej(new Error('page websocket')); });
   const pending = new Map();
-  ws.onmessage = m => { const d = JSON.parse(m.data); pending.get(d.id)?.(d); };
+  ws.onmessage = m => {
+    const d = JSON.parse(m.data);
+    const resolve = Number.isInteger(d?.id) ? pending.get(d.id) : undefined;   // only a reply to one of our own ids
+    if (typeof resolve === 'function') resolve(d);
+  };
   let last = null;
   for (const [i, [method, params]] of steps.entries()) {
     const p = new Promise(res => pending.set(i + 1, res));
