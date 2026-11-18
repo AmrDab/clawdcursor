@@ -45,21 +45,23 @@ Our own benchmarks, each run on one machine. The scope of every result is stated
 
 ### Speed and accuracy on macOS (2.2)
 
-macOS, one machine, 2026-11-17, release candidate rc-2.2 (`8408668d`): the same code as 2.2.0 except the own-window work. 13 scored tasks per model. The run took about 10 minutes wall-clock for both models.
+macOS, one machine, 2026-11-17, release candidate rc-2.2 (`8408668d`): the same code as 2.2.0 except the own-window work. 13 scored tasks per model. The run took 10 min 44 s for both models together.
 
 | Measure | Claude Sonnet 5.5 | Claude Haiku 5.5 |
 |---|---|---|
 | Tasks done | 11 of 13 | 13 of 13 |
-| Within the call budget | not listed | 12 of 13 |
+| Within the call budget | 13 of 13 | 12 of 13 |
 | Tool calls | 56 (a scripted reference run made 75) | 86 |
 | Screenshots | 4 | 4 |
 | False "done" | 0 | 0 |
 | Loops | 0 | 0 |
 | Cost for the 13 tasks | $0.51 | $0.048 |
-| Seconds per task <!-- TODO seconds per task (Mac 2.2) --> | to come | to come |
+| Seconds per task (median) | 18 s (229 s for all 13) | 22 s (321 s for all 13) |
+| Actions by name or label / by screen position | 24 / 6 | 29 / 10 |
 
 - Both Sonnet misses: the owner clicked their own Chrome mid-run, and clawdcursor's safety fence refused to act in the wrong window, as designed. On an earlier 2.2 build the same model did 13 of 13.
 - The scripted reference run (the "oracle") also needs 4 screenshots: the drawing-canvas tasks have no named parts.
+- A task's seconds include starting the agent and the model's own thinking, not only clawdcursor.
 
 ### Own-window work on Windows (2.2)
 
@@ -382,7 +384,7 @@ Restart the host afterwards so it starts the new server. `clawdcursor versions` 
 
 Earlier releases are in the [changelog](CHANGELOG.md).
 
-**2.2.** Clawd Cursor now works beside you: see [What's new](#whats-new) and [What protects you](#what-protects-you). The standard benchmark across app types, OSes and models is the release gate, and the numbers are in [Proof](#proof). Screen geometry and timing, the last two of the five mechanisms in the [2.1 milestone](https://github.com/AmrDab/clawdcursor/milestone/1), are next.
+**2.2.** Clawd Cursor now works beside you: see [What's new](#whats-new) and [What protects you](#what-protects-you). The standard benchmark across app types, OSes and models is the release gate, and the numbers are in [Proof](#proof).
 
 ---
 

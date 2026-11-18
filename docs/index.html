@@ -124,11 +124,11 @@
     Windows 10/11 (x64 + ARM64), macOS 12+ (Intel + Apple Silicon),
     Linux X11, Linux Wayland.
 
-    ── NEXT: 2.1 ───────────────────────────────────────────────────────────────
-    One standard benchmark across app types, OSes and models as the release
-    gate, plus honest results, target resolution, perception without a tree,
-    screen geometry and timing.
-    https://github.com/AmrDab/clawdcursor/milestone/1
+    ── NEW IN 2.2 ──────────────────────────────────────────────────────────────
+    Works beside the user: on Windows and macOS real input waits until the
+    user is idle; three screen states; Pause and Resume on the pill; on
+    Windows the agent works in its own window. Benchmarks and speed:
+    https://clawdcursor.com/#proof
 
     Agent guide: https://clawdcursor.com/llms.txt
     Source:      https://github.com/AmrDab/clawdcursor
@@ -534,7 +534,7 @@
 
     <h3 style="font-size:1.05rem;font-weight:700;margin:24px 0 12px;">Speed and accuracy on macOS (2.2)</h3>
     <p style="color:var(--text2);font-size:0.88rem;line-height:1.65;margin-bottom:14px;">
-      macOS, one machine, 2026-11-17, release candidate rc-2.2 (<code>8408668d</code>): the same code as 2.2.0 except the own-window work. 13 scored tasks per model. The run took about 10 minutes wall-clock for both models.
+      macOS, one machine, 2026-11-17, release candidate rc-2.2 (<code>8408668d</code>): the same code as 2.2.0 except the own-window work. 13 scored tasks per model. The run took 10 min 44 s for both models together.
     </p>
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:0;overflow-x:auto;-webkit-overflow-scrolling:touch;">
       <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
@@ -551,7 +551,7 @@
             </tr>
             <tr style="border-bottom:1px solid var(--border);">
               <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Within the call budget</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">not listed</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">13 of 13</td>
               <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">12 of 13</td>
             </tr>
             <tr style="border-bottom:1px solid var(--border);">
@@ -579,16 +579,21 @@
               <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">$0.51</td>
               <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">$0.048</td>
             </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Seconds per task (median)</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">18 s (229 s for all 13)</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">22 s (321 s for all 13)</td>
+            </tr>
             <tr style="">
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Seconds per task <!-- TODO seconds per task (Mac 2.2) --></td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">to come</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">to come</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Actions by name or label / by screen position</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">24 / 6</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">29 / 10</td>
             </tr>
         </tbody>
       </table>
     </div>
     <p style="color:var(--text2);font-size:0.88rem;line-height:1.65;margin-top:14px;">
-      Both Sonnet misses: the owner clicked their own Chrome mid-run, and clawdcursor's safety fence refused to act in the wrong window, as designed. On an earlier 2.2 build the same model did 13 of 13. The scripted reference run (the "oracle") also needs 4 screenshots: the drawing-canvas tasks have no named parts.
+      Both Sonnet misses: the owner clicked their own Chrome mid-run, and clawdcursor's safety fence refused to act in the wrong window, as designed. On an earlier 2.2 build the same model did 13 of 13. The scripted reference run (the "oracle") also needs 4 screenshots: the drawing-canvas tasks have no named parts. A task's seconds include starting the agent and the model's own thinking, not only clawdcursor.
     </p>
 
     <h3 style="font-size:1.05rem;font-weight:700;margin:32px 0 12px;">Own-window work on Windows (2.2)</h3>
@@ -894,7 +899,7 @@ claude plugin install clawdcursor@clawdcursor</code></pre>
       <div class="feat-card">
         <div class="feat-icon">🧭</div>
         <h4>2.2</h4>
-        <p>It works beside you. On Windows and macOS it never types or moves the mouse while you use the computer, and the screen shows three states: an amber outline, an amber glow, a blue glow. The pill has Pause and Resume. On Windows the agent works in its own window without taking yours. Screen geometry and timing, the last two of the five mechanisms in the <a href="https://github.com/AmrDab/clawdcursor/milestone/1" target="_blank" rel="noopener" style="color:var(--accent2);">2.1 milestone</a>, are next.</p>
+        <p>It works beside you. On Windows and macOS it never types or moves the mouse while you use the computer, and the screen shows three states: an amber outline, an amber glow, a blue glow. The pill has Pause and Resume. On Windows the agent works in its own window without taking yours.</p>
       </div>
     </div>
     <p style="color:var(--text3);font-size:0.78rem;margin-top:14px;line-height:1.6;">
@@ -1017,7 +1022,7 @@ clawdcursor uninstall        <span style="color:var(--text3)"># remove all clawd
     <a href="https://github.com/AmrDab/clawdcursor">GitHub</a> ·
     <a href="https://github.com/AmrDab/clawdcursor/blob/main/CHANGELOG.md">Changelog</a> ·
     <a href="https://github.com/AmrDab/clawdcursor/blob/main/SECURITY.md">Security</a> ·
-    <a href="https://github.com/AmrDab/clawdcursor/milestone/1">2.1 roadmap</a> ·
+    <a href="https://github.com/AmrDab/clawdcursor/releases">Releases</a> ·
     <a href="/llms.txt">llms.txt</a> ·
     <a href="https://discord.gg/hW29nrEZ8G">Discord</a>
   </p>

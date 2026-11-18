@@ -1,12 +1,12 @@
 # clawdcursor
 
-> Lets AI use your computer in real time. A local MCP server that gives a
+> The fallback AI execution layer. A local MCP server that gives a
 > tool-calling agent the real desktop: you take the fastest way into each app (the
 > accessibility tree first, then the window's text, OCR when there is no tree,
 > screenshots last), and after every action it says whether it worked. It
 > runs with the user's own OS permissions. It is a tool layer: no model, no API key
 > and no agent loop of its own. Local-only (HTTP binds 127.0.0.1 with a bearer
-> token), Windows / macOS / Linux, any model with tool calling. Current version: 2.0.0.
+> token), Windows / macOS / Linux, any model with tool calling. Current version: 2.2.0.
 
 How it works: you (the agent) drive six tools and choose each step yourself. Read
 the screen blind first: the accessibility tree, then the window's text, then OCR,
