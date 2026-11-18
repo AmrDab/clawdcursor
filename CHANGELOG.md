@@ -58,6 +58,19 @@ All notable changes to Clawd Cursor will be documented in this file.
   text only, so non-text data on it was replaced. The pasteboard types are read first: with non-text data, printable
   ASCII up to 1000 characters is typed as keys, anything else is refused (`CLIPBOARD_HELD`, nothing typed). A paste
   that put the clipboard back says so: `Typed N chars (paste, clipboard restored)`.
+- **OCR works on a Mac where node has no Screen Recording permission.** OCR grabbed the screen with nut-js inside node,
+  so it failed with "Failed to capture screen" while `computer screenshot` worked: screenshots go through the bundled
+  screenshot helper, which holds its own grant. OCR (`system ocr`, `smart_click` / `smart_read` by visible text, and an
+  `invoke` that falls back to the visible label) now captures through the helper too, and uses nut-js only when no helper
+  is built.
+- **A screen read limited to one window by an argument it does not take reads nothing.** `system ocr` with `processId`
+  read the whole screen, other apps' windows included, and only then warned that it had ignored `processId`. A read of
+  screen content (`ocr`, `copy_all_text`, `screenshot`, `find_button`, …) given `processId`, `processName`, `title` or
+  `windowId` that it cannot honour is now refused before it reads, with the call that reads that one window: focus it,
+  then `ocr` with `scope:"window"`. Other calls still run and warn as before. Over MCP this needed one more fix: the
+  SDK validates a call with zod, which dropped every argument a compound tool's schema does not list before the tool
+  saw it, so neither the refusal nor the "ignored an argument" warning ever ran there. Those arguments now reach the
+  compound tools (never a granular one).
 - **`accessibility read_tree` / `read_screen` on the browser clawdcursor drives over CDP points at the browser tools**
   (#235). The hint after a thin read (and after a full read of that browser) now leads with `browser page_context` /
   `read_text` / `click`, as `find` already did; the 1.x fix had gone into a copy of `read_tree` that no longer ran.
