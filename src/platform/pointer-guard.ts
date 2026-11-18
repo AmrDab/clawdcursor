@@ -147,6 +147,16 @@ const STOP_METHODS = methodsOf('stop');
  */
 let ownInputEnd = 0;
 export const ownInputAt = (): number => ownInputEnd;
+/** Told right after each input of the agent's was sent: the idle check reads the OS's input clock then (core/control.ts). */
+let afterOwnInput: (() => void) | null = null;
+export function setAfterOwnInput(f: (() => void) | null): void { afterOwnInput = f; }
+/** The agent pressed a mouse button (mouseDown) and has not let it go: a drag in progress. */
+let buttonDown = false;
+/**
+ * A gesture of the agent's is in progress: a button or a key it holds down. It is finished before the user's turn begins
+ * (core/control.ts), never left pressed while they move their own mouse or type.
+ */
+export const gestureInProgress = (): boolean => buttonDown || heldKeys.size > 0;
 /** Innermost, so it is noted only for input that was really sent (a refusal sends nothing). */
 function noteOwnInput(target: object): void {
   const t = target as Record<string, unknown>;
@@ -154,9 +164,15 @@ function noteOwnInput(target: object): void {
     const f = t[m];
     if (typeof f !== 'function') continue;
     t[m] = async (...args: unknown[]) => {
-      const r = await f.apply(target, args);
-      ownInputEnd = Date.now();
-      return r;
+      try {
+        const r = await f.apply(target, args);
+        ownInputEnd = Date.now();
+        if (m === 'mouseDown') buttonDown = true;
+        try { afterOwnInput?.(); } catch { /* the idle check falls back to the time */ }
+        return r;
+      } finally {
+        if (m === 'mouseUp') buttonDown = false;
+      }
     };
   }
 }
@@ -409,6 +425,7 @@ function guardHardKeys(target: object): void {
 /** For tests: forget the held keys. */
 export function _resetHeldKeys(): void {
   heldKeys.clear();
+  buttonDown = false;
 }
 
 /**

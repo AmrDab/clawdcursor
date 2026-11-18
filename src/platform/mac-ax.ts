@@ -541,8 +541,8 @@ export interface MacAx {
   focusWindow(pid: number, title?: string): Promise<FocusedWindow | null>;
   /** The frontmost app per NSWorkspace, plus whether the screen is locked. */
   frontmost(): Promise<FrontmostInfo>;
-  /** Milliseconds since the user's last keyboard or mouse event (HID); null when the helper is not built (yet). */
-  idleMs?(): Promise<number | null>;
+  /** Since the user's last keyboard or mouse event (HID), and when it was (ms since 1970); null when the helper is not built (yet). */
+  idle?(): Promise<{ idleMs: number; lastAt: number } | null>;
   /**
    * A running app by (display) name — its pid, launch state and readable windows —
    * straight from NSWorkspace, so a launch can be confirmed without diffing the
@@ -807,11 +807,11 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       return lsappinfoFrontmost(deps.exec);
     },
 
-    async idleMs(): Promise<number | null> {
+    async idle(): Promise<{ idleMs: number; lastAt: number } | null> {
       // Never waits for the helper's first build: until it is there nothing waits for idle (core/control.ts).
       const reply = await viaHelper(['idle'], HELPER_GRACE_MS, 'idle time lookup', { waitForBuild: false }).catch(() => null);
-      const ms = Number(reply?.idleMs);
-      return reply && Number.isFinite(ms) && ms >= 0 ? ms : null;
+      const idleMs = Number(reply?.idleMs), lastAt = Number(reply?.lastAt);
+      return reply && Number.isFinite(idleMs) && idleMs >= 0 && Number.isFinite(lastAt) ? { idleMs, lastAt } : null;
     },
 
     async focusWindow(pid: number, title?: string): Promise<FocusedWindow | null> {

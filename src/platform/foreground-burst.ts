@@ -5,6 +5,7 @@
  * turn (core/control.ts takeover): idle again after 5 s, the step is run again from the start with the target re-focused;
  * still working, it is held until they click Resume on the pill. Never fought for the foreground.
  */
+import { AsyncLocalStorage } from 'async_hooks';
 import type { WindowInfo } from './types';
 import { unguarded } from './pointer-guard';
 
@@ -28,9 +29,12 @@ export interface UserTurns { idle(): Promise<boolean>; takeover(): Promise<void>
 let turns: UserTurns = { idle: async () => true, takeover: async () => undefined };
 export function setUserTurns(t: UserTurns): void { turns = t; }
 
-let active = 0;
-/** A burst is running: its inputs keep the user's turn themselves, so the input guard does not wait for idle again. */
-export const inForegroundBurst = (): boolean => active > 0;
+const inBurst = new AsyncLocalStorage<true>();
+/**
+ * This call is inside a burst: its inputs keep the user's turn themselves, so the input guard does not wait for idle
+ * again. Per call (async context), never process-wide: another call running meanwhile still waits for the user.
+ */
+export const inForegroundBurst = (): boolean => inBurst.getStore() === true;
 
 let bursts = 0;
 /** Foreground bursts run since the task began (the pill / status shows it). */
@@ -81,12 +85,7 @@ export async function withForegroundBurst<T>(p: BurstPlatform, target: BurstTarg
     await turns.takeover();
     before = await p.getActiveWindow().catch(() => null);   // they may have moved to another window meanwhile
   }
-  active++;
-  try {
-    return await burstRun(p, target, fn, replay, before);
-  } finally {
-    active--;
-  }
+  return inBurst.run(true, () => burstRun(p, target, fn, replay, before));
 }
 
 async function burstRun<T>(p: BurstPlatform, target: BurstTarget, fn: (b: Burst) => Promise<T>, replay: boolean, before: WindowInfo | null): Promise<BurstResult<T>> {

@@ -1670,12 +1670,14 @@ func cmdPageText() -> Never {
     emit(["ok": true, "text": String(text.prefix(maxChars)), "source": "AXWebArea", "elapsedMs": elapsedMs()])
 }
 
-/// Milliseconds since the user's last keyboard or mouse event (the HID system's state): the idle check before the agent's
-/// real input (src/core/control.ts). No permission needed.
+/// Milliseconds since the user's last keyboard or mouse event (the HID system's state), and when it was (ms since 1970,
+/// computed here, so two reads of the same event agree): the idle check before the agent's real input
+/// (src/core/control.ts). No permission needed.
 func cmdIdle() -> Never {
     guard let anyInput = CGEventType(rawValue: ~0) else { fail("failed", "no event type for any input") }
-    let s = CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: anyInput)
-    emit(["ok": true, "idleMs": Int((max(0, s) * 1000).rounded())])
+    let s = max(0, CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: anyInput))
+    let lastAt = (Date().timeIntervalSince1970 - s) * 1000
+    emit(["ok": true, "idleMs": Int((s * 1000).rounded()), "lastAt": Int64(lastAt.rounded())])
 }
 
 switch command {

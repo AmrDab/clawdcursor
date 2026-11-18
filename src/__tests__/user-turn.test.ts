@@ -12,7 +12,7 @@ import {
   __setControlDirForTests, __setForegroundReaderForTests, __setIdleReaderForTests, turnTiming, holdControl, releaseHold,
   isHeld, setOnHold, stopControl, isGuardRefusal, STOPPED_TEXT, withTurnBudget, type HoldEvent,
 } from '../core/control';
-import { guardInputMethods, ownInputAt } from '../platform/pointer-guard';
+import { guardInputMethods, ownInputAt, _resetHeldKeys } from '../platform/pointer-guard';
 import { withForegroundBurst } from '../platform/foreground-burst';
 import { ensureInFront } from '../platform/prefer-control';
 import { classifyResult } from '../core/result-codes';
@@ -31,6 +31,7 @@ function fakeDesktop() {
   const d = {
     sent,
     async mouseClick(x: number, y: number) { sent.push(`click ${x},${y}`); },
+    async mouseDown() { sent.push('down'); },
     async mouseMove(x: number, y: number) { sent.push(`move ${x},${y}`); },
     async mouseUp() { sent.push('up'); },
     async keyPress(k: string) { sent.push(`key ${k}`); },
@@ -59,6 +60,7 @@ beforeEach(async () => {
   await sleep(120);   // the last test's own input is past the slack the idle check allows for it
 });
 afterEach(() => {
+  _resetHeldKeys();
   setOnHold(null);
   __setIdleReaderForTests(null);
   Object.assign(turnTiming, DEFAULTS);
@@ -129,6 +131,62 @@ describe('real input waits for the user', () => {
     typing = false;
     await move;
     expect(d.sent).toEqual(['up', 'move 5,5']);
+  });
+
+  it('a drag in progress is finished, never left pressed while the user works: only its start waited for them', async () => {
+    const d = fakeDesktop();
+    await d.mouseDown();
+    typing = true;                 // the user grabs their mouse mid-drag
+    await d.mouseMove(5, 5);       // goes on: waiting here would leave the button down under their hand
+    await d.mouseUp();
+    expect(d.sent).toEqual(['down', 'move 5,5', 'up']);
+    expect(events).toEqual([]);
+    await sleep(10);                  // their next mouse event
+    const next = d.mouseMove(6, 6);   // the gesture is over: the next one waits for them
+    await sleep(30);
+    expect(events).toEqual(['takeover']);
+    typing = false;
+    await next;
+    expect(d.sent.at(-1)).toBe('move 6,6');
+  });
+
+  it('another call running while a burst runs still waits for the user: the burst only lets its own call through', async () => {
+    const d = fakeDesktop();
+    let fg = { processId: 10, handle: 500 };
+    let finish = () => {};
+    const platform = {
+      getActiveWindow: async () => fg as never,
+      focusWindow: async () => { fg = { processId: 42, handle: 900 }; return true; },
+      restoreForeground: async () => { fg = { processId: 10, handle: 500 }; return true; },
+      userIdle: async () => ({ tick: 1, idleMs: 60_000 }),
+      cursorPos: async () => ({ x: 0, y: 0 }),
+      mouseMove: async () => undefined,
+    };
+    const burst = withForegroundBurst(platform, { processId: 42 }, async b => b.act(() => new Promise<void>(r => { finish = r; })));
+    await sleep(20);               // the burst is in its act
+    typing = true;
+    const click = d.mouseClick(1, 1);
+    await sleep(30);
+    expect(d.sent).toEqual([]);
+    expect(events).toEqual(['takeover']);
+    typing = false;
+    finish();
+    await Promise.all([burst, click]);
+    expect(d.sent).toEqual(['click 1,1']);
+  });
+
+  it('a quick run of the agent’s inputs does not hide a user who starts working in the middle of it', async () => {
+    const d = fakeDesktop();
+    await d.keyPress('a');
+    typing = true;                    // milliseconds later, the user is at the keyboard
+    await sleep(5);
+    const next = d.keyPress('b');     // a time window after the agent's own input would have let this through
+    await sleep(20);
+    expect(d.sent).toEqual(['key a']);
+    expect(events).toEqual(['takeover']);
+    typing = false;
+    await next;
+    expect(d.sent).toEqual(['key a', 'key b']);
   });
 
   it('where idle time cannot be read (Linux), nothing waits', async () => {
@@ -210,6 +268,21 @@ describe('the pill\'s Pause', () => {
     expect(errs.map(e => e.message)).toEqual([expect.stringMatching(/^paused by the user/), expect.stringMatching(/^paused by the user/)]);
     expect(Date.now() - t0).toBeLessThan(turnTiming.takeoverMs + turnTiming.waitMs + 60);
     expect(d.sent).toEqual([]);
+  });
+
+  it('a Pause from another clawdcursor process holds this one too, and this pill offers Resume; its Resume lets it go', async () => {
+    const d = fakeDesktop();
+    const file = path.join(dir, 'held.json');
+    fs.writeFileSync(file, JSON.stringify({ by: 'pill', pid: 1, at: Date.now() }));   // as another process's Pause writes it
+    expect(isHeld()).toBe(true);
+    const click = d.mouseClick(1, 1);
+    await sleep(40);
+    expect(d.sent).toEqual([]);
+    expect(events).toEqual(['held']);
+    fs.rmSync(file);                // its Resume
+    await click;
+    expect(d.sent).toEqual(['click 1,1']);
+    expect(events).toEqual(['held', 'resumed']);
   });
 
   it('Stop while held: the waiting act is refused as stopped, and the hold is over', async () => {

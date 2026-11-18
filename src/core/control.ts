@@ -25,7 +25,7 @@ import { quoteScreenText } from './untrusted-screen-content';
 import * as path from 'path';
 import { DATA_DIR } from '../paths';
 import { logger } from './observability/logger';
-import { setInputGuard, isOwnUiPid, ownInputAt, type WindowQuery } from '../platform/pointer-guard';
+import { setInputGuard, setAfterOwnInput, isOwnUiPid, ownInputAt, gestureInProgress, type WindowQuery } from '../platform/pointer-guard';
 import { inForegroundBurst, setUserTurns } from '../platform/foreground-burst';
 import { windowTextIncludes } from '../platform/window-text';
 import { aiHostKind, sameApp } from './ai-hosts';
@@ -36,7 +36,7 @@ const stopFile = () => (dir ? path.join(dir, 'stopped.json') : null);
 /** Only where the stop file cannot be written: then this process at least stays stopped. Otherwise the file is the truth. */
 let stoppedHere = false;
 
-export function __setControlDirForTests(d: string | null): void { dir = d; stoppedHere = false; held = null; resumedAt = 0; resetBinding(); }
+export function __setControlDirForTests(d: string | null): void { dir = d; stoppedHere = false; heldHere = null; resumedAt = 0; pillHeld = false; ownBase = Promise.resolve(null); resetBinding(); }
 
 /** The user took control back. Every clawdcursor process sees it; it survives a restart. */
 export function stopControl(by: string): void {
@@ -50,7 +50,9 @@ export function stopControl(by: string): void {
     } catch { stoppedHere = true; }
   }
   // A stop ends a hold: the waiting acts are refused as stopped now.
-  if (held) { held = null; tell('resumed'); }
+  const wasHeld = isHeld();
+  dropHold();
+  if (wasHeld || pillHeld) tell('resumed');
 }
 
 /** Read on every call, never cached: another process's stop, or resume, must reach this one at once. */
@@ -108,34 +110,77 @@ export async function sleepUnlessStopped(ms: number): Promise<boolean> {
  * is the user's hand leaving it. Tests shorten them.
  */
 export const turnTiming = { idleMs: 1000, takeoverMs: 5000, waitMs: 50_000, pollMs: 200, graceMs: 1500 };
-/** The agent's own input ends a moment before its clock reads it (the read itself takes a few ms). */
+/** Only where the input clock could not be read after the agent's input: its own input ends a moment before its clock reads it. */
 const OWN_SLACK_MS = 100;
+/** Two reads of the same last input: equal on Windows (GetLastInputInfo's tick), within a ms or two on macOS. */
+const TICK_SLACK_MS = 2;
+/**
+ * The OS's input clock, read right after the agent's own last input (pointer-guard.ts tells): unchanged at the next check,
+ * nothing came since, so the last input was the agent's. Changed, someone else's input came after it: the user's. Exact,
+ * where a time window would hide a user who keeps working through a quick run of the agent's inputs (a batch).
+ */
+let ownBase: Promise<number | null> = Promise.resolve(null);
 
-let held: { by: string; since: number } | null = null;
-/** When the user last clicked Resume on the pill. */
+/**
+ * The hold is a file every clawdcursor process reads on every check, as the stop is: the Pause on one process's pill holds
+ * an agent working through another. Only where the file cannot be written does this process keep it to itself.
+ */
+const holdFile = () => (dir ? path.join(dir, 'held.json') : null);
+let heldHere: { by: string; since: number } | null = null;
+/** When the user last clicked Resume on the pill, or this process saw a hold end. */
 let resumedAt = 0;
+/** This process's pill was told 'held' (it offers Resume): it is told 'resumed' when the hold ends, wherever it ended. */
+let pillHeld = false;
 
 /** takeover: the user's turn, waiting `takeoverMs`; held: until their Resume; resumed: the agent's turn again. */
 export type HoldEvent = 'takeover' | 'held' | 'resumed';
 let onHold: ((e: HoldEvent) => void) | null = null;
 /** The indicator (banner.ts): the pill says "Paused", shows Resume while held, and the glow is down. */
 export function setOnHold(f: ((e: HoldEvent) => void) | null): void { onHold = f; }
-const tell = (e: HoldEvent) => { try { onHold?.(e); } catch { /* cosmetic */ } };
+const tell = (e: HoldEvent) => {
+  if (e !== 'takeover') pillHeld = e === 'held';
+  try { onHold?.(e); } catch { /* cosmetic */ }
+};
 
-export function isHeld(): boolean { return held !== null; }
+/** The hold now, read fresh: another process's Pause or Resume must reach this one at once. */
+function holdInfo(): { by: string; since: number } | null {
+  if (heldHere) return heldHere;
+  const file = holdFile();
+  if (!file) return null;
+  let raw: string;
+  try { raw = fs.readFileSync(file, 'utf8'); } catch { return null; }   // no file: not held
+  try { const h = JSON.parse(raw); return { by: String(h?.by ?? ''), since: Number(h?.at) || Date.now() }; } catch { return { by: '', since: Date.now() }; }
+}
+
+export function isHeld(): boolean { return holdInfo() !== null; }
+
+function dropHold(): void {
+  heldHere = null;
+  const file = holdFile();
+  if (file) { try { fs.rmSync(file, { force: true }); } catch { /* gone */ } }
+}
 
 /** The user holds clawdcursor: the pill's Pause, or a takeover they kept working through. Every act waits until releaseHold. */
 export function holdControl(by: string): void {
-  if (held || isStopped()) return;
-  held = { by, since: Date.now() };
+  if (isStopped()) return;
+  if (isHeld()) { if (!pillHeld) tell('held'); return; }   // held from another process: this pill offers Resume too
+  const at = Date.now();
+  const file = holdFile();
+  if (!file || !dir) heldHere = { by, since: at };
+  else {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(file, JSON.stringify({ by, pid: process.pid, at }));
+    } catch { heldHere = { by, since: at }; }
+  }
   logger.info('control.hold', { by, pid: process.pid });
   tell('held');
 }
 
-/** The user's Resume on the pill: the waiting acts go on, and their click on it is not a takeover. */
+/** The user's Resume on the pill: the waiting acts go on (in every process), and their click on it is not a takeover. */
 export function releaseHold(by: string): void {
-  if (!held) return;
-  held = null;
+  if (!isHeld()) { if (pillHeld) tell('resumed'); return; }
+  dropHold();
   resumedAt = Date.now();
   logger.info('control.release', { by, pid: process.pid });
   tell('resumed');
@@ -166,7 +211,10 @@ async function userIsIdle(): Promise<boolean> {
   const i = await readIdle().catch(() => null);
   if (!i || i.idleMs >= turnTiming.idleMs) return true;
   const last = Date.now() - i.idleMs;   // the latest the last input can have been
-  return last <= ownInputAt() + OWN_SLACK_MS || last <= resumedAt + turnTiming.graceMs;
+  if (last <= resumedAt + turnTiming.graceMs) return true;   // the click on Resume
+  const base = await ownBase;
+  if (base !== null) return Math.abs(i.tick - base) <= TICK_SLACK_MS;
+  return last <= ownInputAt() + OWN_SLACK_MS;
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -185,10 +233,18 @@ const byDeadline = (until: number) => Math.min(until, callBudget.getStore()?.unt
 /** While held: wait, up to waitMs, for the user's Resume. Throws the waiting reply when it does not come, or STOPPED. */
 async function waitWhileHeld(): Promise<void> {
   const until = byDeadline(Date.now() + turnTiming.waitMs);
-  while (held) {
+  let waited = false;
+  for (let h = holdInfo(); h; h = holdInfo()) {
+    if (!pillHeld) tell('held');   // held from another process, or from before this one started: this pill offers Resume too
+    waited = true;
     stopCheck();
-    if (Date.now() >= until) throw new Error(heldText(held.since));
+    if (Date.now() >= until) throw new Error(heldText(h.since));
     await sleep(turnTiming.pollMs);
+  }
+  if (waited) {
+    // Ended here or in another process: the Resume click is not a takeover, and this pill offers Pause again.
+    resumedAt = Math.max(resumedAt, Date.now());
+    if (pillHeld) tell('resumed');
   }
   stopCheck();
 }
@@ -199,20 +255,20 @@ async function waitWhileHeld(): Promise<void> {
  * → held until their Resume. Throws the waiting reply, or STOPPED.
  */
 export async function takeover(): Promise<void> {
-  if (!held) {
+  if (!isHeld()) {
     tell('takeover');
     try {
       movedAt = 0;   // a window that comes up meanwhile is the user's doing, not the agent's
-      for (const until = byDeadline(Date.now() + turnTiming.takeoverMs); !held && Date.now() < until;) {
+      for (const until = byDeadline(Date.now() + turnTiming.takeoverMs); !isHeld() && Date.now() < until;) {
         stopCheck();
         await sleep(Math.min(turnTiming.pollMs, Math.max(0, until - Date.now())));
       }
       stopCheck();
-      if (!held && await userIsIdle()) return;
+      if (!isHeld() && await userIsIdle()) return;
       holdControl('takeover');
     } finally {
       // Not held (idle again, or stopped): the agent's turn again as far as the pill goes, never "your turn" left up.
-      if (!held) tell('resumed');
+      if (!isHeld()) tell('resumed');
     }
   }
   await waitWhileHeld();
@@ -220,16 +276,19 @@ export async function takeover(): Promise<void> {
 
 /**
  * Before an act: wait while held; before real input also wait for the user to be idle (a takeover when they are not).
- * Not inside a foreground burst, which keeps the same rule itself (foreground-burst.ts).
+ * Not for this call's own acts inside a foreground burst, which keeps the same rule itself (foreground-burst.ts). Not in the
+ * middle of a gesture of the agent's (a button or a key it holds down): it is finished, never left pressed while the user
+ * works; its start (mouseDown, keyDown) waited for them.
  */
 async function turn(real: boolean): Promise<void> {
-  if (inForegroundBurst()) return;
-  if (held) await waitWhileHeld();
+  if (inForegroundBurst() || gestureInProgress()) return;
+  if (isHeld()) await waitWhileHeld();
   if (real && !(await userIsIdle())) await takeover();
 }
 
 // A hold counts as busy: the burst then waits in takeover() for the Resume, and never starts under the pill's Pause.
-setUserTurns({ idle: async () => !held && await userIsIdle(), takeover });
+setUserTurns({ idle: async () => !isHeld() && await userIsIdle(), takeover });
+setAfterOwnInput(() => { ownBase = readIdle().then(i => i?.tick ?? null, () => null); });
 
 // ── The window the agent is working in ──
 
