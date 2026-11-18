@@ -412,9 +412,13 @@ class ControlBanner {
       this.glowTail = null;
       if (!this.paused) send(this.glowChild, 'OFF');
     }
+    const orbChanged = !label !== !this.turnLabel;
     this.activity = label ?? this.activityBeforeTurn;
     this.turnLabel = label;
     if (!this.paused) send(this.child, `ACTIVITY ${this.activity || 'Working'}`);
+    // The orb (owner, 2026-11-18): it stops, in grey, for the user's turn, and works again after. The pause card's waits for
+    // the user in blue by itself.
+    if (orbChanged && !this.paused) send(this.child, `ORB ${label ? 'paused' : 'working'}`);
   }
 
   /**
@@ -632,6 +636,7 @@ class ControlBanner {
     this.child = child;
     this.publish();
     if (!this.paused && this.userHold === 'held') send(child, 'HELD ON');   // a pill shown again while held offers Resume
+    if (!this.paused && this.turnLabel) send(child, 'ORB paused');            // ...and its orb is stopped
     const started = Date.now();
     let spoke = false;
     // A write to a pill that already exited is EPIPE on this stream — never an uncaught error.

@@ -79,6 +79,7 @@ paused form.
 | --- | --- |
 | `ACTIVITY <text>` | Running form only. Replace the activity text. `<text>` is one line, at most 60 characters, sent raw (no escaping). |
 | `HIDE <ms>` | Hide the pill now and show it again by itself after `<ms>` milliseconds (a whole number; the built-in pill keeps it between 50 and 10000). A later `HIDE` restarts the wait. clawdcursor sends it just before the agent clicks, drags or scrolls, and waits 90 ms for the pill to be gone, so hide at once. Sent in both forms. |
+| `ORB working` / `ORB paused` | Running form only. The state of the pill's animated mark: `paused` while it is the user's turn (a hold or a takeover: stop it, in a muted colour), `working` after. The built-in pill's orb also has a `listening` state, which the paused card shows by itself while it waits for the user. |
 | `HELD ON` / `HELD OFF` | Running form only. The user holds the agent (your Pause, or they kept working after taking over): show a Resume button in place of Pause; `HELD OFF`, Pause again. clawdcursor sends the label too (`ACTIVITY Paused`), and keeps the pill up while held. |
 
 There are no other commands. In particular there is no "choices" or "input" command, and the user's hold above is not

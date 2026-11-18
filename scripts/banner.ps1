@@ -15,7 +15,7 @@
 #   - Parent kills this process to hide the banner.
 #   - stdin: "HIDE <ms>" steps aside for an agent's click; "ACTIVITY <text>" replaces
 #     the activity text (the first one comes in CLAWD_BANNER_ACTIVITY); "HELD ON" / "HELD OFF"
-#     swaps the Pause button for Resume and back.
+#     swaps the Pause button for Resume and back; "ORB working|paused" sets the orb's state (class Orb).
 #   - Pause → prints "BANNER_PAUSE": the parent holds every act of the agent's until
 #     Resume → "BANNER_RESUME" (src/core/control.ts). The pill stays up either way.
 #   - PAUSED mode (env CLAWD_BANNER_MODE=paused, set by src/core/pause-gate.ts
@@ -98,6 +98,8 @@ public class NoActivateBannerForm : Form {
     public event Action<string> ActivityChanged;
     // ...and "HELD ON" / "HELD OFF": the user holds the agent (Pause), so the button offers Resume; and back.
     public event Action<bool> HeldChanged;
+    // ...and "ORB <working|paused|listening>": the orb's state.
+    public event Action<string> OrbChanged;
     System.Windows.Forms.Timer reshow;
     public void StartStdinCommands() {
         var t = new System.Threading.Thread(() => {
@@ -114,6 +116,9 @@ public class NoActivateBannerForm : Form {
                     } else if ((line == "HELD ON" || line == "HELD OFF") && HeldChanged != null) {
                         bool on = line == "HELD ON";
                         try { BeginInvoke((Action)(() => HeldChanged(on))); } catch { }
+                    } else if (line.StartsWith("ORB ") && OrbChanged != null) {
+                        string orb = line.Substring(4).Trim();
+                        try { BeginInvoke((Action)(() => OrbChanged(orb))); } catch { }
                     }
                 }
                 Environment.Exit(0);   // stdin closed: the parent is gone, and a pill must not outlive it
@@ -168,10 +173,30 @@ public class NoActivateBannerForm : Form {
 //   still    with animations off (SPI_GETCLIENTAREAANIMATION): the one frame at t = .6
 // This control only is drawn again, about 10 times a second (#414: fewer wake-ups for the pill; a particle moves two or
 // three pixels a frame).
+// Its State is the library's too (owner, 2026-11-18: the orb changes when the agent is paused or waits for the user):
+//   working    the orbits above, amber: the agent is at work
+//   paused     the library's `paused`: the frame stops where it was, in the pill's grey (the user paused it or took over)
+//   listening  the library's "listening" state (mode wave, src/engine/lattice.ts frameWave) in the pause's blue: the
+//              agent waits for the user (the pause card). At 20 px: rings 15 and lonDensity 40 x sqrt(.105) = 5 and 13,
+//              radii x 1.6, speed 3.998; a sphere of dotted rings that a two-tempo wave swells, turning .18 t, tilted .38.
+// "ORB <state>" on the pill's stdin sets it.
 public class Orb : Control {
     [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint action, uint param, out bool value, uint flags);
-    const int Box = 20, Orbits = 3, Ghosts = 10, Workers = 3;
-    const double Speed = 3.9, Sized = 2.4;
+    const int Box = 20, Orbits = 3, Ghosts = 10, Workers = 3, MaxDots = 64;
+    const double Speed = 3.9, Sized = 2.4, WaveSpeed = 3.998, WaveSized = 1.6;
+    string state = "working";
+    double frozen = 0.6;   // paused: the t the frame stopped at
+    public string State {
+        get { return state; }
+        set {
+            if (value != "paused" && value != "listening") value = "working";
+            if (value == state) return;
+            if (value == "paused") frozen = Now();
+            state = value;
+            Invalidate();
+        }
+    }
+    double Now() { return tick == null ? 0.6 : clock.Elapsed.TotalSeconds * (state == "listening" ? WaveSpeed : Speed); }
     readonly System.Diagnostics.Stopwatch clock = new System.Diagnostics.Stopwatch();
     readonly int[] canvas = new int[Box * Box];
     [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hWnd);
@@ -179,8 +204,9 @@ public class Orb : Control {
     [DllImport("gdi32.dll")] static extern int SetDIBitsToDevice(IntPtr dc, int x, int y, int w, int h, int sx, int sy, int first, int lines, int[] bits, int[] info, uint usage);
     // BITMAPINFOHEADER for the canvas: 40 bytes, Box wide, top-down (a negative height), one plane, 32 bits a pixel.
     static readonly int[] header = { 40, Box, -Box, 1 | (32 << 16), 0, 0, 0, 0, 0, 0 };
-    readonly double[] dots = new double[Orbits * (Ghosts + Workers) * 6];   // x, y, z, radius, ink, alpha
-    readonly int[] order = new int[Orbits * (Ghosts + Workers)];
+    readonly double[] dots = new double[MaxDots * 6];   // x, y, z, radius, ink, alpha
+    readonly int[] order = new int[MaxDots];
+    int count;   // dots in this frame
     System.Windows.Forms.Timer tick;
     public Orb() {
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.Opaque, true);
@@ -208,13 +234,47 @@ public class Orb : Control {
         SetDIBitsToDevice(dc, 0, 0, Box, Box, 0, 0, 0, Box, canvas, header, 0);
         e.Graphics.ReleaseHdc(dc);
     }
+    // A dot of this frame, into its place far to near.
+    void Add(double x, double y, double z, double r, double ink, double alpha) {
+        if (count >= MaxDots) return;
+        int n = count++;
+        dots[6 * n] = x; dots[6 * n + 1] = y; dots[6 * n + 2] = z; dots[6 * n + 3] = r; dots[6 * n + 4] = ink; dots[6 * n + 5] = alpha;
+        int at = n;
+        for (; at > 0 && dots[6 * order[at - 1] + 2] > z; at--) order[at] = order[at - 1];
+        order[at] = n;
+    }
+    // "listening" (lattice.ts frameWave) at 20 px.
+    void Wave(double t) {
+        double c = Box / 2.0, R = c * 0.874, rs = Math.Pow(Box / 300.0, 0.6);
+        double yaw = t * 0.18, st = Math.Sin(0.38), ct = Math.Cos(0.38), sy = Math.Sin(yaw), cy = Math.Cos(yaw);
+        const int rings = 5, lonDensity = 13;
+        for (int ri = 0; ri <= rings; ri++) {
+            double lat = -Math.PI / 2 + (double)ri / rings * Math.PI, cl = Math.Cos(lat), sl = Math.Sin(lat);
+            // two waves, different tempi
+            double w = 0.62 * Math.Sin(t * 2.1 - ri * 0.52) + 0.38 * Math.Sin(t * 1.27 + ri * 0.83);
+            double rr = R * (0.88 + 0.105 * w), crest = Math.Max(0, w);
+            int lons = Math.Max(1, (int)Math.Round(Math.Abs(cl) * lonDensity));
+            for (int lj = 0; lj < lons; lj++) {
+                double lon = (double)lj / lons * 2 * Math.PI;
+                double x = cl * Math.Cos(lon) * rr, y = sl * rr, z = cl * Math.Sin(lon) * rr;
+                double x1 = x * cy + z * sy, z1 = -x * sy + z * cy, y1 = y * ct - z1 * st, z2 = y * st + z1 * ct;
+                double depth = (z2 / R + 1) / 2;
+                Add(c + x1, c - y1, z2, Math.Max(0.3, (0.6 + 1.7 * depth) * WaveSized * (1 + 0.4 * crest) * rs), 0.66 - 0.56 * depth - 0.1 * crest, 1);
+            }
+        }
+    }
     // One frame of the orb, into the canvas.
     void Draw() {
-        double t = tick == null ? 0.6 : clock.Elapsed.TotalSeconds * Speed;
+        double t = state == "paused" ? frozen : Now();
+        count = 0;
+        if (state == "listening") Wave(t); else Orbit(t);
+        Paint();
+    }
+    // "working" (orbits.ts).
+    void Orbit(double t) {
         double centre = Box / 2.0, R = centre * 0.82, scale = Math.Pow(Box / 300.0, 0.6);
         // The shared spin and tilt (core.ts makeProj).
         double yaw = t * 0.12, st = Math.Sin(0.3), ct = Math.Cos(0.3), sy = Math.Sin(yaw), cy = Math.Cos(yaw);
-        int n = 0;
         for (int orbit = 0; orbit < Orbits; orbit++) {
             double h1 = Hash(orbit, 1.7), h2 = Hash(orbit, 5.2), h3 = Hash(orbit, 8.9);
             double ro = R * (0.45 + 0.52 * h1), th = h1 * 2 * Math.PI, phi = Math.Acos(2 * h2 - 1);
@@ -224,31 +284,31 @@ public class Orb : Control {
             ux /= ul; uy /= ul;
             double vx = -nz * uy, vy = nz * ux, vz = nx * uy - ny * ux;
             double speed = (0.25 + 0.55 * h3) * (h3 > 0.5 ? 1 : -1);
-            for (int k = 0; k < Ghosts + Workers; k++, n++) {
+            for (int k = 0; k < Ghosts + Workers; k++) {
                 bool ghost = k < Ghosts;
                 double a = ghost ? k * 2 * Math.PI / Ghosts : t * speed + (k - Ghosts) * 2 * Math.PI / Workers + h2 * 6;
                 double x = (ux * Math.Cos(a) + vx * Math.Sin(a)) * ro, y = (uy * Math.Cos(a) + vy * Math.Sin(a)) * ro, z = vz * Math.Sin(a) * ro;
                 double x1 = x * cy + z * sy, z1 = -x * sy + z * cy, y1 = y * ct - z1 * st, z2 = y * st + z1 * ct;
                 double depth = (z2 / ro + 1) / 2;
-                dots[6 * n] = centre + x1; dots[6 * n + 1] = centre - y1; dots[6 * n + 2] = z2;
-                dots[6 * n + 3] = Math.Max(0.3, (ghost ? 0.9 * Sized : (1.2 + 1.6 * depth) * Sized) * scale);
-                dots[6 * n + 4] = ghost ? 0.72 : 0.3 - 0.22 * depth;
-                dots[6 * n + 5] = ghost ? 0.5 * (0.4 + 0.6 * depth) : 1;
-                // Far to near: into its place among the dots so far.
-                int at = n;
-                for (; at > 0 && dots[6 * order[at - 1] + 2] > z2; at--) order[at] = order[at - 1];
-                order[at] = n;
+                Add(centre + x1, centre - y1, z2, Math.Max(0.3, (ghost ? 0.9 * Sized : (1.2 + 1.6 * depth) * Sized) * scale),
+                    ghost ? 0.72 : 0.3 - 0.22 * depth, ghost ? 0.5 * (0.4 + 0.6 * depth) : 1);
             }
         }
-        // The dots, far to near, over the pill's colour: each pixel by how much of it the dot covers (drawn here, on
-        // 400 pixels, and put on screen in one piece - forty anti-aliased GDI+ ellipses a frame cost far more).
+    }
+    // The dots, far to near, over the pill's colour: each pixel by how much of it the dot covers (drawn here, on
+    // 400 pixels, and put on screen in one piece - forty anti-aliased GDI+ ellipses a frame cost far more). The tint is the
+    // state's: amber at work, the pill's grey when paused, the pause's blue when it waits for the user.
+    void Paint() {
+        int R0 = 245, G0 = 158, B0 = 11;
+        if (state == "paused") { R0 = 140; G0 = 146; B0 = 158; } else if (state == "listening") { R0 = 59; G0 = 130; B0 = 246; }
         int back = BackColor.ToArgb();
         for (int i = 0; i < canvas.Length; i++) canvas[i] = back;
-        foreach (int d in order) {
+        for (int i = 0; i < count; i++) {
+            int d = order[i];
             double dx = dots[6 * d], dy = dots[6 * d + 1], r = dots[6 * d + 3];
             double alpha = dots[6 * d + 5] * Math.Min(1, Math.PI * r * r);   // a dot smaller than a pixel covers that much of it
             double lit = 1 - Math.Min(1, Math.Max(0, dots[6 * d + 4]));
-            int tr = (int)(245 * lit), tg = (int)(158 * lit), tb = (int)(11 * lit);   // amber, fading toward black with the ink
+            int tr = (int)(R0 * lit), tg = (int)(G0 * lit), tb = (int)(B0 * lit);   // the tint, fading toward black with the ink
             for (int py = Math.Max(0, (int)(dy - r - 1)); py <= Math.Min(Box - 1, (int)(dy + r + 1)); py++) {
                 for (int px = Math.Max(0, (int)(dx - r - 1)); px <= Math.Min(Box - 1, (int)(dx + r + 1)); px++) {
                     double ex = px + 0.5 - dx, ey = py + 0.5 - dy, cover = r + 0.5 - Math.Sqrt(ex * ex + ey * ey);
@@ -375,13 +435,11 @@ if ($env:CLAWD_BANNER_MODE -eq 'paused') {
     $script:edge = $blue
     $pad = 18
 
-    $dot = New-Object System.Windows.Forms.Label
-    $dot.Text      = [char]0x25CF
-    $dot.Font      = New-Object System.Drawing.Font('Segoe UI', 9)
-    $dot.ForeColor = $blue
-    $dot.BackColor = [System.Drawing.Color]::Transparent
-    $dot.AutoSize  = $true
-    $dot.Location  = New-Object System.Drawing.Point(($pad - 3), 12)
+    # The orb, waiting for the user: the library's "listening" state, in the pause's blue (class Orb).
+    $dot = New-Object Orb
+    $dot.BackColor = $form.BackColor
+    $dot.State     = 'listening'
+    $dot.Location  = New-Object System.Drawing.Point(($pad - 4), 10)
 
     $title = New-Object System.Windows.Forms.Label
     $sep = ' ' + [char]0x00B7 + ' '   # a middle dot; non-ASCII stays out of the file (PowerShell 5.1 reads it as ANSI)
@@ -392,7 +450,7 @@ if ($env:CLAWD_BANNER_MODE -eq 'paused') {
     $title.ForeColor = [System.Drawing.Color]::FromArgb(147, 180, 245)
     $title.BackColor = [System.Drawing.Color]::Transparent
     $title.AutoSize  = $true
-    $title.Location  = New-Object System.Drawing.Point(($pad + 12), 13)
+    $title.Location  = New-Object System.Drawing.Point(($pad + 20), 13)
 
     $msg = New-Object System.Windows.Forms.Label
     $msg.Text        = [string]$env:CLAWD_BANNER_MESSAGE
@@ -567,13 +625,7 @@ if ($env:CLAWD_BANNER_MODE -eq 'paused') {
 
     $timer = New-Object System.Windows.Forms.Timer
     $timer.Interval = 900
-    $bright = $true
-    $timer.Add_Tick({
-        $script:bright = -not $script:bright
-        if ($script:bright) { $dot.ForeColor = $blue }
-        else                { $dot.ForeColor = [System.Drawing.Color]::FromArgb(25, 55, 110) }
-        $form.KeepOnTop()
-    })
+    $timer.Add_Tick({ $form.KeepOnTop() })   # the orb moves by itself
     $timer.Start()
 
     # A short system sound when the prompt appears, so a user who isn't looking
@@ -656,6 +708,7 @@ function Update-Layout {
 Update-Layout
 
 $form.add_ActivityChanged([Action[string]]{ param($t) $activity.Text = $t; Update-Layout })
+$form.add_OrbChanged([Action[string]]{ param($s) $dot.State = $s })
 $form.add_HeldChanged([Action[bool]]{
     param($on)
     if ($on) { $hold.Text = 'Resume'; $hold.Tag = 'BANNER_RESUME'; $hold.BackColor = $resumeIdle }

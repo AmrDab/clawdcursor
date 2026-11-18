@@ -79,7 +79,6 @@ func rgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> NSColor {
 }
 
 let blue = rgb(59, 130, 246)
-let blueDim = rgb(25, 55, 110)
 let background = rgb(22, 24, 29)
 let outline = rgb(58, 62, 72)
 let muted = rgb(140, 146, 158)
@@ -241,6 +240,21 @@ final class OrbView: NSView {
     var redraw: Timer?
     override var isFlipped: Bool { true }   // y grows downward, as on the canvas the numbers are for
 
+    /// The library's state, as on Windows (banner.ps1 class Orb): "working" (the orbits, amber), "paused" (the library's
+    /// `paused`: the frame stops where it was, in the pill's grey), "listening" (mode wave, lattice.ts frameWave, in the
+    /// pause's blue: the agent waits for the user). "ORB <state>" on the pill's stdin sets it.
+    var state = "working" {
+        didSet {
+            if state == oldValue { return }
+            if state == "paused" { frozen = clock(oldValue) }
+            needsDisplay = true
+        }
+    }
+    var frozen = 0.6
+    func clock(_ s: String) -> Double {
+        redraw == nil ? 0.6 : Date().timeIntervalSince(started) * (s == "listening" ? 3.998 : 3.9)
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         redraw?.invalidate()
@@ -259,13 +273,33 @@ final class OrbView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        let box = 20.0, speed = 3.9, sized = 2.4
-        let t = redraw == nil ? 0.6 : Date().timeIntervalSince(started) * speed
+        let box = 20.0, sized = 2.4
+        let t = state == "paused" ? frozen : clock(state)
         let centre = box / 2, radius = centre * 0.82, scale = pow(box / 300, 0.6)
+        var dots: [(x: Double, y: Double, z: Double, r: Double, ink: Double, alpha: Double)] = []
+        if state == "listening" {
+            // At 20 px: rings 15 and lonDensity 40 x sqrt(.105) = 5 and 13, radii x 1.6; turning .18 t, tilted .38.
+            let r0 = centre * 0.874
+            let yaw = t * 0.18, st = sin(0.38), ct = cos(0.38), sy = sin(yaw), cy = cos(yaw)
+            for ri in 0...5 {
+                let lat = -Double.pi / 2 + Double(ri) / 5 * Double.pi, cl = cos(lat), sl = sin(lat)
+                let w = 0.62 * sin(t * 2.1 - Double(ri) * 0.52) + 0.38 * sin(t * 1.27 + Double(ri) * 0.83)   // two tempi
+                let rr = r0 * (0.88 + 0.105 * w), crest = max(0, w)
+                let lons = max(1, Int((abs(cl) * 13).rounded()))
+                for lj in 0..<lons {
+                    let lon = Double(lj) / Double(lons) * 2 * Double.pi
+                    let x = cl * cos(lon) * rr, y = sl * rr, z = cl * sin(lon) * rr
+                    let x1 = x * cy + z * sy, z1 = -x * sy + z * cy, y1 = y * ct - z1 * st, z2 = y * st + z1 * ct
+                    let depth = (z2 / r0 + 1) / 2
+                    dots.append((x: centre + x1, y: centre - y1, z: z2,
+                                 r: max(0.3, (0.6 + 1.7 * depth) * 1.6 * (1 + 0.4 * crest) * scale),
+                                 ink: 0.66 - 0.56 * depth - 0.1 * crest, alpha: 1))
+                }
+            }
+        }
         // The shared spin and tilt (core.ts makeProj).
         let yaw = t * 0.12, st = sin(0.3), ct = cos(0.3), sy = sin(yaw), cy = cos(yaw)
-        var dots: [(x: Double, y: Double, z: Double, r: Double, ink: Double, alpha: Double)] = []
-        for orbit in 0..<3 {
+        for orbit in 0..<(state == "listening" ? 0 : 3) {
             let h1 = hash(Double(orbit), 1.7), h2 = hash(Double(orbit), 5.2), h3 = hash(Double(orbit), 8.9)
             let ro = radius * (0.45 + 0.52 * h1), th = h1 * 2 * Double.pi, phi = acos(2 * h2 - 1)
             // The orbit's plane: u and v at right angles to its normal.
@@ -288,10 +322,12 @@ final class OrbView: NSView {
                              alpha: ghost ? 0.5 * (0.4 + 0.6 * depth) : 1))
             }
         }
-        // Far to near; on a dark ground the tint (amber, #f59e0b) fades toward black with the ink (core.ts inkColor).
+        // Far to near; on a dark ground the tint fades toward black with the ink (core.ts inkColor). The state's tint:
+        // amber at work, the pill's grey when paused, the pause's blue when it waits for the user.
+        let tint: (r: CGFloat, g: CGFloat, b: CGFloat) = state == "paused" ? (140, 146, 158) : state == "listening" ? (59, 130, 246) : (245, 158, 11)
         for d in dots.sorted(by: { $0.z < $1.z }) {
             let ink = CGFloat(1 - min(1, max(0, d.ink)))
-            ctx.setFillColor(red: 245 / 255 * ink, green: 158 / 255 * ink, blue: 11 / 255 * ink, alpha: CGFloat(d.alpha))
+            ctx.setFillColor(red: tint.r / 255 * ink, green: tint.g / 255 * ink, blue: tint.b / 255 * ink, alpha: CGFloat(d.alpha))
             ctx.fillEllipse(in: CGRect(x: d.x - d.r, y: d.y - d.r, width: 2 * d.r, height: 2 * d.r))
         }
     }
@@ -527,6 +563,9 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 } else if line == "HELD ON" || line == "HELD OFF" {
                     let on = line == "HELD ON"
                     DispatchQueue.main.async { self?.setHeld(on) }
+                } else if line.hasPrefix("ORB ") {
+                    let state = String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+                    DispatchQueue.main.async { (self?.runDot as? OrbView)?.state = state }
                 } else if line == "TARGET" || line.hasPrefix("TARGET ") {
                     // Pairs after the word: <window number or 0> <pid>.
                     let parts = line.split(separator: " ")
@@ -627,7 +666,9 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         content.layer?.borderWidth = 1
         content.layer?.borderColor = (paused ? blue : outline).cgColor
 
-        let dot = label("\u{25CF}", size: 9, color: blue)   // the paused card's dot; the running pill has the orb
+        // The paused card's orb: the library's "listening" state, in the pause's blue (the running pill's is makeOrb()).
+        let dot = OrbView(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
+        dot.state = "listening"
         var height: CGFloat = 38
 
         if paused {
@@ -672,8 +713,8 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             let rowTop: CGFloat = afterMsg + choicesH + inputH
             height = rowTop + 30 + 16
 
-            dot.frame = NSRect(x: pad, y: height - 16 - 16, width: 12, height: 16)
-            title.frame = NSRect(x: pad + 14, y: height - 16 - 16, width: inner - 14, height: 16)
+            dot.frame = NSRect(x: pad - 4, y: height - 16 - 18, width: 20, height: 20)
+            title.frame = NSRect(x: pad + 20, y: height - 16 - 16, width: inner - 20, height: 16)
             msg.frame = NSRect(x: pad, y: height - msgTop - msgH, width: inner, height: msgH)
 
             let gray = footerBg
@@ -835,10 +876,9 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             }
         }
 
-        var bright = true
-        timer = Timer.scheduledTimer(withTimeInterval: paused ? 0.9 : 0.7, repeats: true) { [weak self] _ in
-            bright.toggle()
-            if paused { dot.textColor = bright ? blue : blueDim } else { self?.updateClock() }
+        // The running pill's clock; the card's orb moves by itself.
+        if !paused {
+            timer = Timer.scheduledTimer(withTimeInterval: 0.7, repeats: true) { [weak self] _ in self?.updateClock() }
         }
     }
 

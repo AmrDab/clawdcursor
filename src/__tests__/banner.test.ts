@@ -415,7 +415,7 @@ describe('the indicator has two modes', () => {
     expect(spawned[0].written).toContain('ACTIVITY Paused — your turn');
     controlBanner.burstEvent('resume');
     expect(states(glows[0])).toEqual(['ON', 'OFF', 'ON']);
-    expect(spawned[0].written.at(-1)).toBe('ACTIVITY Typing in Edge');
+    expect(spawned[0].written.slice(-2)).toEqual(['ACTIVITY Typing in Edge', 'ORB working']);   // the orb works again
     vi.advanceTimersByTime(10 * TAIL);
     expect(states(glows[0])).toEqual(['ON', 'OFF', 'ON']);   // up for the rest of the burst
     controlBanner.burstEvent('pause');
@@ -489,7 +489,7 @@ describe('the pill\'s Pause and Resume', () => {
     controlBanner.setActivity('Typing in Edge');
     await fromPill(spawned[0], 'BANNER_PAUSE');
     expect(isHeld()).toBe(true);
-    expect(spawned[0].written).toEqual(expect.arrayContaining(['ACTIVITY Paused', 'HELD ON']));
+    expect(spawned[0].written).toEqual(expect.arrayContaining(['ACTIVITY Paused', 'ORB paused', 'HELD ON']));   // the orb stops, in grey
     controlBanner.foreground();                       // nothing turns the glow on while they hold it
     expect(states(glows[0])).not.toContain('ON');
     controlBanner.setActivity('Clicking in Edge');    // shown once it is the agent's turn again, not over "Paused"
@@ -498,7 +498,7 @@ describe('the pill\'s Pause and Resume', () => {
     expect(spawned[0].killed).toBe(false);            // its Resume is the way back: never hidden while held
     await fromPill(spawned[0], 'BANNER_RESUME');
     expect(isHeld()).toBe(false);
-    expect(spawned[0].written.slice(-2)).toEqual(['ACTIVITY Clicking in Edge', 'HELD OFF']);
+    expect(spawned[0].written.slice(-3)).toEqual(['ACTIVITY Clicking in Edge', 'ORB working', 'HELD OFF']);
     vi.advanceTimersByTime(31_000);
     expect(spawned[0].killed).toBe(true);             // back to the agent: the idle hide counts again
   });
@@ -517,12 +517,30 @@ describe('the pill\'s Pause and Resume', () => {
     expect(swift).toMatch(/@objc func holdClicked\(_ sender: FirstClickButton\) \{\s*emit\(sender\.line\)\s*\}/);
   });
 
+  // The orb (Thinking Orbs, owner 2026-11-18): working (amber orbits), paused (stopped, grey) on "ORB paused", and the
+  // library's "listening" wave in blue on the card that waits for the user. Both drawers, read from the source.
+  it('both pills’ orbs change: ORB lines set the running one, and the waiting card’s orb is the listening wave', () => {
+    const read = (...p: string[]) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', ...p), 'utf8');
+    const ps = read('banner.ps1');
+    expect(ps).toMatch(/line\.StartsWith\("ORB "\)/);
+    expect(ps).toMatch(/\$form\.add_OrbChanged\(\[Action\[string\]\]\{ param\(\$s\) \$dot\.State = \$s \}\)/);
+    expect(ps).toMatch(/\$dot\.State\s+= 'listening'/);
+    expect(ps).toMatch(/if \(state == "listening"\) Wave\(t\); else Orbit\(t\);/);
+    expect(ps).toMatch(/double t = state == "paused" \? frozen : Now\(\);/);
+    const swift = read('mac', 'overlay.swift');
+    expect(swift).toMatch(/line\.hasPrefix\("ORB "\)/);
+    expect(swift).toMatch(/dot\.state = "listening"/);
+    expect(swift).toMatch(/if state == "listening" \{/);
+    expect(swift).toMatch(/let t = state == "paused" \? frozen : clock\(state\)/);
+  });
+
   it('a pill shown again while held offers Resume at once', async () => {
     controlBanner.touch();
     await fromPill(spawned[0], 'BANNER_PAUSE');
     controlBanner.showPaused({ id: 7, message: 'Pick one', since: 0 }, () => {});
     controlBanner.showRunning();
     expect(spawned.at(-1)!.written).toContain('HELD ON');
+    expect(spawned.at(-1)!.written).toContain('ORB paused');   // ...and its orb is stopped
   });
 
   it('a takeover says "your turn" with the glow down, and its end gives the agent\'s label back', () => {
@@ -531,10 +549,10 @@ describe('the pill\'s Pause and Resume', () => {
     controlBanner.foreground();
     controlBanner.holdEvent('takeover');
     expect(states(glows[0])).toEqual(['ON', 'OFF']);
-    expect(spawned[0].written.at(-1)).toBe('ACTIVITY Paused — your turn');
+    expect(spawned[0].written.slice(-2)).toEqual(['ACTIVITY Paused — your turn', 'ORB paused']);
     expect(spawned[0].written).not.toContain('HELD ON');   // no Resume button: it goes on by itself if they stop
     controlBanner.holdEvent('resumed');
-    expect(spawned[0].written.at(-1)).toBe('ACTIVITY Typing in Edge');
+    expect(spawned[0].written.slice(-2)).toEqual(['ACTIVITY Typing in Edge', 'ORB working']);
   });
 });
 

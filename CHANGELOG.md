@@ -35,7 +35,8 @@ All notable changes to Clawd Cursor will be documented in this file.
   confirming each state).
 - **A Pause button on the pill** (Windows, macOS; #453). Every act of the agent's waits, background ones included,
   until Resume on the pill; Resume continues without a chat step. A Pause in one clawdcursor process holds the others
-  too, as Stop does.
+  too, as Stop does. The pill's orb shows it: it stops, in grey, while it is the user's turn, and the card that waits for
+  the user shows the orb's blue "listening" wave (Thinking Orbs' own states).
 - **`compile_ui` element refs work in a window the user is not in** (#453): a ref into a background window acts by name
   in that window's process instead of failing with STALE_REF; one with no unique name there is refused, since a click
   at its bounds would land on the user's window.
