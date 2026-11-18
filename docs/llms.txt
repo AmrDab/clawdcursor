@@ -1,6 +1,6 @@
 # clawdcursor
 
-> The fallback AI execution layer. A local MCP server that gives a
+> Gives any AI control over the GUI: the fallback execution layer. A local MCP server that gives a
 > tool-calling agent the real desktop: you take the fastest way into each app (the
 > accessibility tree first, then the window's text, OCR when there is no tree,
 > screenshots last), and after every action it says whether it worked. It

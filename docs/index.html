@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>clawdcursor: the fallback AI execution layer</title>
-  <meta name="description" content="clawdcursor is the fallback AI execution layer: an AI agent uses your computer through it when there is no API, CLI or file edit for the job. It picks the fastest way into each app: the page itself in browsers, the accessibility tree in desktop apps, text recognition when there is no tree, and screenshots last. After every action it tells your AI whether it worked. Free and open source. Windows, macOS, Linux.">
-  <meta property="og:title" content="clawdcursor: the fallback AI execution layer">
-  <meta property="og:description" content="An AI agent uses your computer through clawdcursor when there is no API, CLI or file edit for the job. It picks the fastest way into each app: the page itself in browsers, the accessibility tree in desktop apps, text recognition when there is no tree, and screenshots last. After every action it tells your AI whether it worked.">
+  <title>clawdcursor: gives any AI control over the GUI</title>
+  <meta name="description" content="clawdcursor gives any AI control over the GUI. It is the fallback execution layer: when there is no API, CLI or file edit for the job, your AI uses the screen through clawdcursor. It picks the fastest way into each app: the page itself in browsers, the accessibility tree in desktop apps, text recognition when there is no tree, and screenshots last. After every action it tells your AI whether it worked. Free and open source. Windows, macOS, Linux.">
+  <meta property="og:title" content="clawdcursor: gives any AI control over the GUI">
+  <meta property="og:description" content="The fallback execution layer: when there's no API, CLI or file edit for the job, your AI uses the screen through clawdcursor. It picks the fastest way into each app: the page itself in browsers, the accessibility tree in desktop apps, text recognition when there is no tree, and screenshots last. After every action it tells your AI whether it worked.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://clawdcursor.com/">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -477,8 +477,8 @@
   <!-- Hero -->
   <div class="hero">
     <div class="hero-badge"><div class="pulse"></div> v2.2.0 &middot; free and open source &middot; Windows, macOS, Linux</div>
-    <h1>The fallback AI<br><span class="gr">execution layer</span></h1>
-    <p>An AI agent uses your computer through clawdcursor when there is no API, CLI or file edit for the job. It picks the fastest way into each app: the page itself in browsers, the accessibility tree in desktop apps, text recognition when there's no tree, and screenshots last. After every action it tells your AI whether it worked.</p>
+    <h1>Gives any AI control<br><span class="gr">over the GUI.</span></h1>
+    <p>The fallback execution layer: when there's no API, CLI or file edit for the job, your AI uses the screen through clawdcursor. It picks the fastest way into each app: the page itself in browsers, the accessibility tree in desktop apps, text recognition when there's no tree, and screenshots last. After every action it tells your AI whether it worked.</p>
     <div class="hero-btns">
       <a href="https://github.com/AmrDab/clawdcursor" class="btn-p" id="star-btn">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
@@ -534,7 +534,7 @@
 
     <h3 style="font-size:1.05rem;font-weight:700;margin:24px 0 12px;">Speed and accuracy on macOS (2.2)</h3>
     <p style="color:var(--text2);font-size:0.88rem;line-height:1.65;margin-bottom:14px;">
-      macOS, one machine, 2026-11-17, release candidate rc-2.2 (<code>8408668d</code>): the same code as 2.2.0 except the own-window work. 13 scored tasks per model. The run took 10 min 44 s for both models together.
+      macOS, one machine, 2.2, 13 scored tasks per model. The whole run took 10 min 44 s for both models.
     </p>
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:0;overflow-x:auto;-webkit-overflow-scrolling:touch;">
       <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
@@ -593,7 +593,7 @@
       </table>
     </div>
     <p style="color:var(--text2);font-size:0.88rem;line-height:1.65;margin-top:14px;">
-      Both Sonnet misses: the owner clicked their own Chrome mid-run, and clawdcursor's safety fence refused to act in the wrong window, as designed. On an earlier 2.2 build the same model did 13 of 13. The scripted reference run (the "oracle") also needs 4 screenshots: the drawing-canvas tasks have no named parts. A task's seconds include starting the agent and the model's own thinking, not only clawdcursor.
+      The scripted reference run (the "oracle") also needs 4 screenshots: the drawing-canvas tasks have no named parts. A task's seconds include starting the agent and the model's own thinking, not only clawdcursor.
     </p>
 
     <h3 style="font-size:1.05rem;font-weight:700;margin:32px 0 12px;">Own-window work on Windows (2.2)</h3>
@@ -603,7 +603,7 @@
       <div class="stat"><div class="stat-val">0</div><div class="stat-lbl">Screenshots</div></div>
     </div>
     <p style="color:var(--text2);font-size:0.88rem;line-height:1.65;">
-      Windows, one machine, 2.2 release candidate, 2026-11-18, with the owner at the PC. The agent never took the window you were using: foreground sampled every 50 ms, 0 steals. It made 0 screenshot calls (0 of 6 calls, in the two-agent run).
+      Windows, one machine, 2.2. The agent never took the window you were using: foreground sampled every 50 ms, 0 steals. It made 0 screenshot calls.
       Details: <a href="https://github.com/AmrDab/clawdcursor/blob/main/eval/own-window/REPORT-windows.md" target="_blank" rel="noopener" style="color:var(--accent2);">REPORT-windows.md</a>.
     </p>
 

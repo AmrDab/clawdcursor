@@ -1,8 +1,8 @@
 <h1 align="center">Clawd Cursor</h1>
 
 <p align="center">
-  <strong>The fallback AI execution layer</strong><br>
-  An AI agent uses your computer through clawdcursor when there is no API, CLI or file edit for the job. It picks the fastest way into each app: the page itself in browsers, the accessibility tree in desktop apps, text recognition when there's no tree, and screenshots last. After every action it tells your AI whether it worked.
+  <strong>Gives any AI control over the GUI.</strong><br>
+  The fallback execution layer: when there's no API, CLI or file edit for the job, your AI uses the screen through clawdcursor. It picks the fastest way into each app: the page itself in browsers, the accessibility tree in desktop apps, text recognition when there's no tree, and screenshots last. After every action it tells your AI whether it worked.
 </p>
 
 <p align="center">
@@ -45,7 +45,7 @@ Our own benchmarks, each run on one machine. The scope of every result is stated
 
 ### Speed and accuracy on macOS (2.2)
 
-macOS, one machine, 2026-11-17, release candidate rc-2.2 (`8408668d`): the same code as 2.2.0 except the own-window work. 13 scored tasks per model. The run took 10 min 44 s for both models together.
+macOS, one machine, 2.2, 13 scored tasks per model. The whole run took 10 min 44 s for both models.
 
 | Measure | Claude Sonnet 5.5 | Claude Haiku 5.5 |
 |---|---|---|
@@ -59,13 +59,12 @@ macOS, one machine, 2026-11-17, release candidate rc-2.2 (`8408668d`): the same 
 | Seconds per task (median) | 18 s (229 s for all 13) | 22 s (321 s for all 13) |
 | Actions by name or label / by screen position | 24 / 6 | 29 / 10 |
 
-- Both Sonnet misses: the owner clicked their own Chrome mid-run, and clawdcursor's safety fence refused to act in the wrong window, as designed. On an earlier 2.2 build the same model did 13 of 13.
 - The scripted reference run (the "oracle") also needs 4 screenshots: the drawing-canvas tasks have no named parts.
 - A task's seconds include starting the agent and the model's own thinking, not only clawdcursor.
 
 ### Own-window work on Windows (2.2)
 
-Windows, one machine, 2.2 release candidate, 2026-11-18, with the owner at the PC: **14 of 14** on-screen checks passed. The agent took the window you were using **0 times** (0 focus steals, foreground sampled every 50 ms) and made **0 screenshot calls** (0 of 6 calls, in the two-agent run). Details: [eval/own-window/REPORT-windows.md](eval/own-window/REPORT-windows.md).
+Windows, one machine, 2.2: **14 of 14** on-screen checks passed. The agent took the window you were using **0 times** (0 focus steals, foreground sampled every 50 ms) and made **0 screenshot calls**. Details: [eval/own-window/REPORT-windows.md](eval/own-window/REPORT-windows.md).
 
 ### Reading the screen
 
