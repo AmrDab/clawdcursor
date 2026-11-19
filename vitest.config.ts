@@ -11,7 +11,7 @@ export default defineConfig({
     project: 'unit',
     globals: true,
     environment: 'node',
-    setupFiles: ['tests/vitest.setup.ts'],
+    setupFiles: ['tests/vitest.setup.ts', 'tests/vitest.guides.setup.ts'],
     projects: [
       {
         extends: true,
