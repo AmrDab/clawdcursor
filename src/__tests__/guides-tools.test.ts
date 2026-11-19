@@ -151,6 +151,10 @@ describe('guide hint: the keys', () => {
   it('a name that is also a tool name is shown as words, so the compact surface does not rewrite it', () => {
     put({ shortcuts: { close_window: 'mod+w', compose: 'c' }, consequential: ['close_window'] });
     expect(guideHint(url, 'win32')).toContain('keys (Windows): close window* ctrl+w · compose c');
+    // the full guide too
+    const full = renderGuide(loadGuides().get('gmail')!, 'win32');
+    expect(full).toContain('close window *: ctrl+w');
+    expect(full).not.toContain('close_window');
   });
 
   it('a refreshed guide (not bundled) has its keys wrapped as untrusted; the pointer stays outside', () => {

@@ -5,6 +5,12 @@
 import { wrapUntrustedScreenContent } from '../untrusted-screen-content';
 import type { Guide, GuideChord, GuideStep } from './lint';
 import type { LoadedGuide } from './store';
+import { COMPOUND_ROUTE_INDEX } from '../../tools/compact-routes';
+
+// A guide name spelled like a tool (Chrome's close_window, open_file) would be rewritten into that tool's call by the compact
+// surface's renaming of tool text: such a name is shown as words, in the hint and in the guide alike.
+const toolNames = new Set(Object.values(COMPOUND_ROUTE_INDEX).flat().map(r => r.delegate));
+export const shownName = (n: string): string => (toolNames.has(n) ? n.replace(/_/g, ' ') : n);
 
 /** The chord to press on `platform`: `mod` is Ctrl (Windows, Linux) or Cmd (macOS); a per-OS object picks its OS, else its default; "" or missing is no key. */
 export function resolveChord(chord: GuideChord, platform: string): string | null {
@@ -19,7 +25,7 @@ const stepText = (s: GuideStep, platform: string): string =>
   s.type === 'pressKey' ? (resolveChord(String(s.key ?? ''), platform) ?? '') : s.type === 'typeAtFocus' ? `type <${s.field ?? 'text'}>` : s.type === 'wait' ? `wait ${s.ms ?? ''}ms` : `check ${s.name ?? ''}`.trim();
 
 function workflowLine(id: string, wf: string | { name?: string; steps?: GuideStep[] }, platform: string): string {
-  const line = typeof wf === 'string' ? `${id}: ${wf}` : `${id}: ${wf.name ?? ''} -> ${(wf.steps ?? []).map(s => stepText(s, platform)).join(', ')}`;
+  const line = typeof wf === 'string' ? `${shownName(id)}: ${wf}` : `${shownName(id)}: ${wf.name ?? ''} -> ${(wf.steps ?? []).map(s => stepText(s, platform)).join(', ')}`;
   return line.length > 200 ? `${line.slice(0, 197)}...` : line;
 }
 
@@ -44,7 +50,7 @@ export function renderGuide({ id, guide: g, source }: LoadedGuide, platform: str
   const where = (g.kind === 'web' ? g.domainHints : g.processNames)?.[0];
   const from = source === 'local' ? 'saved on this PC' : `verified ${g.lastVerified ?? ''}`.trim();
   const lines = [`${g.name ?? id} guide (${[g.kind, where].filter(Boolean).join(' ')}; ${from}; ${OS_LABEL[platform] ?? platform}): ${query ? `${shown.length} of ${all.length}` : all.length} shortcuts${query ? ` for "${query}"` : ''}`];
-  for (const s of shown) lines.push(`${s.name}${hard.has(s.name) ? ' *' : ''}: ${s.chord}`);
+  for (const s of shown) lines.push(`${shownName(s.name)}${hard.has(s.name) ? ' *' : ''}: ${s.chord}`);
   if (shown.some(s => hard.has(s.name))) lines.push('* = hard to undo (sends, posts, deletes, pays or closes): ask the user first unless they asked for it');
   const wfs = filterBy(Object.entries(g.workflows ?? {}), ([k, w]) => `${k} ${typeof w === 'string' ? w : w.name ?? ''}`, query ?? '');
   if (wfs.length) lines.push('Workflows:', ...wfs.map(([k, w]) => workflowLine(k, w, platform)));
