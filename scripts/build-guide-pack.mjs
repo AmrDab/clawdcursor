@@ -4,8 +4,7 @@
  *
  *   node scripts/build-guide-pack.mjs [--src docs/app-guides] [--out docs/app-guides/pack.json]
  *
- * The pack ships inside the npm package (dist/guides/pack.json, built by postbuild) and is mirrored at
- * https://clawdcursor.com/app-guides/pack.json (built by sync-guides.yml), where the client refreshes it as a whole.
+ * The pack ships inside the npm package (dist/guides/pack.json, built by postbuild); sync-guides.yml also builds it into docs/app-guides.
  * Only guides that index.json marks `trust: "verified"` go in; a guide that fails the lint is left out and named.
  * The lint is the client's own (src/core/guides/lint.ts, compiled to dist/): build first (`npx tsc`).
  */

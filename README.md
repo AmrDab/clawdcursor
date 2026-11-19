@@ -197,8 +197,6 @@ Privacy:
 An app guide lists one app's keyboard shortcuts for your OS, a few workflows and tips. Your AI reads it with `system shortcuts_list` (`context` = the app or site, `query` = only matching shortcuts), and `open_app`, `open_file`, `open_url`, `browser navigate` and `window focus` show the app's essential keys for your OS, once per app per session, when there is a guide.
 
 - **Where they come from:** the guides in [AmrDab/clawdcursor-guides](https://github.com/AmrDab/clawdcursor-guides), the verified ones, shipped in the npm package as one pack. Every guide is checked on load; one that fails is skipped.
-- **The refresh:** at most once every 7 days, after the server starts, Clawd Cursor downloads `https://clawdcursor.com/app-guides/pack.json` (the whole pack, at most 2 MB, 10 second timeout). The request does not name any app. If it fails, the guides you have stay. Set `CLAWD_NO_GUIDE_REFRESH=1` to turn it off.
-- **Saving:** your AI can call `system save_guide` with what it learned about an app. Nothing is saved unless you pick **Save** on the pause card; **Save and suggest to clawdcursor-guides** also opens a prefilled GitHub issue in your browser for you to review and send. Saved guides are in `~/.clawdcursor/guides/` on your PC and are never uploaded. With pausing off (`CLAWD_NO_PAUSE=1`), nothing is saved.
 
 ---
 
@@ -411,7 +409,7 @@ Two surfaces run the same code behind the same guards.
 | Tool | Actions |
 |---|---|
 | `accessibility` | `read_tree`, `find`, `get_element`, `focused`, `invoke`, `focus`, `set_value`, `get_value`, `expand`, `collapse`, `toggle`, `select`, `state`, `list_children`, `wait_for`, `compile_ui`, `find_button`, `find_field`, `smart_click`, `smart_type`, `smart_read` |
-| `system` | `clipboard_read`, `clipboard_write`, `copy_all_text`, `report`, `system_time`, `ocr`, `undo`, `shortcuts_list`, `shortcuts_run`, `save_guide`, `pause_for_user`, `detect_webview`, `relaunch_with_cdp`, `build_uri`, `open_uri`, `open_app`, `open_file`, `open_url` |
+| `system` | `clipboard_read`, `clipboard_write`, `copy_all_text`, `report`, `system_time`, `ocr`, `undo`, `shortcuts_list`, `shortcuts_run`, `pause_for_user`, `detect_webview`, `relaunch_with_cdp`, `build_uri`, `open_uri`, `open_app`, `open_file`, `open_url` |
 | `window` | `list`, `active`, `focus`, `maximize`, `minimize`, `restore`, `close`, `resize`, `list_displays`, `screen_size`, `open_app`, `open_file`, `open_url`, `switch_tab`, `navigate` |
 | `browser` | `navigate`, `connect`, `page_context`, `read_text`, `click`, `type`, `select_option`, `evaluate`, `wait_for`, `list_tabs`, `switch_tab`, `scroll` |
 | `computer` | `click`, `double_click`, `right_click`, `middle_click`, `triple_click`, `hover`, `move`, `move_relative`, `scroll`, `scroll_horizontal`, `drag`, `drag_path`, `mouse_down`, `mouse_up`, `type`, `key`, `key_press`, `key_down`, `key_up`, `wait`, `screenshot`, `screenshot_region`, `zoom` |

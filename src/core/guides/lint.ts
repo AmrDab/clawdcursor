@@ -1,5 +1,5 @@
 /**
- * App guide lint: the one check every guide passes before the client shows it (bundled, refreshed or saved on this PC),
+ * App guide lint: the one check every guide passes before the client shows it,
  * and before the pack builder (scripts/build-guide-pack.mjs) lets a guide into the pack.
  *
  * The injection and danger rules are the guides repo's (AmrDab/clawdcursor-guides scripts/lint-guide.mjs): keep them equal.
@@ -26,10 +26,6 @@ export interface Guide {
   lastVerified?: string;
 }
 
-export interface LintOptions {
-  /** A guide saved on this PC: smaller caps, and no sources or lastVerified (nothing official to cite). */
-  local?: boolean;
-}
 export interface LintResult { ok: boolean; errors: string[] }
 
 const APP_ID_RE = /^[a-z0-9-]{2,32}$/;
@@ -54,8 +50,6 @@ export const MAX_TIPS = 12;
 export const MAX_TIP_LEN = 240;
 export const MAX_NAME_LEN = 48;
 export const MAX_BYTES = 64_000;
-export const LOCAL_MAX_SHORTCUTS = 60;
-export const LOCAL_MAX_TIPS = 8;
 
 // Same tables as the guides repo's linter.
 const INJECTION_PATTERNS: Array<{ pattern: RegExp; rule: string }> = [
@@ -117,12 +111,11 @@ export function chordProblem(chord: unknown, allowCmd = true): string | null {
 }
 
 /** Lint one guide. Never throws. */
-export function lintGuide(raw: unknown, opts: LintOptions = {}): LintResult {
+export function lintGuide(raw: unknown): LintResult {
   const errors: string[] = [];
   const err = (m: string) => { errors.push(m); };
   if (!isObj(raw)) return { ok: false, errors: ['guide must be a JSON object'] };
   const g = raw;
-  const local = !!opts.local;
 
   if (typeof g.app !== 'string' || !g.app) return { ok: false, errors: ['app must be a non-empty string'] };
   if (g.name !== undefined && typeof g.name !== 'string') err('name must be a string');
@@ -162,9 +155,8 @@ export function lintGuide(raw: unknown, opts: LintOptions = {}): LintResult {
   if (Array.isArray(g.processNames) && g.processNames.some(p => typeof p === 'string' && (/\.exe$/i.test(p) || /[\\/]/.test(p)))) err('processNames are names without ".exe" or a path');
 
   const names = Object.keys(shortcuts);
-  const maxShortcuts = local ? LOCAL_MAX_SHORTCUTS : MAX_SHORTCUTS;
   if (!names.length) err('shortcuts must not be empty');
-  if (names.length > maxShortcuts) err(`${names.length} shortcuts; max ${maxShortcuts}`);
+  if (names.length > MAX_SHORTCUTS) err(`${names.length} shortcuts; max ${MAX_SHORTCUTS}`);
   for (const n of names) {
     if (n.length > MAX_NAME_LEN || !SHORTCUT_NAME_RE.test(n)) { err(`shortcut name "${n.slice(0, 30)}" must be readable snake_case, at most ${MAX_NAME_LEN} characters`); continue; }
     const c = shortcuts[n];
@@ -209,13 +201,10 @@ export function lintGuide(raw: unknown, opts: LintOptions = {}): LintResult {
     }
   }
   if (Array.isArray(g.tips)) {
-    const maxTips = local ? LOCAL_MAX_TIPS : MAX_TIPS;
-    if (g.tips.length > maxTips) err(`${g.tips.length} tips; max ${maxTips}`);
+    if (g.tips.length > MAX_TIPS) err(`${g.tips.length} tips; max ${MAX_TIPS}`);
     g.tips.forEach((t, i) => { if (typeof t !== 'string' || t.length > MAX_TIP_LEN) err(`tips[${i}] must be a string of at most ${MAX_TIP_LEN} characters`); });
   }
-  if (!local) {
-    if (!Array.isArray(g.sources) || !g.sources.length || !g.sources.every(s => typeof s === 'string' && /^https:\/\//.test(s))) err('sources must be a list of https URLs');
-    if (typeof g.lastVerified !== 'string' || !DATE_RE.test(g.lastVerified) || Number.isNaN(Date.parse(`${g.lastVerified}T00:00:00Z`)) || new Date(`${g.lastVerified}T00:00:00Z`).toISOString().slice(0, 10) !== g.lastVerified) err('lastVerified must be YYYY-MM-DD');
-  }
+  if (!Array.isArray(g.sources) || !g.sources.length || !g.sources.every(s => typeof s === 'string' && /^https:\/\//.test(s))) err('sources must be a list of https URLs');
+  if (typeof g.lastVerified !== 'string' || !DATE_RE.test(g.lastVerified) || Number.isNaN(Date.parse(`${g.lastVerified}T00:00:00Z`)) || new Date(`${g.lastVerified}T00:00:00Z`).toISOString().slice(0, 10) !== g.lastVerified) err('lastVerified must be YYYY-MM-DD');
   return { ok: errors.length === 0, errors };
 }

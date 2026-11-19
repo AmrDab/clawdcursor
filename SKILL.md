@@ -22,8 +22,7 @@ source: https://github.com/AmrDab/clawdcursor
 privacy: >
   All processing runs locally. Server binds to 127.0.0.1 only - not
   network-accessible. Screenshots stay in memory and go only to the MCP
-  client that requested them; clawdcursor calls no model itself. It refreshes
-  its app-guide pack from clawdcursor.com at most weekly (CLAWD_NO_GUIDE_REFRESH=1 turns it off) and sends
+  client that requested them; clawdcursor calls no model itself. It sends
   anonymous error reports by default (result codes, timings and its own
   file:line, never screen content; https://github.com/AmrDab/clawdcursor/blob/main/docs/telemetry.md).
   When the user asks to turn them off, call system
@@ -256,7 +255,7 @@ Every GUI task follows the same shape regardless of surface:
 4. REPEAT   until done
 ```
 
-**Use this OS's keys.** The server instructions name the OS and its shortcut modifier (cmd on macOS, ctrl on Windows and Linux); `mod` always means that modifier (`mod+s`). Never send another OS's shortcut (no `alt+f4` or `win+r` on a Mac, no `cmd+q` on Windows); `system {"action":"shortcuts_list"}` lists this OS's chords. `ctrl+…` on macOS is sent as the real Ctrl key (right in a terminal, wrong for copy/paste). When a result shows keys from a guide, press them instead of hunting with the mouse; the rest of that guide is system {"action":"shortcuts_list","context":"<app>"}; after working out shortcuts for an app that has no guide (or finding a listed one wrong), call system {"action":"save_guide"} once at the end of the task, and the user decides.
+**Use this OS's keys.** The server instructions name the OS and its shortcut modifier (cmd on macOS, ctrl on Windows and Linux); `mod` always means that modifier (`mod+s`). Never send another OS's shortcut (no `alt+f4` or `win+r` on a Mac, no `cmd+q` on Windows); `system {"action":"shortcuts_list"}` lists this OS's chords. `ctrl+…` on macOS is sent as the real Ctrl key (right in a terminal, wrong for copy/paste). When a result shows keys from a guide, press them instead of hunting with the mouse; the rest of that guide is system {"action":"shortcuts_list","context":"<app>"}.
 
 **Keystrokes always go to whatever has focus.** If focus is wrong (terminal instead of Excel), your `mod+s` - `Ctrl+S` on Windows/Linux, `Cmd+S` on macOS - saves your terminal session, not the spreadsheet. So: **focus first, act, verify.**
 
@@ -403,7 +402,7 @@ with the same semantics. Full reference via the MCP `tools/list` request.
 | `computer`      | mouse_click, mouse_{double,right,middle,triple}_click, mouse_hover, mouse_move_relative, mouse_drag, mouse_drag_stepped, mouse_down, mouse_up, mouse_scroll, mouse_scroll_horizontal, type_text, key_press, key_down, key_up, wait, desktop_screenshot, desktop_screenshot_region |
 | `accessibility` | read_screen, find_element, a11y_get_element, get_focused_element, invoke_element, focus_element, set_field_value, a11y_get_value, a11y_expand, a11y_collapse, a11y_toggle, a11y_select, get_element_state, a11y_list_children, wait_for_element |
 | `window`        | get_windows, get_active_window, focus_window, maximize_window, minimize_window_to_taskbar, restore_window, close_window, resize_window, list_displays, get_screen_size, open_app, open_file, open_url, switch_tab_os, navigate_browser |
-| `system`        | read_clipboard, write_clipboard, get_system_time, ocr_read_screen, undo_last, shortcuts_list, shortcuts_execute, save_guide |
+| `system`        | read_clipboard, write_clipboard, get_system_time, ocr_read_screen, undo_last, shortcuts_list, shortcuts_execute |
 | `browser`       | cdp_connect, cdp_page_context, cdp_read_text, cdp_click, cdp_type, cdp_select_option, cdp_evaluate, cdp_wait_for_selector, cdp_list_tabs, cdp_switch_tab, cdp_scroll |
 | `batch`         | ordered list of tool calls in one round-trip — see Execution playbook |
 

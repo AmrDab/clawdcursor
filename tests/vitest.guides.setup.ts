@@ -7,4 +7,4 @@ import * as path from 'path';
 import { __setGuidePathsForTests } from '../src/core/guides/store';
 
 const none = path.join(os.tmpdir(), `clawdcursor-test-no-guides-${process.pid}`);
-__setGuidePathsForTests({ localDir: path.join(none, 'guides'), cacheFile: path.join(none, 'cache', 'pack.json'), bundledFile: path.join(none, 'pack.json') });
+__setGuidePathsForTests({ bundledFile: path.join(none, 'pack.json') });

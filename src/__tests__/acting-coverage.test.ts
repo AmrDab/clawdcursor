@@ -14,7 +14,7 @@ const NOT_ACTING: Record<string, string[]> = {
     'compile_ui', 'find_button', 'find_field', 'smart_read'],
   window: ['list', 'active', 'list_displays', 'screen_size'],
   system: ['clipboard_read', 'copy_all_text', 'report', 'telemetry_optout', 'system_time', 'ocr', 'shortcuts_list',
-    'pause_for_user', 'save_guide', 'detect_webview', 'build_uri'],
+    'pause_for_user', 'detect_webview', 'build_uri'],
   // connect can launch a browser window: call-guards.ts empties the OCR cache for it by name, without an outcome line.
   browser: ['connect', 'page_context', 'read_text', 'evaluate', 'wait_for', 'list_tabs'],
 };

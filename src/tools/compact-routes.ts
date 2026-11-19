@@ -112,7 +112,6 @@ const SYSTEM_ACTIONS: ActionRoute[] = [
   { action: 'undo',            delegate: 'undo_last' },
   { action: 'shortcuts_list',  delegate: 'shortcuts_list' },
   { action: 'shortcuts_run',   delegate: 'shortcuts_execute' },
-  { action: 'save_guide',      delegate: 'save_guide' },
   // Hand the desktop to the user at a roadblock (sign-in, 2FA, CAPTCHA) and
   // continue when they click Resume on screen.
   { action: 'pause_for_user',  delegate: 'pause_for_user' },

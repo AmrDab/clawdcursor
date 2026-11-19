@@ -20,8 +20,8 @@ name: sync-app-guides
 # What we sync:
 #   - index.json
 #   - every *.json at the source repo's root (excluding package*.json)
-#   - pack.json, built here from the verified guides that pass the client lint (scripts/build-guide-pack.mjs):
-#     the whole pack the clawdcursor client refreshes weekly (https://clawdcursor.com/app-guides/pack.json)
+#   - pack.json, built here from the verified guides that pass the client lint (scripts/build-guide-pack.mjs),
+#     the pack that is bundled into the npm package
 #
 # We commit only on a real diff so the history stays clean.
 

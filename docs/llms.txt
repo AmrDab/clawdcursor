@@ -163,7 +163,7 @@ choice. Never ask for a password or secret on it.
 
 ## App guides
 
-App guides (keyboard shortcuts, workflows and tips per app) ship in the package and refresh weekly from clawdcursor.com (CLAWD_NO_GUIDE_REFRESH=1 turns that off). When a result shows keys from a guide, press them instead of hunting with the mouse; the rest of that guide is system {"action":"shortcuts_list","context":"<app>"}; after working out shortcuts for an app that has no guide (or finding a listed one wrong), call system {"action":"save_guide"} once at the end of the task, and the user decides.
+App guides (keyboard shortcuts, workflows and tips per app) ship in the package. When a result shows keys from a guide, press them instead of hunting with the mouse; the rest of that guide is system {"action":"shortcuts_list","context":"<app>"}.
 
 ## Error reports
 

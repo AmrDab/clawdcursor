@@ -30,8 +30,6 @@ const OVERLAY_NAME = /^clawd-overlay(-[0-9a-f]+)?$/i;
  */
 const PAUSE_SAFE = new Set([
   'system:pause_for_user', 'resume_task',
-  // It asks on the pause card itself, and a re-call re-attaches to it while it waits.
-  'system:save_guide',
   // Waiting and reporting touch nothing on screen.
   'computer:wait', 'system:report',
   // Turning off error reports touches nothing on screen either.

@@ -33,7 +33,6 @@ describe('per-call facts', () => {
       mouse_right_click           image-pointer
       mouse_hover                 image-pointer
       wait                        pause-safe
-      save_guide                  pause-safe
       session_report              pause-safe stop-safe
       telemetry_optout            pause-safe stop-safe
       mouse_middle_click          image-pointer
@@ -62,7 +61,6 @@ describe('per-call facts', () => {
       computer:screenshot         screenshot
       system:report               pause-safe stop-safe
       system:telemetry_optout     pause-safe stop-safe
-      system:save_guide           pause-safe
       system:pause_for_user       pause-safe stop-safe
       "
     `);
