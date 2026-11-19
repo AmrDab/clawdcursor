@@ -193,7 +193,7 @@ function printSummary(results: DiagResult[]): void {
     console.log(`   Next:`);
     console.log(`     ${pc.cyan('clawdcursor agent')}           run it, with a live log of every action on this computer`);
     console.log(`     ${pc.cyan('clawdcursor task "<task>"')}   test an agent (with ${pc.cyan('clawdcursor agent')} open, its actions show in the live log)\n`);
-    console.log(pc.gray(`   Editors (Claude Code, Cursor, Windsurf, Zed) run their own clawdcursor: register \`clawdcursor mcp\` in the editor's MCP config.`));
+    console.log(pc.gray(`   Editors (Claude Code, Cursor, Windsurf, Zed) run their own clawdcursor: register \`clawdcursor mcp --compact\` in the editor's MCP config.`));
   } else {
     const failures = results.filter(r => !r.ok);
     console.log(`⚠️  ${failures.length} issue(s) detected:`);

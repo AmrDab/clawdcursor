@@ -21,6 +21,7 @@ import { enableHostAncestry } from '../core/ai-hosts';
 import { actedIn, actRecord, withTurnBudget } from '../core/control';
 import { logger } from '../core/observability/logger';
 import { COMPOUND_ROUTE_INDEX, compactCall } from '../tools/compact-routes';
+import { resultCallsAsProse } from '../tools/call-prose';
 
 const COMPOUND_TOOLS = new Set(Object.keys(COMPOUND_ROUTE_INDEX));
 /** A compound call's arguments that its schema does not list (keepUndeclaredArgs), for the call being run. */
@@ -144,6 +145,8 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
   // integrating agent (Claude Code, Cursor, Windsurf, Zed, OpenClaw) HOW to
   // use clawdcursor cheaply. Without it, agents drive the raw GUI tools with
   // their own premium model, the expensive path.
+  // The one tool that asks the user, named the way this surface names it (compact: a compound tool and its action).
+  const pauseTool = compact ? 'the system tool, action pause_for_user' : 'the pause_for_user tool';
   const instructions =
       // Owner 2026-11-17: the agent should know, without being told to use clawdcursor, that no task asked of it is out of
       // reach (the 0.5-era rules a 2026-02 skill scan cut and the 2.x "FALLBACK layer" line replaced).
@@ -172,7 +175,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'is where a screenshot is the right tool, inside that area only: plan every stroke from one screenshot, send them in ONE batch ' +
       '(click with path, drag_path), then check with ONE screenshot_region of only the changed area, max_edge 512. ' +
       'The toolbars, fields and dialogs around it are still pressed by name (invoke) or by visible label (smart_click), not by pixel. ' +
-      'Roadblocks only the user can clear (sign-in, 2FA, CAPTCHA, a step that needs their confirmation): call system {action:"pause_for_user", message} — ' +
+      `Roadblocks only the user can clear (sign-in, 2FA, CAPTCHA, a step that needs their confirmation): call ${pauseTool} with a message — ` +
       'ask for that ONE step only ("Sign in to Glama") and do everything before and after it yourself; for a sign-in, code or CAPTCHA, done_when ' +
       '(what shows on screen once they are done) ends the pause the moment they finish, with no Resume click — never for a confirmation or a choice. Never type or guess credentials. ' +
       'A step your own rules won\'t let you take (creating an account, downloading a private key, entering a password, key or token) is a roadblock too, ' +
@@ -180,7 +183,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'and ask only for the paste ("Paste your app-specific password into the Terminal, press Enter, then click Resume"), naming where it goes: never into the prompt\'s own reply box, whose text reaches you; afterwards pass the saved key\'s file path or keychain profile name, never the secret. A plan limit or upgrade wall is a roadblock too: ' +
       'stop, quote the blocking text and pause_for_user; never click Upgrade / Subscribe yourself. ' +
       'While you are driving the desktop, the user is watching the screen, not your chat: ask them on the pause card (use choices when there are options), not in your own chat — ' +
-      'system {action:"pause_for_user", message, choices:[...], input:{placeholder?, multiline?}}. Before an irreversible action the user did not ask for (sending, deleting, paying, closing unsaved work), ask there first and follow the answer {status:"replied", choice | reply}: clawdcursor does not judge what you do, so that decision is yours. ' +
+      `${pauseTool} with message, choices (a list, when there are options) and input (placeholder, multiline). Before an irreversible action the user did not ask for (sending, deleting, paying, closing unsaved work), ask there first and follow the answer {status:"replied", choice | reply}: clawdcursor does not judge what you do, so that decision is yours. ` +
       'Drive UI symbolically: compile_ui / find_button / find_field return a stable ' +
       '{element_id, snapshot_id} you pass to invoke/set_value — it survives layout shifts, so ' +
       'prefer it over pixel coordinates. Pass `expect` on consequential actions so a failed one ' +
@@ -206,7 +209,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
   // A CAD run (2026-11-16) made 73 coordinate clicks, ~58 on labelled buttons, and 7 accessibility calls: after 3 coordinate clicks with no
   // click by name since, say once that a label is pressed by name. A batch is act-other and is not counted.
   const COORD_CLICK_HINT = compact
-    ? '[clawdcursor] 3 clicks by coordinates and none by name. A button, tab, menu or field with a visible label: accessibility smart_click {"target":"<label>"} presses it with no screenshot; keep x,y for points with no label, like inside a canvas.'
+    ? '[clawdcursor] 3 clicks by coordinates and none by name. A button, tab, menu or field with a visible label: smart_click {"target":"<label>"} presses it with no screenshot; keep x,y for points with no label, like inside a canvas.'
     : '[clawdcursor] 3 clicks by coordinates and none by name. A button, tab, menu or field with a visible label: smart_click {"target":"<label>"} presses it with no screenshot; keep x,y for points with no label, like inside a canvas.';
   let coordClicks = 0;
   let coordNudged = false;
@@ -292,10 +295,13 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // hint and a safe next call (result-codes.ts). Not on JSON results (they carry their own status) or a batch
         // (its report has a status per step).
         const callAction = typeof params?.action === 'string' ? params.action : undefined;
+        // Every call a hint names goes out as prose for this surface ("the browser tool, action page_context"), never as a
+        // call-shaped text the host has no tool of that name for (call-prose.ts).
+        const surface = compact ? 'compact' : 'granular';
         const withOutcome = (text: string, isError: boolean): string => {
-          if (tool.name === 'batch' || isJsonText(text)) return text;
+          if (tool.name === 'batch' || isJsonText(text)) return resultCallsAsProse(text, surface);
           const c = classifyResult(text, isError, isActingCall(tool.name, callAction, isUnverifiableAction), 'mcp', isActingCall(tool.name, callAction));
-          return c ? `${text}\n${renderResultLine(c)}` : text;
+          return resultCallsAsProse(c ? `${text}\n${renderResultLine(c)}` : text, surface);
         };
         // Consent gate (non-fatal): until the user accepts one-time consent,
         // every tool returns a clear, host-VISIBLE prompt instead of the server

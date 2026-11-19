@@ -318,7 +318,7 @@ describe('--no-vision: no screenshot reaches the MCP client\'s model', () => {
     desktop: { captureForLLM: vi.fn(async () => ({ buffer: Buffer.from('pixels'), llmWidth: 10, llmHeight: 10, width: 10, height: 10, scaleFactor: 1 })) },
   });
   const latestShot = async () => (await import('../core/screen-binding')).latestShotId();
-  const REFUSED = /vision is disabled on this server[\s\S]*\[refused · VISION_DISABLED · .*next: accessibility \{"action":"compile_ui"\}/;
+  const REFUSED = /vision is disabled on this server[\s\S]*\[refused · VISION_DISABLED · .*next: the (?:accessibility tool, action compile_ui|compile_ui tool)/;
 
   // Every surface a screenshot can be taken from: the compact compound, and the two granular screenshot tools.
   const calls: Array<{ compact: boolean; name: string; args: Record<string, unknown> }> = [
@@ -381,7 +381,7 @@ describe('the first screenshot of a session that read nothing is nudged to blind
     await createMcpServer({ ctx: shotCtx(), compact: true });
     const r = await capturedHandlers.get('computer')!({ action: 'screenshot' });
     expect(text(r)).toMatch(/A screenshot before any text was read\. Cheaper and exact:/);
-    expect(text(r)).toMatch(/If the target has a visible label, click it with accessibility \{"action":"smart_click","target":"<label>"\} instead of coordinates\./);
+    expect(text(r)).toMatch(/If the target has a visible label, click it with the accessibility tool, action smart_click, target "<label>" instead of coordinates\./);
   });
 
   it('a screenshot after a blind read in the same session is not nudged', async () => {
@@ -477,12 +477,12 @@ describe('coordinate clicks with none by name are nudged to smart_click, once', 
   it('compact and granular name smart_click in their own names', async () => {
     await createMcpServer({ ctx: ctx(), compact: true });
     for (let i = 0; i < 2; i++) await click();
-    expect(text(await click())).toContain('accessibility smart_click {"target":"<label>"} presses it with no screenshot');
+    expect(text(await click())).toContain('the accessibility tool, action smart_click, target "<label>" presses it with no screenshot');
     capturedHandlers.clear();
     await createMcpServer({ ctx: ctx(), compact: false });
     for (let i = 0; i < 2; i++) await click(false);
     const g = text(await click(false));
-    expect(g).toContain('smart_click {"target":"<label>"} presses it with no screenshot');
+    expect(g).toContain('the smart_click tool, target "<label>" presses it with no screenshot');
     expect(g).not.toContain('accessibility smart_click');
   });
 

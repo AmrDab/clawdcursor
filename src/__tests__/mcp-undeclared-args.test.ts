@@ -76,7 +76,7 @@ describe('a compound call\'s arguments that its schema does not list, over MCP',
     expect(reads.ocr).not.toHaveBeenCalled();
     expect(r.isError).toBe(true);
     expect(r.text).toMatch(/system ocr NOT EXECUTED: it cannot be limited to one window by processName/);
-    expect(r.text).toContain('window {"action":"focus","processName":"Terminal"}');
+    expect(r.text).toContain('the window tool, action focus, processName "Terminal"');
   });
 
   it('ocr without it still reads', async () => {

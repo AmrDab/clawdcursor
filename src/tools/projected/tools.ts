@@ -913,17 +913,19 @@ export function buildUnifiedTools(): UnifiedTool[] {
         if (!empty && (rb.result === 'suffix' || rb.result === 'mismatch') && submit) {
           // Return would submit what the field shows, not what was typed (live: an address bar's suggestion swapped the
           // whole URL). Not pressed; the caller sees what the field shows and decides.
+          // The focus is not on a text field at all (a profile picker, a button): the page's text is not a suggestion.
+          const elsewhere = rb.elsewhere;
           const what = rb.result === 'suffix'
             ? 'the typed text with more after it (an autocomplete suggestion: Delete drops it)'
             : 'different text (a suggestion took over, or the field reformatted it)';
           return {
             success: false,
-            text: `${shown}, but the field shows ${what} — Return not pressed. Check the field: if it is right, press Return; otherwise fix it first.${fieldShows}${inputWarningNote(ctx)}`,
+            text: `${shown}, but ${elsewhere ? `the focus is on ${elsewhere}, not a text field` : `the field shows ${what}`} — Return not pressed. ${elsewhere ? 'Click the field you meant, then type again.' : 'Check the field: if it is right, press Return; otherwise fix it first.'}${fieldShows}${inputWarningNote(ctx)}`,
           };
         }
         if (submit) await ctx.platform.keyPress('Return');
         const note = empty ? ` ⚠ ${EMPTY_AFTER_TYPING}` : rb.result === 'suffix' || rb.result === 'mismatch'
-          ? ` ⚠ read back: the field shows different text (an autocomplete suggestion, or the field reformatted it); check it before going on.${fieldShows}`
+          ? ` ⚠ read back: ${rb.elsewhere ? `the focus is on ${rb.elsewhere}, not a text field` : 'the field shows different text (an autocomplete suggestion, or the field reformatted it)'}; check it before going on.${fieldShows}`
           : '';
         return { success: true, text: `${shown}${note}${inputWarningNote(ctx)}` };
       },

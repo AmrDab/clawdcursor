@@ -67,6 +67,41 @@ $r.error
     expect(out[1]).toBe('Element not found');
   });
 
+  // The browser's "Restore pages?" bubble is a top-level window of the browser's own pid; the main window is the one searched.
+  it('within naming another top-level window of the pid searches that window too; a title the searched window already holds does not', () => {
+    const out = runPs(['Get-WithinWindow', 'ConvertTo-TitleKey', 'Get-ProcessScopeWindows', 'Cmd-InvokeElement'], `
+function Get-ScopeWindowHandle { param($wpid) return [IntPtr]11 }
+$script:titles = @{ 11 = 'Inbox - Microsoft Edge'; 12 = 'Restore pages?'; 13 = 'Downloads' }
+function ConvertFrom-ScopeHandle { param($h)
+  $w = [pscustomobject]@{ Current = [pscustomobject]@{ Name = $script:titles[[int]"$h"]; NativeWindowHandle = [int]"$h" } }
+  $w | Add-Member -MemberType ScriptMethod -Name FindFirst -Value { param($scope, $cond) $script:searched += $this.Current.Name; return $null }
+  $w | Add-Member -MemberType ScriptMethod -Name FindAll -Value { param($scope, $cond) $script:searched += $this.Current.Name; return @() }
+  return $w }
+function Get-PidWindowCandidates { param($wpid) return ,@(
+  [pscustomobject]@{ Handle = [IntPtr]11; Aux = $false; Owned = $false }, [pscustomobject]@{ Handle = [IntPtr]12; Aux = $false; Owned = $false },
+  [pscustomobject]@{ Handle = [IntPtr]13; Aux = $false; Owned = $false }) }
+function Get-ScopeOtherWindows { param($a, $b) return 2 }
+$scope = @(ConvertFrom-ScopeHandle 11)
+"sibling: $(@(Get-WithinWindow 1 'restore pages' $scope)[0].Current.Name)"
+"own title: $(@(Get-WithinWindow 1 'inbox' $scope).Count)"
+"no such window: $(@(Get-WithinWindow 1 'nothing like it' $scope).Count)"
+"empty: $(@(Get-WithinWindow 1 '' $scope).Count)"
+$script:searched = @()
+$r = Cmd-InvokeElement ([pscustomobject]@{ processId = 1; name = 'Restore'; action = 'click'; within = 'Restore pages' })
+"invoke searched: $($script:searched -join '|')"
+$script:searched = @()
+$r = Cmd-InvokeElement ([pscustomobject]@{ processId = 1; name = 'Restore'; action = 'click' })
+"no within searched: $($script:searched -join '|')"`);
+    expect(out).toEqual([
+      'sibling: Restore pages?',
+      'own title: 0',
+      'no such window: 0',
+      'empty: 0',
+      'invoke searched: Inbox - Microsoft Edge|Restore pages?',
+      'no within searched: Inbox - Microsoft Edge',
+    ]);
+  });
+
   it('the z-order choice skips topmost / tool windows (Explorer\'s taskbar) unless nothing else matches', () => {
     const out = runPs(['Select-ScopeWindowHandle'], `
 $fake = { param($h, $aux, $owned) [pscustomobject]@{ Handle = [IntPtr]$h; Aux = $aux; Owned = $owned } }

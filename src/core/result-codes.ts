@@ -126,7 +126,7 @@ const RULES: Rule[] = [
     next: { mcp: 'computer {"action":"screenshot"}' } },
   { code: 'STALE_REF', outcome: 'failed', test: /ref rejected|unknown snapshot|snapshot .*(?:expired|stale)|call compile_ui first/i,
     hint: 'the screen changed since that snapshot; take a fresh one', next: REREAD },
-  { code: 'READBACK_MISMATCH', outcome: 'failed', test: /but the field shows .* — Return not pressed/i,
+  { code: 'READBACK_MISMATCH', outcome: 'failed', test: /but (?:the field shows|the focus is on) .* — Return not pressed/i,
     hint: 'the field does not show exactly what was typed, so it was not submitted; check it — press Return if it is right, fix it if not', next: REREAD },
   // A set / replace whose field holds something else: old text that was not cleared ("10030" for "30"), or a reformat.
   { code: 'READBACK_MISMATCH', outcome: 'failed', test: /the field shows .*, not the (?:value|text) asked for/i,

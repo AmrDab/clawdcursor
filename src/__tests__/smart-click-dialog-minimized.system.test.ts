@@ -33,6 +33,7 @@ $other = Hit 2 (Rc 3600 -500 80 30)
 // dialog that has the focus, and an element with no pattern at all.
 const FAKE_WINDOW = `
 function Get-ProcessScopeWindows { param($wpid) return $script:window }
+function Get-PidWindowCandidates { param($wpid) return ,@() }
 function Get-ScopeOtherWindows { param($a, $b) return 0 }
 function Get-MonitorRects { return ,@(@{ x = 0; y = 0; width = 3840; height = 2400 }, @{ x = 2796; y = -1080; width = 1920; height = 1080 }) }
 $script:minimized = $false
@@ -56,7 +57,7 @@ function Window($els) {
   $w | Add-Member -MemberType ScriptMethod -Name FindAll -Value { param($scope, $cond) return $this.Els }
   return $w }
 `;
-const FNS = ['Test-NameMatch', 'Test-RectOnMonitor', 'Select-InvokeTarget', 'Get-UiParent', 'Get-ContainerOf', 'Test-Activatable', 'Cmd-InvokeElement'];
+const FNS = ['Test-NameMatch', 'Get-WithinWindow', 'ConvertTo-TitleKey', 'Test-RectOnMonitor', 'Select-InvokeTarget', 'Get-UiParent', 'Get-ContainerOf', 'Test-Activatable', 'Cmd-InvokeElement'];
 const click = (name: string) => `$r = Cmd-InvokeElement ([pscustomobject]@{ processId = 3648; name = '${name}'; action = 'click' })`;
 
 describe.runIf(process.platform === 'win32')('ps-bridge (run for real): the dialog in focus decides between visible matches', () => {

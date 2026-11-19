@@ -87,6 +87,7 @@ $only1 = { param($h) $h.index -eq 1 }
   // pattern-available properties, and an InvokePattern that records the press.
   const FAKE_WINDOW = `
 function Get-ProcessScopeWindows { param($wpid) return $script:window }
+function Get-PidWindowCandidates { param($wpid) return ,@() }
 function Get-ScopeOtherWindows { param($a, $b) return 0 }
 function Get-MonitorRects { return ,@(@{ x = 0; y = 0; width = 3840; height = 2400 }, @{ x = 2796; y = -1080; width = 1920; height = 1080 }) }
 $script:pressed = @()
@@ -104,7 +105,7 @@ function Window($els) {
   $w | Add-Member -MemberType ScriptMethod -Name FindAll -Value { param($scope, $cond) return $this.Els }
   return $w }
 `;
-  const FNS = ['Test-NameMatch', 'Test-RectOnMonitor', 'Select-InvokeTarget', 'Get-FocusedDialog', 'Test-ElementUnder', 'Test-WindowMinimized', 'Get-UiParent', 'Get-ContainerOf', 'Test-Activatable', 'Cmd-InvokeElement'];
+  const FNS = ['Test-NameMatch', 'Get-WithinWindow', 'ConvertTo-TitleKey', 'Test-RectOnMonitor', 'Select-InvokeTarget', 'Get-FocusedDialog', 'Test-ElementUnder', 'Test-WindowMinimized', 'Get-UiParent', 'Get-ContainerOf', 'Test-Activatable', 'Cmd-InvokeElement'];
   const invoke = `$r = Cmd-InvokeElement ([pscustomobject]@{ processId = 3648; name = 'New'; action = 'click' })`;
 
   it('invoke "New": the ribbon button on the second monitor is pressed, not the hidden web view\'s link before it', () => {

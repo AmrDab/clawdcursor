@@ -157,7 +157,8 @@ describe('review fixes', () => {
 
   it('a blocked submit is READBACK_MISMATCH (both the suggestion and the different-text wording)', () => {
     for (const t of ['Typed 9 chars (keys): "github.c", but the field shows the typed text with more after it (an autocomplete suggestion: Delete drops it) — Return not pressed.',
-      'Typed 9 chars (keys): "x", but the field shows different text (a suggestion took over, or the field reformatted it) — Return not pressed.']) {
+      'Typed 9 chars (keys): "x", but the field shows different text (a suggestion took over, or the field reformatted it) — Return not pressed.',
+      "Typed 9 chars (keys): \"x\", but the focus is on Pane 'Profiles', not a text field — Return not pressed. Click the field you meant, then type again."]) {
       expect(classifyResult(t, true, true)?.code).toBe('READBACK_MISMATCH');
     }
   });
