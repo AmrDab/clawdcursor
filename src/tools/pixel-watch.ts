@@ -21,6 +21,8 @@ const REGION_EDGE = 512;
 const BASELINE_GAP_MS = 120;
 /** region_unchanged waits this long after the act before it looks, so a render that lags the input is not missed. */
 const UNCHANGED_SETTLE_MS = 300;
+/** The effect line looks again this long after a first frame that showed no change, before it says `pixels same`. */
+const SAME_RECHECK_MS = 250;
 
 export const pixelEffectOn = (): boolean => /^(1|true|on|yes)$/i.test(process.env.CLAWD_PIXEL_EFFECT ?? '');
 
@@ -49,8 +51,14 @@ export async function startPixelEffect(ctx: ToolContext): Promise<null | (() => 
   if (!before) return null;
   return async () => {
     try {
-      const after = await grabGrey(adapter, { maxEdge: EFFECT_EDGE });
-      const d = diffFrames(before, after);
+      let after = await grabGrey(adapter, { maxEdge: EFFECT_EDGE });
+      let d = diffFrames(before, after);
+      if (!d.box || d.count < SCREEN_MIN_PIXELS) {
+        // A redraw can lag the input: look once more before saying nothing changed (a "same" invites a second send).
+        await sleep(SAME_RECHECK_MS);
+        after = await grabGrey(adapter, { maxEdge: EFFECT_EDGE });
+        d = diffFrames(before, after);
+      }
       if (!d.box || d.count < SCREEN_MIN_PIXELS) return { text: 'pixels same' };
       // Frame pixels → physical → screen units (what a11y reports and space:"screen" takes: points on macOS).
       const k = after.scale / screenToPhysical(ctx);

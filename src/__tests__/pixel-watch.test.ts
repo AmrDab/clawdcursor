@@ -56,6 +56,25 @@ describe('startPixelEffect', () => {
     const ctx = ctxShowing([await png(400, 300), await png(400, 300, [[100, 50, 2, 4]])]);
     expect(await (await startPixelEffect(ctx))!()).toEqual({ text: 'pixels same' });
   });
+  it('a redraw that lags the input is still seen: the second after-frame differs', async () => {
+    process.env.CLAWD_PIXEL_EFFECT = '1';
+    const blank = await png(400, 300);
+    const ctx = ctxShowing([blank, blank, await png(400, 300, [[100, 50, 40, 20]])]);
+    const done = await startPixelEffect(ctx);
+    expect(await done!()).toMatchObject({ text: 'pixels changed in (100,50 40x20)' });
+    expect(ctx.platform!.screenshot).toHaveBeenCalledTimes(3);
+  });
+  it('says pixels same only after exactly two after-frames; a change on the first returns at once', async () => {
+    process.env.CLAWD_PIXEL_EFFECT = '1';
+    const blank = await png(400, 300);
+    const same = ctxShowing([blank]);
+    const done = await startPixelEffect(same);
+    expect(await done!()).toEqual({ text: 'pixels same' });
+    expect(same.platform!.screenshot).toHaveBeenCalledTimes(3);   // before + two after
+    const quick = ctxShowing([blank, await png(400, 300, [[100, 50, 40, 20]])]);
+    await (await startPixelEffect(quick))!();
+    expect(quick.platform!.screenshot).toHaveBeenCalledTimes(2);  // before + one after
+  });
   it('reads nothing when vision is disabled', async () => {
     process.env.CLAWD_PIXEL_EFFECT = '1';
     const ctx = { ...ctxShowing([await png(400, 300)]), disableVision: true } as ToolContext;
