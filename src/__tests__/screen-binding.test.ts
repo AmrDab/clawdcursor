@@ -85,6 +85,9 @@ describe('which calls are checked', () => {
     expect(isImagePointerCall('computer', 'drag_path', { path: '[{"x":1,"y":1},{"x":2,"y":2}]' })).toBe(true);   // a JSON string on the wire
     expect(isImagePointerCall('mouse_drag', undefined, { x1: 1, y1: 1, x2: 2, y2: 2 })).toBe(true);
     expect(isImagePointerCall('mouse_click', undefined, { x: 1, y: 2 })).toBe(true);
+    // computer-use's point: compact.ts maps it to x/y after the guards, so it must be checked as x/y is.
+    expect(isImagePointerCall('computer', 'click', { coordinate: [1, 2] })).toBe(true);
+    expect(isImagePointerCall('computer', 'click', { coordinate: [1, 2], space: 'screen' })).toBe(false);
   });
 
   it('not: screen-space (accessibility) coordinates, actions at the cursor, keys, typing, reads', () => {
