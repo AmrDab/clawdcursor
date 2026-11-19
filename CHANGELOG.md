@@ -5,6 +5,7 @@ All notable changes to Clawd Cursor will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **`type` says ✓ only when the field holds exactly what was typed** (or its old value plus it). A field that holds more, such as "2680" after typing "80" onto a "26" that was not selected, now reports what it holds and is no longer confirmed.
 - **A tree read or an invoke that timed out is reported as a timeout**, not as an empty window ("app may be custom-canvas",
   with advice to take a screenshot) or an element that was not found. Windows and Linux.
 - **`window` close, minimize and focus act on one window and name it.** Every field given must match (`processName` and

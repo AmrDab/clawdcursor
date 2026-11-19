@@ -178,6 +178,10 @@ export type FieldRead = { value?: string; secure?: boolean; readable?: boolean }
  *
  * `whole`: the field was to be REPLACED, so it must hold the text and nothing else (holdsValue).
  *
+ * `exact` (typing without a submit): ✓ only when the field's WHOLE value is the typed text (a trailing Tab or line break the
+ * typing sent is ignored), or is `before` + the typed text, an append the caller can see was meant. Text that merely
+ * CONTAINS what was typed ("2680" after typing "80" onto a field that kept its "26") is 'suffix', never 'match'.
+ *
  * An empty read counts only when the reader says the field is `readable` (a by-name value read does, see fieldRead, and
  * so does the focused-element read): then a clear is confirmed, and a field that still shows nothing after typing or a
  * set is a 'mismatch' with value '' (#377: a paste that read the clipboard after it was restored); typing callers report
@@ -187,9 +191,9 @@ export type FieldRead = { value?: string; secure?: boolean; readable?: boolean }
 export async function readBackTyped(
   focused: () => Promise<FieldRead | null | undefined>,
   text: string,
-  opts: { maxMs?: number; stepMs?: number; submit?: boolean; whole?: boolean } = {},
+  opts: { maxMs?: number; stepMs?: number; submit?: boolean; whole?: boolean; exact?: boolean; before?: string } = {},
 ): Promise<{ result: ReadBack; value?: string; secure?: boolean }> {
-  const { maxMs = 300, stepMs = 100, submit = false, whole = false } = opts;
+  const { maxMs = 300, stepMs = 100, submit = false, whole = false, exact = false, before } = opts;
   const want = flat(text);
   if (!want && !whole) return { result: 'unknown' };
   const t0 = Date.now();
@@ -204,6 +208,7 @@ export async function readBackTyped(
       // Before a submit the field must END with the text (Return goes to whatever follows it); otherwise anywhere will
       // do — typing into the middle of a document.
       const result = whole ? holdsValue(v, want)
+        : exact && !submit ? (v === want || (before !== undefined && v === flat(before + text)) ? 'match' : v.includes(want) ? 'suffix' : 'mismatch')
         : (submit ? v.endsWith(want) : v.includes(want)) ? 'match' : v.includes(want) ? 'suffix' : 'mismatch';
       if (result === 'match') return { result, value: v };
       last = { result, value: v };
