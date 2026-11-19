@@ -270,7 +270,7 @@
               },
               "query": {
                 "type": "string",
-                "description": "Only the shortcuts whose name or keys contain these words (e.g. \"bold\", \"next tab\"). Use it on a big guide."
+                "description": "shortcuts_list: only the shortcuts whose name or keys contain these words (e.g. \"bold\", \"next tab\"). build_uri: a JSON object of query parameters, e.g. {\"subject\":\"hi\",\"body\":\"hello\"}; each value is URL-encoded."
               },
               "intent": {
                 "type": "string",
