@@ -88,6 +88,15 @@ describe('3. failures keep the platform reason', () => {
   });
 });
 
+describe('select NOT_FOUND on a dropdown option (#445)', () => {
+  it('names the dropdown call that works', async () => {
+    const combo = { name: 'Shipping', controlType: 'ComboBox' };
+    const p = plat([combo], () => ({ success: false, data: { reason: 'not_found' } }));
+    const s = await agentTool('a11y_select').execute({ name: 'Express' }, { platform: p } as any);
+    expect(s.text).toContain('accessibility {action:"select", name:"Shipping", value:"Express"}');
+  });
+});
+
 describe('follow-ups', () => {
   it('toggle falls back to a Button (WinUI / GTK) only when no checkbox, radio or switch matches', async () => {
     const t = { name: 'Wi-Fi', controlType: 'Text' };
