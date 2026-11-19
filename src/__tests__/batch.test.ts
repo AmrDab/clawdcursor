@@ -80,7 +80,7 @@ describe('executeBatch — the user stops clawdcursor mid-batch (#294)', () => {
     stopControl('pill');
     const r = await executeBatch([{ name: 'key_press', arguments: { key: 'Return' } }], ctx);
     expect(tools.key_press.handler).not.toHaveBeenCalled();
-    expect(r.steps[0]).toMatchObject({ status: 'blocked', text: STOPPED_TEXT });
+    expect(r.steps[0]).toMatchObject({ status: 'blocked', text: expect.stringContaining(STOPPED_TEXT) });
   });
 
 });
@@ -151,12 +151,44 @@ describe('executeBatch — halting', () => {
     expect(tools.mouse_click.handler).toHaveBeenCalledTimes(1);
   });
 
-  it('caps the number of executed steps', async () => {
+  it('refuses a batch longer than its cap before step 1, naming the cap and the count', async () => {
     tools.t = okTool('t');
     const steps = Array.from({ length: 5 }, () => ({ name: 't' }));
-    const r = await executeBatch(steps, ctx, { maxSteps: 3 });
-    expect(r.completed).toBe(3);
-    expect(r.stopReason).toMatch(/capped at 3/);
+    const r = await getBatchTools()[0].handler({ steps, maxSteps: 3 }, ctx);
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/5 steps.*cap of 3/);
+    expect(tools.t.handler).not.toHaveBeenCalled();
+  });
+
+  it('the default cap is 12: thirteen steps are refused, twelve run', async () => {
+    tools.t = okTool('t');
+    const run = (n: number) => getBatchTools()[0].handler({ steps: Array.from({ length: n }, () => ({ name: 't' })) }, ctx);
+    const over = await run(13);
+    expect(over.isError).toBe(true);
+    expect(tools.t.handler).not.toHaveBeenCalled();
+    expect((await run(12)).isError).toBe(false);
+    expect(tools.t.handler).toHaveBeenCalledTimes(12);
+  });
+});
+
+describe('batch: reads and the halting step come back whole', () => {
+  const long = 'x'.repeat(400);
+
+  it('a read step longer than 160 characters is returned whole; an act step is still cut', async () => {
+    tools.read_screen = tool('read_screen', async () => ({ text: long }));
+    tools.computer = tool('computer', async () => ({ text: long }));
+    const r = await executeBatch([{ name: 'read_screen' }, { name: 'computer', arguments: { action: 'click', x: 1, y: 2, space: 'screen' } }], ctx);
+    expect(r.steps[0].text).toBe(long);
+    expect(r.steps[1].text.length).toBeLessThan(long.length);
+  });
+
+  it('the halting step keeps its whole text and ends with the result line', async () => {
+    tools.type_text = tool('type_text', async () => ({ text: `read-back failed: ${long} field value was "abc"`, isError: true }));
+    const r = await executeBatch([{ name: 'type_text', arguments: { text: 'x' } }], ctx);
+    expect(r.steps[0].status).toBe('error');
+    expect(r.steps[0].text).toContain(long);
+    expect(r.steps[0].text).toContain('field value was "abc"');
+    expect(r.steps[0].text).toMatch(/\n\[failed · [A-Z_]+ · .*\]$/);
   });
 });
 

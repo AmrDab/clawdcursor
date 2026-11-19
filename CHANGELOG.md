@@ -2,6 +2,11 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **A read inside a `batch` comes back whole, and so does the step that stops it.** The stopping step ends with its `[failed · CODE · hint · next]` line, as a direct call would. `find` prints its coordinates note after the elements, not before. A batch longer than its step cap is refused before step 1, with the cap and the step count in the message.
+
 ## [2.2.0] - 2026-11-18
 
 ### Added
