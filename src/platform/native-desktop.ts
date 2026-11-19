@@ -600,9 +600,6 @@ export class NativeDesktop {
         await typeTextMac(defaultMacAx(), text, 10000);
         return;
       }
-      // The helper's key events when it is built and may post them; otherwise System Events, as before.
-      const { defaultMacAx: macAx } = await import('./mac-ax');
-      if (await macAx().postText?.(text)) return;
       const escaped = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
       try {
         // The program (which contains the text) goes to osascript on stdin: argv is readable by every process on the Mac.
@@ -682,8 +679,6 @@ export class NativeDesktop {
     const { MAC_MODIFIER, runAppleScript, hasNonAscii, pressKeyMac, refuseNonAsciiChord, typeTextMac } = await import('./mac-keyboard');
 
     if (keyCombo === '+') {
-      const { defaultMacAx } = await import('./mac-ax');
-      if (await pressKeyMac(defaultMacAx(), { char: '+', mods: [] })) return;
       await runAppleScript('tell application "System Events" to keystroke "+"', 5000);
       return;
     }

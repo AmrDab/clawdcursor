@@ -2,7 +2,8 @@
  * macOS PlatformAdapter — all macOS-specific code lives here.
  *
  * Strategy:
- *   - Keystrokes: osascript + System Events (CGEvent from helper is blocked by TCC)
+ *   - Keystrokes: named keys and letter/digit shortcuts through the ax helper's CGEvent when it is built and may post events
+ *     (CGPreflightPostEventAccess); text through System Events (non-ASCII through the helper's Unicode events); System Events otherwise
  *   - Mouse: nut-js (nut-js mouse events ARE delivered)
  *   - Screenshot: screenshot-helper Swift binary (avoids ReplayKit CPU spin)
  *   - Accessibility: mac-ax.ts (the ax-helper Swift binary, osascript JXA as the fallback)
@@ -900,7 +901,6 @@ export class MacOSAdapter implements PlatformAdapter {
 
     // Literal "+" can't be split.
     if (combo === '+') {
-      if (await pressKeyMac(this.ax, { char: '+', mods: [] })) return;
       await runAppleScript('tell application "System Events" to keystroke "+"', 6_000);
       return;
     }

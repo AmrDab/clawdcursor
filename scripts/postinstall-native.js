@@ -49,6 +49,7 @@ try {
 // call that wait. Best effort like everything above: any failure leaves the build to first use.
 (async () => {
   try {
+    if (process.platform !== 'darwin') process.exit(0);
     const { prebuildMacAxHelper } = require('../dist/platform/mac-ax');
     const state = await prebuildMacAxHelper();
     if (state === 'built') console.log('[clawdcursor] Accessibility helper built.');

@@ -52,10 +52,8 @@ export const hasNonAscii = (text: string): boolean => /[\u0080-\uFFFF]/.test(tex
  * helper's Unicode key events. Without the helper such text is refused rather than typed as "a"s. The keyboard guard is the
  * caller's job (it runs first).
  */
-export async function typeTextMac(ax: Pick<MacAx, 'typeUnicode'> & Partial<Pick<MacAx, 'postText'>>, text: string, timeoutMs: number): Promise<void> {
+export async function typeTextMac(ax: Pick<MacAx, 'typeUnicode'>, text: string, timeoutMs: number): Promise<void> {
   if (!hasNonAscii(text)) {
-    // The helper's key events when it is built and may post them (a fraction of a System Events call); otherwise as before.
-    if (await ax.postText?.(text)) return;
     const escaped = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     await runAppleScript(`tell application "System Events" to keystroke "${escaped}"`, timeoutMs);
     return;
@@ -69,8 +67,9 @@ export async function typeTextMac(ax: Pick<MacAx, 'typeUnicode'> & Partial<Pick<
 }
 
 /**
- * Virtual key codes of the letter, digit and unshifted punctuation keys of a US keyboard. Only for a key pressed WITH modifiers
- * (⌘C): a character on its own is typed as text, which needs no layout. The helper checks that a US layout is active.
+ * Virtual key codes of the letter, digit and unshifted punctuation keys of a US keyboard: the REAL key a character is on, so a page
+ * that reads event.code / keyCode sees it. A character is never sent through the helper as text (that is every key "A" with a
+ * Unicode string attached). The helper checks that a US layout is active.
  */
 const US_KEY_CODES: Record<string, number> = {
   a: 0, s: 1, d: 2, f: 3, h: 4, g: 5, z: 6, x: 7, c: 8, v: 9, b: 11, q: 12, w: 13, e: 14, r: 15, y: 16, t: 17,
@@ -87,13 +86,12 @@ const US_KEY_CODES: Record<string, number> = {
  * The keyboard-owner guard and every other check run before this, in the caller.
  */
 export async function pressKeyMac(
-  ax: Partial<Pick<MacAx, 'postKey' | 'postText'>>,
+  ax: Partial<Pick<MacAx, 'postKey'>>,
   key: { code?: number; char?: string; mods: string[]; phase?: 'tap' | 'down' | 'up' },
 ): Promise<boolean> {
   const phase = key.phase ?? 'tap';
   if (key.code !== undefined) return (await ax.postKey?.({ code: key.code, mods: key.mods, phase })) === true;
   if (key.char === undefined || phase !== 'tap') return false;
-  if (key.mods.length === 0) return (await ax.postText?.(key.char)) === true;
   const code = US_KEY_CODES[key.char];
   return code !== undefined && (await ax.postKey?.({ code, mods: key.mods, phase, usLayout: true })) === true;
 }

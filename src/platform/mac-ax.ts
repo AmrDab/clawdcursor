@@ -537,14 +537,8 @@ export interface MacAx {
    */
   typeUnicode(text: string): Promise<boolean>;
   /**
-   * Post `text` as key events through the helper's CGEvent path (0.3–0.6 s per call through System Events, tens of ms here).
-   * True only when the helper is built AND the helper itself reported that this process may post key events
-   * (CGPreflightPostEventAccess): false means nothing was sent and the caller uses System Events. A timeout throws.
-   */
-  postText(text: string): Promise<boolean>;
-  /**
    * Post one key (a virtual key code, with modifier flags) through the helper: `phase` tap = down then up. Same contract as
-   * `postText`. `usLayout`: the code names a letter / digit / punctuation key of a US keyboard, so the helper refuses (false)
+   * a refusal contract: false means nothing was sent and the caller uses System Events. True only when the helper is built AND reported CGPreflightPostEventAccess() true (a timeout throws). `usLayout`: the code names a letter / digit / punctuation key of a US keyboard, so the helper refuses (false)
    * when another layout is active, where that code is a different character.
    */
   postKey(key: { code: number; mods: string[]; phase: 'tap' | 'down' | 'up'; usLayout?: boolean }): Promise<boolean>;
@@ -1049,12 +1043,6 @@ export function createMacAx(deps: MacAxDeps): MacAx {
         { errorJsonIsData: true, text: { name, value: q.value } },
       );
       return toInvokeResult(out);
-    },
-
-    async postText(text: string): Promise<boolean> {
-      const s = viaStdin({ text });
-      const budget = HELPER_TYPE_BASE_MS + [...text].length * HELPER_TYPE_PER_CHAR_MS;
-      return viaKeys(['type', '--timeout-ms', String(budget), ...s.args], budget, s.input);
     },
 
     async postKey(key: { code: number; mods: string[]; phase: 'tap' | 'down' | 'up'; usLayout?: boolean }): Promise<boolean> {
