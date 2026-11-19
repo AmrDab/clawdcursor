@@ -66,7 +66,7 @@ import { psOpts, powershellExe } from '../platform/ps-spawn';
 import * as readline from 'readline';
 import { getPackageRoot } from '../paths';
 import { macOverlayBinary } from '../platform/mac-swift-binary';
-import { setBeforePointerPress, setBeforeCapture, setOwnUiPids, isOwnUiPid, setOnAgentInput, setOnAgentPoint, GUARDED_METHODS } from '../platform/pointer-guard';
+import { setBeforePointerPress, setBeforeCapture, setOwnUiPids, isOwnUiPid, setOnAgentInput, setOnAgentPoint, GUARDED_METHODS, isForegroundInput } from '../platform/pointer-guard';
 import type { PauseAnswer, PauseInfo } from './pause-gate';
 import { publishOverlayState, foreignOverlayState } from './overlay-state';
 import { agentWindows, holdControl, isStopped, releaseHold, setOnHold, workingIn, workingWindow, type HoldEvent } from './control';
@@ -868,7 +868,7 @@ setOnAgentInput(method => {
   const label = activityLabel(method, workingIn()?.processName, workingIn()?.appName);
   // The foreground-mode signal: only synthetic keyboard and mouse input lands in the foreground window. First, so the
   // pill's line never says the old mode next to the new activity.
-  if (GUARDED_METHODS[method]?.kind === 'foreground') controlBanner.foreground();
+  if (isForegroundInput(method)) controlBanner.foreground();
   if (label) controlBanner.setActivity(label);
   controlBanner.setWorkingWindow(workingWindow());
 });

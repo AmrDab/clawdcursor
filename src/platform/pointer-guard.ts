@@ -118,22 +118,11 @@ export async function guardedInput<R>(method: string, args: unknown[], send: () 
  *  - `background`: acts that do not go through the window in front: by element (accessibility), on a window by handle
  *    (window messages), in a page (CDP). The user sees only the amber outline round the agent's window and the pill
  *    "running in background". They still stop when the user does: a handler already running when they stop must not
- *    carry on (#294). writeClipboard, evaluate (any page script) and switchTab act too (audit 2026-11-05). So does every
- *    other pointer method (`pointerMethods`: mouseMove — hover opens menus — and mouseMoveRelative), by rule rather than
- *    by name, so a new one is not left moving after a Stop. Putting the user's own clipboard back after a paste is not
- *    agent input: those restores run unguarded().
- *  - `launch`: launchApp, wrapped on its own below (it rebinds the window the agent works in).
- */
-/**
- * Every guarded method of the input layers, by name, with what the running pill says while it runs (banner.ts).
- *  - `input`: synthetic keyboard and mouse input, refused while stopped and when the agent's window is no longer in
- *    front; the pill names that window's app.
- *  - `stop`: acts that do not go through the window in front — by element (accessibility), on a window by handle, or in
- *    a page (CDP) — still stop when the user does: a handler already running when they stop must not carry on (#294).
- *    writeClipboard, evaluate (any page script) and switchTab act too (audit 2026-11-05). So does every other pointer
- *    method (`pointerMethods`: mouseMove — hover opens menus — and mouseMoveRelative), by rule rather than by name, so a
- *    new one is not left moving after a Stop. Putting the user's own clipboard back after a paste is not agent input:
- *    those restores run unguarded().
+ *    carry on (#294). writeClipboard, evaluate (any page script) and switchTab act too (audit 2026-11-05). Putting the
+ *    user's own clipboard back after a paste is not agent input: those restores run unguarded().
+ *  - every other pointer method (`pointerMethods`: mouseMove — hover opens menus — and mouseMoveRelative) is guarded by
+ *    rule rather than by name, so a new one is not left moving after a Stop. It moves the user's real cursor, so the user
+ *    sees it as foreground (isForegroundInput).
  *  - `launch`: launchApp, wrapped on its own below (it rebinds the window the agent works in).
  */
 export const GUARDED_METHODS: Readonly<Record<string, { kind: 'foreground' | 'background' | 'launch'; activity?: string }>> = {
@@ -154,6 +143,11 @@ export const GUARDED_METHODS: Readonly<Record<string, { kind: 'foreground' | 'ba
 const methodsOf = (kind: 'foreground' | 'background') => Object.keys(GUARDED_METHODS).filter(m => GUARDED_METHODS[m].kind === kind);
 const FOREGROUND_METHODS = methodsOf('foreground');
 const BACKGROUND_METHODS = methodsOf('background');
+/**
+ * Input the user sees as the foreground mode: the listed foreground methods, and every pointer move (a hover moves their
+ * real cursor), which is guarded by rule, not by name, below.
+ */
+export const isForegroundInput = (method: string): boolean => GUARDED_METHODS[method]?.kind === 'foreground' || /^mouse[A-Z]/.test(method);
 
 /**
  * When the agent's own synthetic input last ended (a key, a click, a move, a focus, putting the user's window back): the OS

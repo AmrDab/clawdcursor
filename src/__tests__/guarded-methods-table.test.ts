@@ -4,7 +4,7 @@
  * pill, or named on the pill without being guarded.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { guardInputMethods, setInputGuard, GUARDED_METHODS } from '../platform/pointer-guard';
+import { guardInputMethods, setInputGuard, GUARDED_METHODS, isForegroundInput } from '../platform/pointer-guard';
 import { activityLabel } from '../core/banner';
 
 const METHODS = [
@@ -77,5 +77,10 @@ describe('the two modes of the table', () => {
     for (const m of ['invokeElement', 'deliverToWindow', 'navigate', 'typeInField', 'evaluate', 'writeClipboard']) expect(kind(m)).toBe('background');
     expect(kind('launchApp')).toBe('launch');
     expect(Object.values(GUARDED_METHODS).map(g => g.kind).sort().filter((k, i, a) => a.indexOf(k) === i)).toEqual(['background', 'foreground', 'launch']);
+  });
+
+  it('the indicator shows foreground for real input and for a pointer move (it moves the real cursor), not for a background act', () => {
+    for (const m of ['mouseClick', 'keyPress', 'mouseMove', 'mouseMoveRelative']) expect(isForegroundInput(m)).toBe(true);
+    for (const m of ['invokeElement', 'deliverToWindow', 'navigate', 'click', 'writeClipboard', 'launchApp']) expect(isForegroundInput(m)).toBe(false);
   });
 });
