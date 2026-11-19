@@ -41,6 +41,7 @@ import { viaLadder } from '../../platform/ladder';
 import { effectLine, windowChange, type WindowRead } from '../../core/effect';
 import { missText, structuredMissFields, untrusted, targetOf, targetText } from '../../core/miss-text';
 import { sleep } from '../../sleep';
+import { withGuideHint } from '../../core/guides/hint';
 
 /** a11y_get_value returns a value whole up to this size (a long document, not a whole book). */
 const GET_VALUE_MAX = 20_000;
@@ -1001,7 +1002,9 @@ export function buildUnifiedTools(): UnifiedTool[] {
         const q = buildWinQuery(args) ?? {};
         const ok = await ctx.platform.focusWindow(q);
         await sleep(250);
-        return { success: ok, text: ok ? 'Focused matching window.' : ctx.platform.takeFocusFailure?.() ?? 'No matching window found.' };
+        if (!ok) return { success: ok, text: ctx.platform.takeFocusFailure?.() ?? 'No matching window found.' };
+        const w = await Promise.resolve(ctx.platform.getActiveWindow?.()).catch(() => null);
+        return { success: ok, text: withGuideHint('Focused matching window.', { names: [w?.processName ?? '', String(args.processName ?? '')], title: w?.title }) };
       },
     },
 

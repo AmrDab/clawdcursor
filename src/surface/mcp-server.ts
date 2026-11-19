@@ -30,6 +30,7 @@ import { SessionLog, outcomeOf } from './session-log';
 import { withSteps, watchChildProcesses } from '../core/observability/steps';
 import { inMcpSession } from '../core/verify/assertions';
 import { allowNames, setHost } from '../core/observability/telemetry';
+import { startGuideRefresh } from '../core/guides/refresh';
 import { classifyResult, renderResultLine, isJsonText, isActingAction, isUnverifiableAction } from '../core/result-codes';
 import { refusalBefore, afterCall, forgetScreenIfActed, guardedCall } from '../tools/call-guards';
 import { OPAQUE_MARK } from '../tools/blind-hints';
@@ -183,7 +184,9 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'system {action:"pause_for_user", message, choices:[...], input:{placeholder?, multiline?}}. Before an irreversible action the user did not ask for (sending, deleting, paying, closing unsaved work), ask there first and follow the answer {status:"replied", choice | reply}: clawdcursor does not judge what you do, so that decision is yours. ' +
       'Drive UI symbolically: compile_ui / find_button / find_field return a stable ' +
       '{element_id, snapshot_id} you pass to invoke/set_value — it survives layout shifts, so ' +
-      'prefer it over pixel coordinates. Pass `expect` on consequential actions so a failed one ' +
+      'prefer it over pixel coordinates. ' +
+      'When a result names a guide, read it with system {action:"shortcuts_list", context}; after working out shortcuts for an app that has no guide (or finding a listed one wrong), call system {action:"save_guide"} once at the end of the task, and the user decides. ' +
+      'Pass `expect` on consequential actions so a failed one ' +
       'reports a DEVIATION instead of a hollow success. Each action result and error ends with one line: ' +
       '[confirmed | unverified | refused · CODE · hint · next | failed · CODE · hint · next] — follow its next call instead of guessing. ' +
       'A native API, CLI or direct file edit that does the same job is cheaper: use it when it exists, and never decline a task ' +
@@ -191,6 +194,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'https://clawdcursor.com/llms.txt.';
 
   const server = new McpServer({ name: 'clawdcursor', version: VERSION }, { instructions });
+  startGuideRefresh();   // the app-guide pack, at most once a week, in the background
 
   // Local record of this session (tool / action / blind-vs-vision / ok — no
   // content). Feeds `clawdcursor report` and the vision-streak nudge below.

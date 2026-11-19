@@ -51,7 +51,7 @@ export const COST_CLASS_BY_TOOL: Readonly<Record<string, ToolCostClass>> = {
   open_app: 'act', navigate_browser: 'act', wait: 'act',
   open_file: 'act', open_url: 'act', open_uri: 'act', relaunch_with_cdp: 'act',
   submit_report: 'act',
-  pause_for_user: 'act', resume_task: 'act',
+  pause_for_user: 'act', resume_task: 'act', save_guide: 'act',
   // batch is inert itself (each step is gated/costed individually); classify the wrapper cheapest.
   batch: 'act',
 
