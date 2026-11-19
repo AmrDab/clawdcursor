@@ -606,10 +606,9 @@ export class NativeDesktop {
         await runAppleScript(`tell application "System Events" to keystroke "${escaped}"`, 10000);
       } catch (err: any) {
         console.warn(`   ⌨️  macOS type failed: ${err.message?.substring(0, 100)}`);
-        // Fallback: try helper anyway
-        if (this.helper) {
-          await this.helper.type(text);
-        }
+        // Fallback: try helper anyway. With no helper the text was not typed, and the caller must hear it (it reported done).
+        if (!this.helper) throw err;
+        await this.helper.type(text);
       }
       return;
     }
@@ -750,11 +749,8 @@ export class NativeDesktop {
       throw new Error(`Unknown key: "${key}"`);
     }
 
-    try {
-      await runAppleScript(script, 5000);
-    } catch (err: any) {
-      console.warn(`   ⌨️  macOS key press failed: ${err.message?.substring(0, 100)}`);
-    }
+    // A failed press is an error, as in MacOSAdapter.keyPress: swallowed, smart_type and shortcuts_run reported it done.
+    await runAppleScript(script, 5000);
   }
 
   /**
