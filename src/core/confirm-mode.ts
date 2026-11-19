@@ -36,6 +36,8 @@ import { quoteScreenText } from './untrusted-screen-content';
 
 const LABEL = /\b(send|delete|remove|pay|buy|submit|close|discard)\b/i;
 const COMBOS = ['alt+f4', 'mod+w', 'mod+q', 'mod+enter', 'shift+delete'];
+/** macOS Move to Trash / delete in Mail; on Windows and Linux ctrl+backspace only deletes a word. */
+const DARWIN_COMBOS = ['mod+backspace'];
 /** Roles a click presses (UIA, macOS AX without its prefix, AT-SPI): not text, a document, a field or the window. */
 const PRESSABLE = /^(?:Button|SplitButton|PopUpButton|MenuButton|CheckBox|RadioButton|Hyperlink|Link|MenuItem|ListItem|Cell|TabItem|Tab|TreeItem|OutlineRow|push button|toggle button|check box|radio button|menu item|check menu item|radio menu item|list item|page tab)$/i;
 /** Under common 60 s MCP client timeouts, as pause_for_user. */
@@ -55,7 +57,7 @@ export function consequentialCombo(combo: unknown, held: string[] = [], os: Node
   const heldKeys = held.flatMap(k => keySet(k, os));
   return String(combo ?? '').trim().split(/\s+/).filter(Boolean).some(chord => {
     const down = new Set([...heldKeys, ...keySet(chord, os)]);
-    return COMBOS.some(c => keySet(c, os).every(k => down.has(k)));
+    return (os === 'darwin' ? [...COMBOS, ...DARWIN_COMBOS] : COMBOS).some(c => keySet(c, os).every(k => down.has(k)));
   });
 }
 
@@ -65,9 +67,10 @@ const typedCombo = (text: unknown, held: string[]) =>
 
 const nameOf = (e: UiElement) => (e.name || e.description || '').trim();
 
-let readTree = async (): Promise<UiElement[]> => (await (await import('../platform')).getPlatform()).getUiTree();
+const defaultReadTree = async (): Promise<UiElement[]> => (await (await import('../platform')).getPlatform()).getUiTree();
+let readTree = defaultReadTree;
 export function __setTreeReaderForTests(f: (() => Promise<UiElement[]>) | null): void {
-  readTree = f ?? (async () => (await (await import('../platform')).getPlatform()).getUiTree());
+  readTree = f ?? defaultReadTree;
 }
 
 /** The name of the smallest named pressable element under (x, y) in the window in front (screen coordinates, as clicks take them). */
@@ -122,6 +125,11 @@ const labelled = (s: unknown) => typeof s === 'string' && LABEL.test(s);
 /** One verb for every way of pressing: an invoke's ladder and its bounds click are one act, asked once. */
 const press = (label: string) => ({ what: `click ${quote(label)}` });
 
+const isLeft = (b: unknown) => {
+  const button = typeof b === 'object' && b ? (b as { button?: unknown }).button : b;
+  return button === undefined || button === 'left' || button === 1;
+};
+
 async function clickAt(x: unknown, y: unknown) {
   if (typeof x !== 'number' || typeof y !== 'number') return null;
   const label = await labelAt(x, y);
@@ -134,7 +142,8 @@ async function consequential(method: string, args: unknown[], held: string[], ta
   const o = (typeof a === 'object' && a) || {};
   const typed = (text: unknown) => typedCombo(text, held) ? { what: `type ${quote(String(text))} with ${quote(held.join('+'))} held` } : null;
   switch (method) {
-    case 'mouseClick': case 'mouseDoubleClick': return clickAt(args[0], args[1]);
+    // A right or middle click only opens a menu or a tab: the platforms pass {button}, NativeDesktop a number (1 = left).
+    case 'mouseClick': case 'mouseDoubleClick': return isLeft(args[2]) ? clickAt(args[0], args[1]) : null;
     case 'keyPress': case 'keyDown': case 'pressKey': return consequentialCombo(a, held) ? { what: `press ${quote(String(a))}` } : null;
     case 'typeText': return typed(a);
     // Reading, filling or opening an element is not the act; pressing, toggling or picking it is.
