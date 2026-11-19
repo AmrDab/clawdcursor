@@ -19,7 +19,13 @@ export async function openFilePath(
   // Leaf segment — for a directory this is the Explorer window title.
   const leaf = p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '';
   let isDir = false;
-  try { isDir = (await fsp.stat(p)).isDirectory(); } catch { /* unknown/missing — treat as file */ }
+  try { isDir = (await fsp.stat(p)).isDirectory(); }
+  catch (err) {
+    // A path that is not there is a failure, not an "Opened:" the opener may never have honoured. Any other stat error
+    // (permissions, a path form stat cannot read) is not proof of absence: the opener decides.
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return { text: `open_file failed: no such file or folder: ${p}`, isError: true };
+  }
   try {
     if (platform.platform === 'darwin' || platform.platform === 'linux') {
       // The opener accepted the path (a refusal throws); which app answers is not known, so no window is claimed.
