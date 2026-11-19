@@ -61,14 +61,11 @@ import './quiet-warnings';   // first: before any dependency can emit DEP0040
 import { Command } from 'commander';
 import { VERSION } from '../version';
 import { authHeaders } from './auth';
-import dotenv from 'dotenv';
 import pc from 'picocolors';
 import { migrateFromLegacyDir } from '../paths';
 import { stopHostApp } from '../platform/native-helper';
 import { stopControl, resumeControl, isStopped } from '../core/control';
 import { foreignOverlayState } from '../core/overlay-state';
-
-dotenv.config({ quiet: true });
 
 migrateFromLegacyDir();
 

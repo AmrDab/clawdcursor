@@ -323,7 +323,9 @@ const platformPointPid: PointPid = async at => {
   const r = await psRunner.run({ cmd: 'pid-at-point', ...(at ? { x: Math.round(at.x), y: Math.round(at.y) } : {}) }) as { processId?: number };
   return typeof r?.processId === 'number' && r.processId > 0 ? r.processId : null;
 };
-let pointPid: PointPid = process.env.VITEST ? async () => null : platformPointPid;
+let pointPid: PointPid = platformPointPid;
+/** For test code only (tests/vitest.setup.ts): a unit test must not ask the real desktop what is at a point. */
+export function __useTestDoublesForTests(): void { pointPid = async () => null; }
 /** For tests: what is at a point. */
 export function __setPointPidReaderForTests(f: PointPid | null): void {
   pointPid = f ?? platformPointPid;

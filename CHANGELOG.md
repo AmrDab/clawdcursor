@@ -2,6 +2,13 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- **Settings come only from the environment, command-line flags and `~/.clawdcursor`.** A `.env` file and a
+  `.clawdcursor-config.json` in the working directory are no longer read, and `CLAWD_DISABLE_VISION` now takes
+  precedence over the config files.
+
 ## [2.2.0] - 2026-11-18
 
 ### Added

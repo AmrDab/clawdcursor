@@ -30,8 +30,8 @@ import { inForegroundBurst, setUserTurns } from '../platform/foreground-burst';
 import { windowTextIncludes } from '../platform/window-text';
 import { aiHostKind, sameApp } from './ai-hosts';
 
-// Off under the test runner unless a test points it somewhere: tests must not write into the user's real data dir.
-let dir: string | null = process.env.VITEST ? null : DATA_DIR;
+// The real data dir. Test code switches it off with __useTestDoublesForTests(): tests must not write into the user's real data dir.
+let dir: string | null = DATA_DIR;
 const stopFile = () => (dir ? path.join(dir, 'stopped.json') : null);
 /** Only where the stop file cannot be written: then this process at least stays stopped. Otherwise the file is the truth. */
 let stoppedHere = false;
@@ -193,12 +193,13 @@ const heldText = (since: number) =>
   `(waitedSec: ${Math.round((Date.now() - since) / 1000)}).`;
 
 type Idle = { tick: number; idleMs: number } | null;
-// Off under the test runner unless a test sets a reader. Null: this OS cannot tell (Linux), and then nothing waits.
-let readIdle: () => Promise<Idle> = process.env.VITEST ? async () => null : async () => {
+// Null: this OS cannot tell (Linux), and then nothing waits.
+const platformIdle = async (): Promise<Idle> => {
   const { getPlatform } = await import('../platform');
   const p = await getPlatform();
   return (await p.userIdle?.()) ?? null;
 };
+let readIdle: () => Promise<Idle> = platformIdle;
 export function __setIdleReaderForTests(f: (() => Promise<Idle>) | null): void {
   readIdle = f ?? (async () => null);
 }
@@ -358,13 +359,21 @@ const platformForeground = async (): Promise<Foreground | null> => {
   const w = await (await getPlatform()).getActiveWindow();
   return w && w.processId ? { processId: w.processId, processName: w.processName || `pid ${w.processId}`, appName: w.appName, title: w.title || undefined, handle: w.handle, guessed: w.guessed, hostedProcessId: w.hostedProcessId, hostedProcessName: w.hostedProcessName, bounds: w.bounds } : null;
 };
-// Off under the test runner unless a test sets a reader: a unit test must not start the real platform to ask.
-let readForeground: () => Promise<Foreground | null> = process.env.VITEST ? async () => null : platformForeground;
+let readForeground: () => Promise<Foreground | null> = platformForeground;
 type ListedWindow = { processId: number; handle?: number | string; processName: string; appName?: string; hostedProcessId?: number; hostedProcessName?: string; hostedAppName?: string };
-let readWindows: () => Promise<ListedWindow[]> = process.env.VITEST ? async () => [] : async () => {
+const platformWindows = async (): Promise<ListedWindow[]> => {
   const { getPlatform } = await import('../platform');
   return (await getPlatform()).listWindows();
 };
+let readWindows: () => Promise<ListedWindow[]> = platformWindows;
+
+/** For test code only (tests/vitest.setup.ts): no stop-file dir and no platform reads, so a unit test never touches the real desktop or data dir. */
+export function __useTestDoublesForTests(): void {
+  dir = null;
+  readIdle = async () => null;
+  readForeground = async () => null;
+  readWindows = async () => [];
+}
 
 /** The window in front now, a fresh read; null when it cannot be read. */
 export const foregroundNow = (): Promise<Foreground | null> => readForeground().catch(() => null);

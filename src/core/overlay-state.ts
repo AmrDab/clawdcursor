@@ -20,11 +20,12 @@ const STALE_MS = 45_000;
 let heartbeat: ReturnType<typeof setInterval> | null = null;
 let last: OverlayState = { pids: [], paused: false };
 
-// Off under the test runner unless a test points it somewhere: tests must not write into the user's real data dir.
-let dir: string | null = process.env.VITEST ? null : path.join(DATA_DIR, 'overlay');
+let dir: string | null = path.join(DATA_DIR, 'overlay');
 const own = () => (dir ? path.join(dir, `${process.pid}.json`) : null);
 
 export function __setOverlayStateDirForTests(d: string | null): void { dir = d; }
+/** For test code only (tests/vitest.setup.ts): tests must not write into the user's real data dir. */
+export function __useTestDoublesForTests(): void { dir = null; }
 
 /** Never throws: a failed write leaves the other processes without this one's overlay, not this process broken. */
 export function publishOverlayState(s: OverlayState): void {
