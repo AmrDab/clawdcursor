@@ -31,6 +31,7 @@ const record = (fields: Record<string, Rule>): Rule => v =>
 
 const NUM = int(2 ** 31 - 1);   // the client clamps to this
 const NAME = oneOf(...NAMES, 'other');   // a closed list: the registered tool and action names, else "other"
+const NAME_SHAPE = /^[a-z][a-z0-9_-]{0,39}$/;
 const own = <T>(o: Record<string, T>, k: string): T | null => (Object.prototype.hasOwnProperty.call(o, k) ? o[k] : null);
 const COMMON: Record<string, Rule> = {
   id: match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/),
@@ -82,13 +83,24 @@ export function validEvent(e: unknown): e is Event {
   return Object.keys(COMMON).every(k => k in o) && Object.entries(fields).every(([k, [, required]]) => !required || k in o);
 }
 
+/** A name that has the shape of one but is not on the list (a tool added since this Worker was deployed) is stored as "other". */
+function knownNames(e: unknown): unknown {
+  if (!e || typeof e !== 'object' || Array.isArray(e)) return e;
+  const o = { ...(e as Record<string, unknown>) };
+  for (const k of ['tool', 'action']) {
+    const v = o[k];
+    if (typeof v === 'string' && NAME_SHAPE.test(v) && !(NAMES as readonly string[]).includes(v)) o[k] = 'other';
+  }
+  return o;
+}
+
 /** A request body: the valid events in it, or null when the body itself is wrong (not a JSON array, too big, too many). */
 export function validate(body: string): Event[] | null {
   if (new TextEncoder().encode(body).length > MAX_BODY) return null;
   let parsed: unknown;
   try { parsed = JSON.parse(body); } catch { return null; }
   if (!Array.isArray(parsed) || parsed.length > MAX_EVENTS) return null;
-  return parsed.filter(validEvent);
+  return parsed.map(knownNames).filter(validEvent);
 }
 
 export default {

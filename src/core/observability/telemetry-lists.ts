@@ -37,8 +37,8 @@ export const APP_KINDS = ['browser', 'electron', 'native', 'unknown'];
 
 /**
  * Every tool and action name clawdcursor registers (getAllTools + getCompactSurface: the tool names and each tool's actions),
- * for the Worker to accept only these. The client sends "other" for anything else. A test fails when the registry and this
- * list differ: add the new name here, and redeploy the Worker, or events carrying it are dropped.
+ * for the Worker to store only these. The client sends "other" for anything else. A test fails when the registry and this
+ * list differ: add the new name here and redeploy the Worker; until then the Worker stores the new name as "other".
  */
 export const NAMES = [
   'a11y_collapse', 'a11y_expand', 'a11y_get_element', 'a11y_get_value', 'a11y_list_children', 'a11y_select', 'a11y_toggle', 'accessibility',

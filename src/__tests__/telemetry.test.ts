@@ -334,10 +334,16 @@ describe('the Worker', () => {
     }
   });
 
-  it('takes only the registered names: an unknown word is dropped, "other" is allowed', () => {
+  it('an unknown name is stored as "other"; a registered name and "other" are kept', () => {
     const named = (tool: string, action?: string) => ({ ...good, tool, ...(action ? { action } : {}) });
     expect(validate(JSON.stringify([named('computer', 'alice_smith'), named('alice_smith'), named('other', 'other'), named('computer', 'click')])))
-      .toEqual([named('other', 'other'), named('computer', 'click')]);
+      .toEqual([named('computer', 'other'), named('other'), named('other', 'other'), named('computer', 'click')]);
+  });
+
+  it('a name that is not a string or has the wrong shape still fails the event', () => {
+    const named = (tool: unknown, action?: unknown) => ({ ...good, tool, ...(action === undefined ? {} : { action }) });
+    expect(validate(JSON.stringify([named(5), named('computer', 7), named('Alice Smith'), named('computer', 'C:\Users\alice'), named('a'.repeat(41)), named('computer', 'click')])))
+      .toEqual([named('computer', 'click')]);
   });
 
   it('the list of names in the Worker is the registry list, no more and no less', () => {
