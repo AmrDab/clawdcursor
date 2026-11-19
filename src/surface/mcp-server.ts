@@ -185,7 +185,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'Drive UI symbolically: compile_ui / find_button / find_field return a stable ' +
       '{element_id, snapshot_id} you pass to invoke/set_value — it survives layout shifts, so ' +
       'prefer it over pixel coordinates. ' +
-      'When a result names a guide, read it with system {action:"shortcuts_list", context}; after working out shortcuts for an app that has no guide (or finding a listed one wrong), call system {action:"save_guide"} once at the end of the task, and the user decides. ' +
+      'When a result shows keys from a guide, press them instead of hunting with the mouse; the rest of that guide is system {action:"shortcuts_list", context}; after working out shortcuts for an app that has no guide (or finding a listed one wrong), call system {action:"save_guide"} once at the end of the task, and the user decides. ' +
       'Pass `expect` on consequential actions so a failed one ' +
       'reports a DEVIATION instead of a hollow success. Each action result and error ends with one line: ' +
       '[confirmed | unverified | refused · CODE · hint · next | failed · CODE · hint · next] — follow its next call instead of guessing. ' +

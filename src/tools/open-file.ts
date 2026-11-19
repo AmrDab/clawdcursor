@@ -10,6 +10,7 @@ import type { PlatformAdapter } from '../platform/types';
 import { windowTextIncludes } from '../platform/window-text';
 import { quoteScreenText } from '../core/untrusted-screen-content';
 import { resolveAlias, startedNoWindowText } from '../platform/app-aliases';
+import { withGuideHint } from '../core/guides/hint';
 
 export async function openFilePath(
   platform: PlatformAdapter,
@@ -24,7 +25,9 @@ export async function openFilePath(
     if (platform.platform === 'darwin' || platform.platform === 'linux') {
       // The opener accepted the path (a refusal throws); which app answers is not known, so no window is claimed.
       await platform.launchApp(platform.platform === 'darwin' ? 'open' : 'xdg-open', { url: p });
-      return { text: `Opened: ${p} — handed to its default app; no window was checked, so read the screen before acting on it.` };
+      // The one app the path itself names: Finder for a folder, the app for a .app bundle. A document's app is not known.
+      const app = platform.platform === 'darwin' ? (isDir ? 'Finder' : /[.]app$/i.test(leaf) ? leaf.slice(0, -4) : '') : '';
+      return { text: withGuideHint(`Opened: ${p} — handed to its default app; no window was checked, so read the screen before acting on it.`, { names: [app] }, platform.platform) };
     }
     if (!isDir) {
       // A file is opened by its own program, not by Explorer, so no Explorer window is ever the result (live:
@@ -37,9 +40,11 @@ export async function openFilePath(
         processNames: exe ? [exe, ...(alias?.processNames ?? [])] : [],
         searchTerm: alias?.searchTerm,
       });
-      if (res?.title) return { text: `Opened: ${p} (window: ${quoteScreenText(res.title)})` };
+      // The window (or process) launchApp reports is the program's own: only a program's processNames are asked for.
+      const probe = { names: [exe, ...(alias?.processNames ?? []), res?.processName ?? ''], title: res?.title };
+      if (res?.title) return { text: withGuideHint(`Opened: ${p} (window: ${quoteScreenText(res.title)})`, probe, platform.platform) };
       if (!exe) return { text: `Opened: ${p}` };
-      if (res?.pid) return { text: `Opened: ${p} — ${startedNoWindowText(leaf, res)}` };
+      if (res?.pid) return { text: withGuideHint(`Opened: ${p} — ${startedNoWindowText(leaf, res)}`, probe, platform.platform) };
       const by = `"processName":${JSON.stringify(exe)}`;
       const focus = `window {"action":"focus",${by}}`;
       return { text: `Opened: ${p} — handed to Windows, but neither a window nor a process of ${leaf} was found: it may not have started. Wait, then ${focus} before acting on it.` };
@@ -58,7 +63,7 @@ export async function openFilePath(
         isError: true,
       };
     }
-    return { text: `Opened folder "${leaf}" (window: ${quoteScreenText(title)})` };
+    return { text: withGuideHint(`Opened folder "${leaf}" (window: ${quoteScreenText(title)})`, { names: ['explorer'] }, platform.platform) };
   } catch (err) {
     return {
       text: `open_file failed: ${err instanceof Error ? err.message : String(err)}`,

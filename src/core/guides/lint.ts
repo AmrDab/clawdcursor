@@ -17,6 +17,7 @@ export interface Guide {
   domainHints?: string[];
   processNames?: string[];
   shortcuts: Record<string, GuideChord>;
+  essentials?: string[];
   consequential?: string[];
   workflows?: Record<string, string | { name?: string; steps?: GuideStep[] }>;
   layout?: Record<string, string>;
@@ -48,6 +49,7 @@ const VALID_DOMAIN_RE = /^(?:\*\.)?[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](
 
 export const MAX_SHORTCUTS = 150;
 export const MAX_WORKFLOWS = 20;
+export const MAX_ESSENTIALS = 8;
 export const MAX_TIPS = 12;
 export const MAX_TIP_LEN = 240;
 export const MAX_NAME_LEN = 48;
@@ -182,6 +184,14 @@ export function lintGuide(raw: unknown, opts: LintOptions = {}): LintResult {
   if (g.consequential !== undefined) {
     if (!Array.isArray(g.consequential)) err('consequential must be a list of shortcut names');
     else for (const n of g.consequential) if (typeof n !== 'string' || !(n in shortcuts)) err(`consequential: "${String(n).slice(0, 30)}" is not a shortcut`);
+  }
+  if (g.essentials !== undefined) {
+    if (!Array.isArray(g.essentials) || g.essentials.some(n => typeof n !== 'string')) err('essentials must be a list of shortcut names');
+    else {
+      if (g.essentials.length > MAX_ESSENTIALS) err(`${g.essentials.length} essentials; max ${MAX_ESSENTIALS}`);
+      if (new Set(g.essentials).size !== g.essentials.length) err('essentials repeats a name');
+      for (const n of g.essentials as string[]) if (!(n in shortcuts)) err(`essentials: "${n.slice(0, 30)}" is not a shortcut`);
+    }
   }
   if (isObj(g.workflows)) {
     const wf = Object.entries(g.workflows);

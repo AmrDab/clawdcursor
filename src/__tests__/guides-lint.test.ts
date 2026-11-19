@@ -106,3 +106,17 @@ describe('wildcard domainHints', () => {
     for (const h of ['*atlassian.net', 'a.*.net', '*.', '**.atlassian.net']) expect(lintGuide(web({ domainHints: [h] })).ok, h).toBe(false);
   });
 });
+
+describe('guide lint: essentials', () => {
+  it('up to 8 distinct shortcut names pass; a guide without essentials passes', () => {
+    expect(lintGuide(web({ essentials: ['go_to_inbox', 'compose'] })).ok).toBe(true);
+    const many = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`key_${i}`, `ctrl+${i}`]));
+    expect(lintGuide(web({ shortcuts: many, consequential: undefined, essentials: Object.keys(many).slice(0, 8) })).ok).toBe(true);
+  });
+  it('more than 8, a repeat, an unknown name or a non-list fail', () => {
+    const many = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`key_${i}`, `ctrl+${i}`]));
+    for (const e of [Object.keys(many), ['compose', 'compose'], ['nuke'], 'compose', [1]]) {
+      expect(lintGuide(web({ shortcuts: { ...many, compose: 'c' }, consequential: undefined, essentials: e })).ok, JSON.stringify(e)).toBe(false);
+    }
+  });
+});

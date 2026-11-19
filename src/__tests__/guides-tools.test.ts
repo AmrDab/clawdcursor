@@ -9,6 +9,7 @@ import { PassThrough } from 'stream';
 import { controlBanner } from '../core/banner';
 import { pauseGate } from '../core/pause-gate';
 import { getShortcutTools } from '../tools/shortcuts';
+import { getExtraTools } from '../tools/extras';
 import { guideHint, resetGuideHints } from '../core/guides/hint';
 import { __setGuidePathsForTests, loadGuides } from '../core/guides/store';
 import { renderGuide } from '../core/guides/render';
@@ -112,11 +113,84 @@ describe('shortcuts_list with a guide', () => {
 describe('guide hint', () => {
   it('one line, once per app per session, from a process name, a url or a window title', () => {
     expect(guideHint({ names: ['notepad'] })).toBe('');
-    expect(guideHint({ url: 'https://mail.google.com/mail/u/0/' })).toBe('guide: Gmail (5 shortcuts, 1 workflows): shortcuts_list {"context":"gmail"}');
+    expect(guideHint({ url: 'https://mail.google.com/mail/u/0/' }, 'win32')).toBe('guide: Gmail keys (Windows): compose c · go_to_inbox g i · send* ctrl+Return · find_in_page ctrl+f · mark_unread shift+u (* = hard to undo). All 5 shortcuts, 1 workflows and tips: shortcuts_list {"context":"gmail"}');
     expect(guideHint({ url: 'https://mail.google.com/' })).toBe('');
     resetGuideHints();
     expect(guideHint({ names: ['x'], title: 'Inbox - Gmail - Google Chrome' })).toContain('guide: Gmail');
     expect(guideHint({ names: ['x'], title: 'Inbox - Gmail' })).toBe('');
+  });
+});
+
+describe('guide hint: the keys', () => {
+  const put = (over: Record<string, unknown>, where: 'bundledFile' | 'cacheFile' = 'bundledFile') => {
+    fs.writeFileSync(paths()[where], JSON.stringify({ schemaVersion: 2, generatedAt: 'x', guides: { gmail: { ...gmail, ...over } } }));
+    __setGuidePathsForTests(paths()); resetGuideHints();
+  };
+  const url = { url: 'https://mail.google.com/' };
+  const rest = 'All 5 shortcuts, 1 workflows and tips: shortcuts_list {"context":"gmail"}';
+
+  it('essentials in their order, resolved per OS: mod, a skipped key, * on a consequential one', () => {
+    put({ essentials: ['send', 'find_in_page', 'compose'] });
+    expect(guideHint(url, 'win32')).toBe(`guide: Gmail keys (Windows): send* ctrl+Return · find_in_page ctrl+f · compose c (* = hard to undo). ${rest}`);
+    resetGuideHints();
+    expect(guideHint(url, 'darwin')).toBe(`guide: Gmail keys (macOS): send* cmd+Return · find_in_page cmd+f · compose c (* = hard to undo). ${rest}`);
+    // linux has no key for find_in_page: skipped; nothing marked is shown, so no * legend
+    put({ essentials: ['find_in_page', 'compose'] });
+    expect(guideHint(url, 'linux')).toBe(`guide: Gmail keys (Linux): compose c. ${rest}`);
+  });
+
+  it('without essentials, the first 8 shortcuts in file order', () => {
+    const many = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`key_${i}`, `ctrl+${i}`]));
+    put({ shortcuts: many, consequential: [] });
+    const h = guideHint(url, 'win32');
+    expect(h).toContain('key_0 ctrl+0 · key_1 ctrl+1');
+    expect(h).toContain('key_7 ctrl+7. All 10 shortcuts');
+    expect(h).not.toContain('key_8');
+  });
+
+  it('a name that is also a tool name is shown as words, so the compact surface does not rewrite it', () => {
+    put({ shortcuts: { close_window: 'mod+w', compose: 'c' }, consequential: ['close_window'] });
+    expect(guideHint(url, 'win32')).toContain('keys (Windows): close window* ctrl+w · compose c');
+  });
+
+  it('a refreshed guide (not bundled) has its keys wrapped as untrusted; the pointer stays outside', () => {
+    put({ essentials: ['compose'] }, 'cacheFile');
+    expect(guideHint(url, 'win32')).toBe(`guide:\n<untrusted-screen-content>\nGmail keys (Windows): compose c\n</untrusted-screen-content>\n${rest}`);
+  });
+});
+
+describe('guide hint on open_file', () => {
+  const ctxFor = (platform: string, res: Record<string, unknown> = {}): ToolContext => ({
+    ensureInitialized: async () => {},
+    platform: { platform, launchApp: vi.fn(async () => res) },
+  }) as unknown as ToolContext;
+  const openFile = getExtraTools().find(t => t.name === 'open_file')!;
+  const desk = (app: string, name: string, os: string, proc: string, chord: string) =>
+    ({ app, name, kind: 'desktop', os: [os], processNames: [proc], shortcuts: { new_item: chord }, sources: gmail.sources, lastVerified: gmail.lastVerified });
+  beforeEach(() => {
+    const guides = { 'file-explorer': desk('file-explorer', 'File Explorer', 'win32', 'explorer', 'ctrl+n'), finder: desk('finder', 'Finder', 'darwin', 'Finder', 'mod+n'), notepad: desk('notepad', 'Notepad', 'win32', 'notepad', 'mod+n') };
+    fs.writeFileSync(paths().bundledFile, JSON.stringify({ schemaVersion: 2, generatedAt: 'x', guides }));
+    __setGuidePathsForTests(paths()); resetGuideHints();
+  });
+
+  it('a folder on Windows: the File Explorer guide, once per app', async () => {
+    const leaf = dir.split(/[\/]/).pop()!;
+    const res = { title: `${leaf} - File Explorer`, pid: 5 };
+    expect((await openFile.handler({ path: dir }, ctxFor('win32', res))).text).toContain('guide: File Explorer keys (Windows): new_item ctrl+n.');
+    expect((await openFile.handler({ path: dir }, ctxFor('win32', res))).text).not.toContain('guide:');
+  });
+
+  it('a program on Windows: the guide of the program the open reports', async () => {
+    const r = await openFile.handler({ path: 'C:/Windows/notepad.exe' }, ctxFor('win32', { title: 'Untitled - Notepad', pid: 7 }));
+    expect(r.text).toContain('guide: Notepad keys (Windows): new_item ctrl+n.');
+  });
+
+  it('a document: the result names no app, so no hint and no extra read', async () => {
+    expect((await openFile.handler({ path: 'C:/docs/a.txt' }, ctxFor('win32'))).text).not.toContain('guide');
+  });
+
+  it('a folder on macOS: the Finder guide', async () => {
+    expect((await openFile.handler({ path: dir }, ctxFor('darwin'))).text).toContain('guide: Finder keys (macOS): new_item cmd+n.');
   });
 });
 

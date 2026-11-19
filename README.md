@@ -194,7 +194,7 @@ Privacy:
 
 ## App guides
 
-An app guide lists one app's keyboard shortcuts for your OS, a few workflows and tips. Your AI reads it with `system shortcuts_list` (`context` = the app or site, `query` = only matching shortcuts), and `open_app`, `open_url`, `browser navigate` and `window focus` mention a guide once per app per session when there is one.
+An app guide lists one app's keyboard shortcuts for your OS, a few workflows and tips. Your AI reads it with `system shortcuts_list` (`context` = the app or site, `query` = only matching shortcuts), and `open_app`, `open_file`, `open_url`, `browser navigate` and `window focus` show the app's essential keys for your OS, once per app per session, when there is a guide.
 
 - **Where they come from:** the guides in [AmrDab/clawdcursor-guides](https://github.com/AmrDab/clawdcursor-guides), the verified ones, shipped in the npm package as one pack. Every guide is checked on load; one that fails is skipped.
 - **The refresh:** at most once every 7 days, after the server starts, Clawd Cursor downloads `https://clawdcursor.com/app-guides/pack.json` (the whole pack, at most 2 MB, 10 second timeout). The request does not name any app. If it fails, the guides you have stay. Set `CLAWD_NO_GUIDE_REFRESH=1` to turn it off.
