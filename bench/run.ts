@@ -185,7 +185,13 @@ async function runOne(task: TaskSpec, m: ModelRun, env: Env, n: number, repeat: 
     const cdp = fixture.cdp;
     const proveCdp = async () => cdp !== undefined && await cdpIsFixture({ ...cdp, browserPids: fixture.roots });
     let cdpProven = await proveCdp();
-    const cdpClock = setInterval(() => { proveCdp().then(ok => { cdpProven = ok; }, () => { cdpProven = false; }); }, 5000);
+    // One scan at a time: under load a scan outlasts the 5 s tick, and the next must not start on top of it.
+    let proving = false;
+    const cdpClock = setInterval(() => {
+      if (proving) return;
+      proving = true;
+      proveCdp().then(ok => { cdpProven = ok; }, () => { cdpProven = false; }).finally(() => { proving = false; });
+    }, 5000);
     const dog = new Watchdog({ maxCalls: task.caps.calls, maxSeconds: task.caps.seconds, fixtureApps: fixture.apps, focusSettleMs: FOCUS_SETTLE_MS }, {
       ownsFocus: async () => ownsFocus(await readFocus(), await fixture.roots(), fixture.frameTitle),
       // The process an act went to is judged by the fence's own rule, over the very pids the daemon was fenced to.
