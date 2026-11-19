@@ -6,7 +6,8 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ### Fixed
 - **A takeover no longer says "paused by the user" when they did not press Pause.** While the user is using the computer, the call waits and replies "the user is using the computer, clawdcursor is waiting for them" (code `USER_ACTIVE`): call the same step again. The pill's Pause keeps `PAUSED`, and a pause card waiting for an answer is now `PAUSE_PENDING`.
-- **A hold no longer outlives the session that made it.** A hold whose process has exited is ignored and removed, so a new session does not start paused. With the pill off (`--no-banner`, `CLAWD_NO_BANNER=1`, no overlay on this OS) there is no Resume to click, so a takeover only waits for the user to be idle and holds nothing.
+- **When you take over, the agent carries on by itself once you are idle.** No 5 s wait and no Resume click: nothing more is sent while you work, and the next step runs once you have been idle for 1 s. Only the pill's Pause holds the agent until Resume.
+- **A hold no longer outlives the session that made it.** A hold whose process has exited is ignored and removed, so a new session does not start paused.
 - **`clawdcursor resume` clears a hold**, not only a stop.
 - **A pause card is withdrawn when the session that asked for it ends.** A card shown by another clawdcursor process now blocks input and window changes only; reading the screen still works.
 - The server instructions say what a waiting reply means: call the same step again, and do not retry a Stop.

@@ -10,7 +10,7 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   __setControlDirForTests, __setForegroundReaderForTests, __setIdleReaderForTests, turnTiming, holdControl, releaseHold,
-  isHeld, setOnHold, setPillAvailable, giveControlBack, stopControl, isGuardRefusal, STOPPED_TEXT, withTurnBudget, type HoldEvent,
+  isHeld, setOnHold, giveControlBack, stopControl, isGuardRefusal, STOPPED_TEXT, withTurnBudget, type HoldEvent,
 } from '../core/control';
 import { guardInputMethods, ownInputAt, _resetHeldKeys } from '../platform/pointer-guard';
 import { withForegroundBurst } from '../platform/foreground-burst';
@@ -49,7 +49,7 @@ beforeEach(async () => {
   __setControlDirForTests(dir);
   __setForegroundReaderForTests(async () => EDGE);
   // waitMs long enough that a loaded machine never ends a wait before the test clicks Resume; one test shortens it.
-  Object.assign(turnTiming, { idleMs: 40, takeoverMs: 80, waitMs: 2000, pollMs: 5, graceMs: 30 });
+  Object.assign(turnTiming, { idleMs: 40, waitMs: 2000, pollMs: 5, graceMs: 30 });
   typing = false;
   userAt = 0;
   // The OS's idle time counts every process's input, the agent's own too (GetLastInputInfo).
@@ -65,7 +65,6 @@ beforeEach(async () => {
 afterEach(() => {
   _resetHeldKeys();
   setOnHold(null);
-  setPillAvailable(null);
   __setIdleReaderForTests(null);
   Object.assign(turnTiming, DEFAULTS);
   __setControlDirForTests(null);
@@ -73,10 +72,9 @@ afterEach(() => {
 });
 
 describe('real input waits for the user', () => {
-  it('a click while the user is at the keyboard is not sent; idle at the takeover mark, it goes on by itself', async () => {
+  it('a click while the user is at the keyboard is not sent; once they are idle it goes on by itself', async () => {
     const d = fakeDesktop();
     typing = true;
-    const t0 = Date.now();
     const click = d.mouseClick(1, 1);
     await sleep(30);
     expect(d.sent).toEqual([]);
@@ -84,26 +82,38 @@ describe('real input waits for the user', () => {
     typing = false;                         // they stop
     await click;
     expect(d.sent).toEqual(['click 1,1']);
-    expect(Date.now() - t0).toBeGreaterThanOrEqual(turnTiming.takeoverMs - 5);
     expect(events).toEqual(['takeover', 'resumed']);
     expect(isHeld()).toBe(false);
   });
 
-  it('still working at the takeover mark: held (the pill offers Resume), and the pill\'s Resume sends it', async () => {
+  it('a user who keeps working holds nothing: no Resume click is needed, the call goes on when they are idle', async () => {
     const d = fakeDesktop();
     typing = true;
     const click = d.mouseClick(1, 1);
-    await sleep(turnTiming.takeoverMs + 40);
-    expect(isHeld()).toBe(true);
-    expect(events).toEqual(['takeover', 'held']);
-    await sleep(60);
-    expect(d.sent).toEqual([]);             // no auto-resume once held, however long they work
+    await sleep(200);
+    expect(isHeld()).toBe(false);
+    expect(fs.existsSync(path.join(dir, 'held.json'))).toBe(false);
+    expect(events).toEqual(['takeover']);
+    expect(d.sent).toEqual([]);
     typing = false;
+    await click;
+    expect(d.sent).toEqual(['click 1,1']);
+    expect(events).toEqual(['takeover', 'resumed']);
+  });
+
+  it("the pill's Pause during a takeover holds it until Resume", async () => {
+    const d = fakeDesktop();
+    typing = true;
+    const click = d.mouseClick(1, 1);
+    await sleep(30);
+    holdControl('pill');
+    typing = false;
+    await sleep(60);
+    expect(d.sent).toEqual([]);             // idle, but held: the Pause wins
     userAt = Date.now();                    // the click on Resume is input too: not a takeover
     releaseHold('pill');
     await click;
     expect(d.sent).toEqual(['click 1,1']);
-    expect(events).toEqual(['takeover', 'held', 'resumed']);
   });
 
   it('Stop during a takeover: refused as stopped, and the pill is not left saying "your turn"', async () => {
@@ -203,7 +213,7 @@ describe('real input waits for the user', () => {
   });
 });
 
-describe('a takeover says what it is, and holds only where Resume can be clicked', () => {
+describe('a takeover says what it is, and never holds', () => {
   it('a takeover that outlasts the call is the user at work, not their Pause: its own words and code', async () => {
     const d = fakeDesktop();
     typing = true;
@@ -212,7 +222,7 @@ describe('a takeover says what it is, and holds only where Resume can be clicked
     turnTiming.waitMs = 2000;
     expect(err.message).toMatch(/^the user is using the computer — clawdcursor is waiting for them, and nothing was sent/);
     expect(err.message).toMatch(/call the same step again/);
-    expect(err.message).toMatch(/click Resume on the pill/);
+    expect(err.message).toMatch(/once they are idle/);
     expect(err.message).not.toMatch(/paused by the user/);
     expect(isGuardRefusal(err)).toBe(true);
     expect(classifyResult(`Error: ${err.message}`, true, true)).toMatchObject({ outcome: 'refused', code: 'USER_ACTIVE' });
@@ -224,15 +234,14 @@ describe('a takeover says what it is, and holds only where Resume can be clicked
     expect(classifyResult('paused — a pause is waiting for the user on screen, and nothing runs', true, true)?.code).toBe('PAUSE_PENDING');
   });
 
-  it('with no pill: nothing is written, the call waits for idle within its budget and returns the waiting reply', async () => {
-    setPillAvailable(() => false);
+  it('nothing is written: the call waits for idle within its budget and returns the waiting reply', async () => {
     const d = fakeDesktop();
     typing = true;
     turnTiming.waitMs = 200;
     const err = await refused(d.mouseClick(1, 1));
     turnTiming.waitMs = 2000;
     expect(err.message).toMatch(/^the user is using the computer — clawdcursor is waiting for them, and nothing was sent/);
-    expect(err.message).not.toMatch(/Resume/);   // no pill, no button to name
+    expect(err.message).not.toMatch(/Resume/);   // nothing to click: being idle is enough
     expect(classifyResult(`Error: ${err.message}`, true, true)?.code).toBe('USER_ACTIVE');
     expect(isHeld()).toBe(false);
     expect(fs.existsSync(path.join(dir, 'held.json'))).toBe(false);
@@ -240,12 +249,11 @@ describe('a takeover says what it is, and holds only where Resume can be clicked
     expect(d.sent).toEqual([]);
   });
 
-  it('with no pill, a user who goes idle lets the call go on by itself', async () => {
-    setPillAvailable(() => false);
+  it('a user who goes idle lets the call go on by itself, pill or none', async () => {
     const d = fakeDesktop();
     typing = true;
     const click = d.mouseClick(1, 1);
-    await sleep(turnTiming.takeoverMs + 40);
+    await sleep(120);
     expect(d.sent).toEqual([]);
     typing = false;
     await click;

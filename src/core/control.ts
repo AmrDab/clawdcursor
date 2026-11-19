@@ -106,17 +106,15 @@ export async function sleepUnlessStopped(ms: number): Promise<boolean> {
 // Real input (a key, a click, a drag, a move, a focus, a launch: anything that takes the user's mouse, keyboard or front
 // window) waits until the user is idle: the agent never moves the mouse or types while their hands are on it. When they
 // take over (busy when the agent wants to start, or their input in the middle of a foreground burst), nothing more is
-// sent; after `takeoverMs` it carries on by itself if they are idle, and if they are still working clawdcursor is HELD
-// until they click Resume on the pill (or Stop). The pill's Pause holds it too. While held every act waits, background
-// ones included, `waitMs` per call; then the call returns the HELD waiting reply and the agent calls the same step again.
-// Reads are not held.
+// sent, and nothing is held (owner, 2026-11-19): the call waits until they are idle and then goes on by itself. Only the
+// pill's Pause holds clawdcursor, until they click Resume (or Stop). Every wait is bounded per call (`waitMs`); then the
+// call returns the waiting reply and the agent calls the same step again. Reads never wait.
 
 /**
- * idleMs: no input for this long is idle; takeoverMs: how long a takeover waits before it looks again; waitMs: how long
- * one call waits while held (some hosts time a tool call out at 60 s); graceMs: input this soon after the pill's Resume
- * is the user's hand leaving it. Tests shorten them.
+ * idleMs: no input for this long is idle; waitMs: how long one call waits for the user (some hosts time a tool call out at
+ * 60 s); graceMs: input this soon after the pill's Resume is the user's hand leaving it. Tests shorten them.
  */
-export const turnTiming = { idleMs: 1000, takeoverMs: 5000, waitMs: 50_000, pollMs: 200, graceMs: 1500 };
+export const turnTiming = { idleMs: 1000, waitMs: 50_000, pollMs: 200, graceMs: 1500 };
 /** Only where the input clock could not be read after the agent's input: its own input ends a moment before its clock reads it. */
 const OWN_SLACK_MS = 100;
 /** Two reads of the same last input: equal on Windows (GetLastInputInfo's tick), within a ms or two on macOS. */
@@ -134,16 +132,13 @@ let ownBase: Promise<number | null> = Promise.resolve(null);
  */
 const holdFile = () => (dir ? path.join(dir, 'held.json') : null);
 let heldHere: { by: string; since: number } | null = null;
-/** Can the user's pill show here (banner.ts sets it)? Without it nobody can click Resume, so a takeover never holds. */
-let pillCanShow: () => boolean = () => true;
-export function setPillAvailable(f: (() => boolean) | null): void { pillCanShow = f ?? (() => true); }
 const aliveProcess = (pid: number) => { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; } };
 /** When the user last clicked Resume on the pill, or this process saw a hold end. */
 let resumedAt = 0;
 /** This process's pill was told 'held' (it offers Resume): it is told 'resumed' when the hold ends, wherever it ended. */
 let pillHeld = false;
 
-/** takeover: the user's turn, waiting `takeoverMs`; held: until their Resume; resumed: the agent's turn again. */
+/** takeover: the user's turn, until they are idle; held: the pill's Pause, until their Resume; resumed: the agent's turn again. */
 export type HoldEvent = 'takeover' | 'held' | 'resumed';
 let onHold: ((e: HoldEvent) => void) | null = null;
 /** The indicator (banner.ts): the pill says "Paused", shows Resume while held, and the glow is down. */
@@ -207,12 +202,10 @@ export function releaseHold(by: string): void {
 // The Pause button says "paused by the user"; a takeover is the user at work, not a Pause they pressed, and says so.
 const waitedFor = (since: number) => `(waitedSec: ${Math.round((Date.now() - since) / 1000)}).`;
 const NO_GIVING_UP = 'Do not end the task, give up or act some other way meanwhile ';
-const heldText = (since: number, by: string) => by === 'takeover'
-  ? 'the user is using the computer — clawdcursor is waiting for them, and nothing was sent. Waiting is normal: call the same step again ' +
-    `to keep waiting; it runs once they click Resume on the pill. ${NO_GIVING_UP}${waitedFor(since)}`
-  : 'paused by the user — they have the desktop, and nothing was sent. Waiting is normal: call the same step again to keep ' +
-    `waiting; it runs the moment they click Resume on the pill. ${NO_GIVING_UP}${waitedFor(since)}`;
-// No pill to Resume from: nothing is held, the call only waits for the user to be idle.
+const heldText = (since: number) =>
+  'paused by the user — they have the desktop, and nothing was sent. Waiting is normal: call the same step again to keep ' +
+  `waiting; it runs the moment they click Resume on the pill. ${NO_GIVING_UP}${waitedFor(since)}`;
+// A takeover holds nothing: the call only waits for the user to be idle.
 const activeText = (since: number) =>
   'the user is using the computer — clawdcursor is waiting for them, and nothing was sent. Waiting is normal: call the same step again ' +
   `to keep waiting; it runs once they are idle. ${NO_GIVING_UP}${waitedFor(since)}`;
@@ -246,12 +239,12 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 /**
  * One tool call's share of waiting for the user (mcp-server.ts runs every call in it): all its waits together, a burst's
- * takeover at the start and another after an interruption included, end by takeoverMs + waitMs from the call's start, so
+ * takeover at the start and another after an interruption included, end by waitMs from the call's start, so
  * the call returns its waiting reply before a host's 60 s limit, never acting later for a call the host gave up on.
  */
 const callBudget = new AsyncLocalStorage<{ until: number }>();
 export function withTurnBudget<R>(fn: () => R): R {
-  return callBudget.run({ until: Date.now() + turnTiming.takeoverMs + turnTiming.waitMs }, fn);
+  return callBudget.run({ until: Date.now() + turnTiming.waitMs }, fn);
 }
 const byDeadline = (until: number) => Math.min(until, callBudget.getStore()?.until ?? Infinity);
 
@@ -263,7 +256,7 @@ async function waitWhileHeld(): Promise<void> {
     if (!pillHeld) tell('held');   // held from another process, or from before this one started: this pill offers Resume too
     waited = true;
     stopCheck();
-    if (Date.now() >= until) throw new Error(heldText(h.since, h.by));
+    if (Date.now() >= until) throw new Error(heldText(h.since));
     await sleep(turnTiming.pollMs);
   }
   if (waited) {
@@ -274,7 +267,7 @@ async function waitWhileHeld(): Promise<void> {
   stopCheck();
 }
 
-/** With no pill: wait, up to the call's budget, until the user is idle (true) or another process holds (false). Throws the waiting reply, or STOPPED. */
+/** Wait, up to the call's budget, until the user is idle (true) or the pill's Pause holds (false). Throws the waiting reply, or STOPPED. */
 async function waitUntilIdle(since: number): Promise<boolean> {
   const until = byDeadline(Date.now() + turnTiming.waitMs);
   for (;;) {
@@ -288,8 +281,10 @@ async function waitUntilIdle(since: number): Promise<boolean> {
 
 /**
  * The user took over: busy when the agent wanted to start, or their input in the middle of a burst (whose window and
- * cursor are already theirs again). Nothing is sent. After takeoverMs: idle → resolves, the step goes on; still working
- * → held until their Resume. Throws the waiting reply, or STOPPED.
+ * cursor are already theirs again). Nothing is sent and nothing is held: the call waits until they are idle, then the step
+ * goes on by itself (owner, 2026-11-19: no Resume click needed). Still working when the call's budget ends: the waiting
+ * reply, and the agent calls the same step again. The pill's Pause meanwhile turns it into a hold. Throws the waiting
+ * reply, or STOPPED.
  */
 export async function takeover(): Promise<void> {
   if (!isHeld()) {
@@ -297,14 +292,7 @@ export async function takeover(): Promise<void> {
     tell('takeover');
     try {
       movedAt = 0;   // a window that comes up meanwhile is the user's doing, not the agent's
-      for (const until = byDeadline(Date.now() + turnTiming.takeoverMs); !isHeld() && Date.now() < until;) {
-        stopCheck();
-        await sleep(Math.min(turnTiming.pollMs, Math.max(0, until - Date.now())));
-      }
-      stopCheck();
-      if (!isHeld() && await userIsIdle()) return;
-      if (pillCanShow()) holdControl('takeover');
-      else if (await waitUntilIdle(started)) return;   // no Resume to click, so nothing is held: only their being idle lets it go
+      if (await waitUntilIdle(started)) return;
     } finally {
       // Not held (idle again, or stopped): the agent's turn again as far as the pill goes, never "your turn" left up.
       if (!isHeld()) tell('resumed');

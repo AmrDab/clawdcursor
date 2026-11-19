@@ -57,7 +57,7 @@ import { macOverlayBinary } from '../platform/mac-swift-binary';
 import { setBeforePointerPress, setBeforeCapture, setOwnUiPids, isOwnUiPid, setOnAgentInput, setOnAgentPoint, GUARDED_METHODS } from '../platform/pointer-guard';
 import type { PauseAnswer, PauseInfo } from './pause-gate';
 import { publishOverlayState, foreignOverlayState } from './overlay-state';
-import { agentWindows, holdControl, setPillAvailable, isStopped, releaseHold, setOnHold, workingIn, workingWindow, type HoldEvent } from './control';
+import { agentWindows, holdControl, isStopped, releaseHold, setOnHold, workingIn, workingWindow, type HoldEvent } from './control';
 import { appLabel } from './app-label';
 import { burstCount, resetBurstCount, setOnBurst, type BurstEvent } from '../platform/foreground-burst';
 import { logger } from './observability/logger';
@@ -69,7 +69,7 @@ const DODGE_SETTLE_MS = 90;
 const PAUSED_OUTLINE = '#3b82f6'; // blue — "your turn"
 /** What the pill says while it is the user's turn: an R2 burst paused for them, or a takeover waiting to see if they are done. */
 const PAUSED_LABEL = 'Paused — your turn';
-/** ...and while they hold it (the pill's Pause, or they kept working): Resume on the pill continues. */
+/** ...and while they hold it (the pill's Pause): Resume on the pill continues. */
 const HELD_LABEL = 'Paused';
 
 /** How long the full-screen glow stays up after the last foreground input, or after a foreground burst ends. */
@@ -834,7 +834,5 @@ setOnAgentInput(method => {
 // ...and every R2 burst, for its whole length.
 setOnBurst(e => controlBanner.burstEvent(e));
 setOnHold(e => controlBanner.holdEvent(e));
-// ...and whether the pill can show at all: with none there is no Resume to click, so a takeover holds nothing (control.ts).
-setPillAvailable(() => controlBanner.canShow());
 // Captures: the overlay is never in one — it excludes itself where the OS can, and steps aside where it cannot.
 setBeforeCapture(() => controlBanner.beforeCapture());
