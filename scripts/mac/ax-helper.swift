@@ -1709,6 +1709,52 @@ func cmdKey() -> Never {
 
 // MARK: - pagetext
 
+/// A web page's text with a line break at the end of every block (heading, paragraph, list item, table row…). Text runs
+/// (AXStaticText) are joined as they come: the page's own spaces are in them. A secure text field is never read.
+struct PageWalk {
+    var out = ""
+    var nodes = 0
+    var aborted = false   // out of time or nodes: the caller then uses the single read
+    /// Roles that start and end on a line of their own.
+    static let blocks: Set<String> = ["AXHeading", "AXParagraph", "AXGroup", "AXList", "AXListItem", "AXTable", "AXRow", "AXOutline",
+                                      "AXWebArea", "AXToolbar", "AXTabGroup", "AXRadioGroup", "AXMenu"]
+    /// An AXGroup the browser makes for an inline element: it stays in its line.
+    static let inlineDescriptions: Set<String> = ["code", "emphasis", "strong", "mark", "time", "insertion", "deletion", "subscript",
+                                                  "superscript", "abbreviation"]
+
+    mutating func breakLine() {
+        while out.last == " " || out.last == "\t" { out.removeLast() }
+        if !out.isEmpty && out.last != "\n" { out.append("\n") }
+    }
+
+    mutating func visit(_ el: AXUIElement, depth: Int) {
+        if aborted { return }
+        nodes += 1
+        if nodes > 20_000 || depth > 80 || timeUp() { aborted = true; return }
+        let a = multi(el, ["AXRole", "AXSubrole", "AXRoleDescription", "AXValue", "AXChildren"])
+        if str(a["AXSubrole"]) == "AXSecureTextField" { return }
+        let role = str(a["AXRole"]) ?? ""
+        switch role {
+        case "AXStaticText":
+            if let v = str(a["AXValue"]) { out += v }
+            return
+        case "AXTextField", "AXTextArea", "AXComboBox":
+            breakLine()
+            if let v = str(a["AXValue"]) { out += v }
+            breakLine()
+            return
+        case "AXImage":
+            return
+        default:
+            break
+        }
+        let block = PageWalk.blocks.contains(role) && !PageWalk.inlineDescriptions.contains((str(a["AXRoleDescription"]) ?? "").lowercased())
+        if block { breakLine() }
+        for kid in (a["AXChildren"] as? [AXUIElement]) ?? [] { visit(kid, depth: depth + 1) }
+        if block { breakLine() } else if role == "AXCell", let last = out.last, last != " ", last != "\n" { out.append(" ") }
+    }
+}
+
 /// The whole text of the frontmost app's document — what VoiceOver reads — with no keystrokes: nothing is selected and
 /// the clipboard is not touched (copy_all_text pressed Cmd+A / Cmd+C, which left the page highlighted). An editor with the
 /// focus (AXTextArea): its value. A web page (AXWebArea holding the focus): AXStringForTextMarkerRange over the whole area.
@@ -1752,16 +1798,27 @@ func cmdPageText() -> Never {
         }
     }
     guard let area = web else { fail("failed", "no web page or text document has the focus") }
+    // The whole area in one read, as before: the fallback, and the yardstick the block walk is checked against.
+    var whole: String? = nil
     var range: CFTypeRef?
-    guard AXUIElementCopyParameterizedAttributeValue(area, "AXTextMarkerRangeForUIElement" as CFString, area, &range) == .success,
-          let markers = range else {
-        fail("failed", "the page does not expose its text range")
+    if AXUIElementCopyParameterizedAttributeValue(area, "AXTextMarkerRangeForUIElement" as CFString, area, &range) == .success, let markers = range {
+        var out: CFTypeRef?
+        if AXUIElementCopyParameterizedAttributeValue(area, "AXStringForTextMarkerRange" as CFString, markers, &out) == .success,
+           let text = out as? String, !text.isEmpty { whole = text }
     }
-    var out: CFTypeRef?
-    guard AXUIElementCopyParameterizedAttributeValue(area, "AXStringForTextMarkerRange" as CFString, markers, &out) == .success,
-          let text = out as? String, !text.isEmpty else {
-        fail("failed", "the page did not return its text")
+    // The single read runs headings, paragraphs and list items together ("lazy dog.Second paragraph", #266). Walk the page's
+    // blocks instead and end each with a line break, as Windows (UIA TextPattern) and Linux (AT-SPI) do. It is used only when
+    // it kept (nearly) every character the whole read found; otherwise nothing that read today gets worse.
+    var walk = PageWalk()
+    walk.visit(area, depth: 0)
+    walk.breakLine()
+    func letters(_ s: String) -> Int {
+        s.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) && $0.value != 0xFFFC }.count
     }
+    if !walk.aborted, !walk.out.isEmpty, letters(walk.out) * 10 >= letters(whole ?? "") * 9 {
+        emit(["ok": true, "text": String(walk.out.prefix(maxChars)), "source": "AXWebArea:blocks", "elapsedMs": elapsedMs()])
+    }
+    guard let text = whole else { fail("failed", "the page did not return its text") }
     emit(["ok": true, "text": String(text.prefix(maxChars)), "source": "AXWebArea", "elapsedMs": elapsedMs()])
 }
 
@@ -1787,9 +1844,9 @@ case "tree": cmdTree()
 case "find": cmdFind()
 case "invoke": cmdInvoke()
 case "type": cmdType()
+case "key": cmdKey()
 case "focus": cmdFocus()
 case "pagetext": cmdPageText()
 case "window-of": cmdWindowOf()
 default: fail("failed", "usage: ax-helper windows|window-at|window-of|active|frontmost|idle|apps|focused|tree|find|invoke|type|key|focus|pagetext [options] (got \"\(command)\")")
 }
-case "key": cmdKey()
