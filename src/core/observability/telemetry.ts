@@ -204,6 +204,9 @@ export function __setSenderForTests(s: Sender | null): void { sender = s ?? fetc
 const queue: TelemetryEvent[] = [];
 let taken = 0;
 let takenDay = '';
+let noticePrinted = false;   // once per process, even when the state file cannot be written
+/** Tests only: the notice is once per process. */
+export function __resetNoticeForTests(): void { noticePrinted = false; }
 let timer: ReturnType<typeof setTimeout> | undefined;
 
 /** Called by logger.ts for every day-log line. Never throws, never waits. */
@@ -215,9 +218,10 @@ export function observe(msg: string, meta: Record<string, unknown> | undefined):
     if (!event || taken >= MAX_EVENTS || offReason() !== null) return;
     taken++;
     const state = readState();
-    if (!state.noticeShown) {
+    if (!state.noticeShown && !noticePrinted) {
+      noticePrinted = true;
       // stderr: stdout is the MCP channel.
-      process.stderr.write('[clawdcursor] Sends anonymous error reports (error codes and clawdcursor\'s own file:line, never screen content) to help fix bugs. Turn off: clawdcursor optout\n');
+      process.stderr.write('[clawdcursor] Sends anonymous error reports to help fix bugs: a random install id, the version, your OS and host app, error codes, timings and clawdcursor\'s own file:line. Never screen content, typed text or file paths. Turn off: clawdcursor optout\n');
       writeState({ noticeShown: true, id: state.id });
     }
     queue.push(event);
