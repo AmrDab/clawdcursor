@@ -63,12 +63,13 @@ describe('shortcuts_list with a guide', () => {
     expect(win).toContain('send *: ctrl+Return');
     expect(win).toContain('find_in_page: ctrl+f');
     expect(win).toContain('go_to_inbox: g i');
-    expect(win).toContain('compose_and_send: compose and send an email -> c, type <recipient>, mod+Return');
+    expect(win).toContain('compose_and_send: compose and send an email -> c, type <recipient>, ctrl+Return');   // workflow keys too
     expect(win).toContain('- Single-letter shortcuts');
     expect(win).not.toContain('<untrusted-screen-content>');
     const mac = render('darwin');
     expect(mac).toContain('send *: cmd+Return');
     expect(mac).toContain('find_in_page: cmd+f');
+    expect(mac).toContain('-> c, type <recipient>, cmd+Return');
     expect(render('linux')).not.toContain('find_in_page');   // "" = not on that OS
   });
 

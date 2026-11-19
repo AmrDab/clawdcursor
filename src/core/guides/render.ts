@@ -15,11 +15,11 @@ export function resolveChord(chord: GuideChord, platform: string): string | null
 
 const OS_LABEL: Record<string, string> = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' };
 
-const stepText = (s: GuideStep): string =>
-  s.type === 'pressKey' ? String(s.key ?? '') : s.type === 'typeAtFocus' ? `type <${s.field ?? 'text'}>` : s.type === 'wait' ? `wait ${s.ms ?? ''}ms` : `check ${s.name ?? ''}`.trim();
+const stepText = (s: GuideStep, platform: string): string =>
+  s.type === 'pressKey' ? (resolveChord(String(s.key ?? ''), platform) ?? '') : s.type === 'typeAtFocus' ? `type <${s.field ?? 'text'}>` : s.type === 'wait' ? `wait ${s.ms ?? ''}ms` : `check ${s.name ?? ''}`.trim();
 
-function workflowLine(id: string, wf: string | { name?: string; steps?: GuideStep[] }): string {
-  const line = typeof wf === 'string' ? `${id}: ${wf}` : `${id}: ${wf.name ?? ''} -> ${(wf.steps ?? []).map(stepText).join(', ')}`;
+function workflowLine(id: string, wf: string | { name?: string; steps?: GuideStep[] }, platform: string): string {
+  const line = typeof wf === 'string' ? `${id}: ${wf}` : `${id}: ${wf.name ?? ''} -> ${(wf.steps ?? []).map(s => stepText(s, platform)).join(', ')}`;
   return line.length > 200 ? `${line.slice(0, 197)}...` : line;
 }
 
@@ -47,7 +47,7 @@ export function renderGuide({ id, guide: g, source }: LoadedGuide, platform: str
   for (const s of shown) lines.push(`${s.name}${hard.has(s.name) ? ' *' : ''}: ${s.chord}`);
   if (shown.some(s => hard.has(s.name))) lines.push('* = hard to undo (sends, posts, deletes, pays or closes): ask the user first unless they asked for it');
   const wfs = filterBy(Object.entries(g.workflows ?? {}), ([k, w]) => `${k} ${typeof w === 'string' ? w : w.name ?? ''}`, query ?? '');
-  if (wfs.length) lines.push('Workflows:', ...wfs.map(([k, w]) => workflowLine(k, w)));
+  if (wfs.length) lines.push('Workflows:', ...wfs.map(([k, w]) => workflowLine(k, w, platform)));
   const tips = query ? filterBy(g.tips ?? [], t => t, query).slice(0, 3) : g.tips ?? [];
   if (tips.length) lines.push('Tips:', ...tips.map(t => `- ${t}`));
   const text = lines.join('\n');
