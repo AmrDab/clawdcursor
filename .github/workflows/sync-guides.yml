@@ -20,6 +20,8 @@ name: sync-app-guides
 # What we sync:
 #   - index.json
 #   - every *.json at the source repo's root (excluding package*.json)
+#   - pack.json, built here from the verified guides that pass the client lint (scripts/build-guide-pack.mjs):
+#     the whole pack the clawdcursor client refreshes weekly (https://clawdcursor.com/app-guides/pack.json)
 #
 # We commit only on a real diff so the history stays clean.
 
@@ -77,9 +79,20 @@ jobs:
             esac
           done
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build pack.json
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx tsc
+          node scripts/build-guide-pack.mjs
+
       - name: Commit if changed
         run: |
-          if git diff --quiet -- docs/app-guides/; then
+          if [ -z "$(git status --porcelain -- docs/app-guides/)" ]; then
             echo "No changes."
             exit 0
           fi

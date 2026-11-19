@@ -5,6 +5,14 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { execFileSync } from 'child_process';
+
+// The app-guide pack ships in the package: dist/guides/pack.json, built from docs/app-guides (a source checkout has both).
+const root = path.resolve(__dirname, '..');
+const packScript = path.join(root, 'scripts', 'build-guide-pack.mjs');
+if (fs.existsSync(packScript) && fs.existsSync(path.join(root, 'docs', 'app-guides', 'index.json'))) {
+  execFileSync(process.execPath, [packScript, '--out', path.join('dist', 'guides', 'pack.json')], { cwd: root, stdio: 'inherit' });
+}
 
 // Suppress the "Run consent" hint if the user already did it on this machine.
 const consentGiven = fs.existsSync(path.join(os.homedir(), '.clawdcursor', 'consent'));

@@ -43,6 +43,11 @@ function main() {
   const { lintGuide } = createRequire(import.meta.url)(path.join(root, 'dist', 'core', 'guides', 'lint.js'));
   const { pack, skipped } = buildGuidePack(srcDir, g => lintGuide(g));
   for (const s of skipped) console.warn(`guide pack: left out ${s.app}: ${s.why}`);
+  // Same guides as the pack already there: keep that file, so the hourly sync commits nothing when nothing changed.
+  try {
+    const old = JSON.parse(fs.readFileSync(out, 'utf8'));
+    if (JSON.stringify(old.guides) === JSON.stringify(pack.guides)) { console.log(`guide pack: unchanged (${Object.keys(pack.guides).length} guides)`); return; }
+  } catch { /* no pack yet */ }
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, JSON.stringify(pack));
   console.log(`guide pack: ${Object.keys(pack.guides).length} guides -> ${path.relative(root, out)} (${fs.statSync(out).size} bytes)`);

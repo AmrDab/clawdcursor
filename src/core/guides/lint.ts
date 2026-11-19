@@ -3,9 +3,8 @@
  * and before the pack builder (scripts/build-guide-pack.mjs) lets a guide into the pack.
  *
  * The injection and danger rules are the guides repo's (AmrDab/clawdcursor-guides scripts/lint-guide.mjs): keep them equal.
- * The v2 shape and the chord grammar are the format contract (tasks/guide-format-v2.md). A guide with a `kind` is v2 and
- * is checked in full; a guide without one is v1 and only has to be well-formed and free of injection (its chords are
- * shown as written).
+ * The v2 shape and the chord grammar are the format contract (tasks/guide-format-v2.md). Only v2 guides load: a guide
+ * without `kind` is refused, so a guide can not pick a weaker check by leaving it out.
  */
 
 export type GuideChord = string | Partial<Record<'default' | 'darwin' | 'win32' | 'linux', string>>;
@@ -44,7 +43,8 @@ const NAMED_KEYS = new Set([
 ]);
 const STEP_TYPES = ['pressKey', 'typeAtFocus', 'wait', 'verify'];
 const URL_OR_PATH_RE = /^(?:https?:\/\/|\/|\.\/|\.\.\/)/i;
-const VALID_DOMAIN_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/i;
+// A hostname, optionally with a path prefix where one host serves several apps ("docs.google.com/document").
+const VALID_DOMAIN_RE = /^(?:\*\.)?[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?:\/[A-Za-z0-9._~-]+)*$/i;
 
 export const MAX_SHORTCUTS = 150;
 export const MAX_WORKFLOWS = 20;
@@ -75,29 +75,19 @@ const DANGEROUS_PROSE: Array<{ pattern: RegExp; rule: string }> = [
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
-/** Every string a reader (or a model) will see, with where it is. Shortcut names read as words. */
-function texts(g: Record<string, unknown>): Array<{ value: string; at: string }> {
-  const out: Array<{ value: string; at: string }> = [];
-  const add = (value: unknown, at: string) => { if (typeof value === 'string') out.push({ value, at }); };
-  add(g.name, 'name');
-  if (isObj(g.shortcuts)) for (const k of Object.keys(g.shortcuts)) add(k.replace(/_/g, ' '), `shortcuts.${k}`);
-  if (Array.isArray(g.tips)) g.tips.forEach((t, i) => add(t, `tips[${i}]`));
-  if (isObj(g.workflows)) {
-    for (const [k, wf] of Object.entries(g.workflows)) {
-      if (typeof wf === 'string') { add(wf, `workflows.${k}`); continue; }
-      if (!isObj(wf)) continue;
-      add(wf.name, `workflows.${k}.name`);
-      if (Array.isArray(wf.steps)) {
-        wf.steps.forEach((s, i) => {
-          if (!isObj(s)) return;
-          for (const f of ['note', 'field', 'name']) add(s[f], `workflows.${k}.steps[${i}].${f}`);
-        });
-      }
-    }
-  }
-  if (isObj(g.layout)) for (const [k, v] of Object.entries(g.layout)) add(v, `layout.${k}`);
+/**
+ * Every string that can reach an agent, with where it is: all values and all keys of the guide, at any depth (a name, a
+ * workflow id, a step field, a chord, a layout key, a domain hint, a source). Keys read as words.
+ */
+function texts(v: unknown, at = '$', out: Array<{ value: string; at: string }> = [], depth = 0): Array<{ value: string; at: string }> {
+  if (typeof v === 'string') out.push({ value: v, at });
+  else if (depth < 8 && Array.isArray(v)) v.forEach((x, i) => texts(x, `${at}[${i}]`, out, depth + 1));
+  else if (depth < 8 && isObj(v)) for (const [k, x] of Object.entries(v)) { out.push({ value: k.replace(/_/g, ' '), at: `${at}.${k}` }); texts(x, `${at}.${k}`, out, depth + 1); }
   return out;
 }
+
+/** What a reader sees: look-alike forms folded (NFKC), zero-width and bidi marks removed, whitespace collapsed to one space. */
+export const normalizeText = (s: string): string => s.normalize('NFKC').replace(/\p{Cf}/gu, '').replace(/\s+/g, ' ');
 
 /** The chord grammar (guides repo scripts/lint-guide.mjs, kept equal). Returns the problem, or null. `cmd` only where allowed (a darwin chord). */
 export function chordProblem(chord: unknown, allowCmd = true): string | null {
@@ -131,7 +121,6 @@ export function lintGuide(raw: unknown, opts: LintOptions = {}): LintResult {
   if (!isObj(raw)) return { ok: false, errors: ['guide must be a JSON object'] };
   const g = raw;
   const local = !!opts.local;
-  const v2 = g.kind !== undefined;
 
   if (typeof g.app !== 'string' || !g.app) return { ok: false, errors: ['app must be a non-empty string'] };
   if (g.name !== undefined && typeof g.name !== 'string') err('name must be a string');
@@ -146,22 +135,21 @@ export function lintGuide(raw: unknown, opts: LintOptions = {}): LintResult {
     g.domainHints.forEach((h, i) => {
       if (typeof h !== 'string') err(`domainHints[${i}] must be a string`);
       else if (URL_OR_PATH_RE.test(h)) err(`domainHints must be bare domains, not URLs or paths (got "${h}")`);
-      else if (v2 && !VALID_DOMAIN_RE.test(h)) err(`domainHints[${i}] is not a valid domain`);
+      else if (!VALID_DOMAIN_RE.test(h)) err(`domainHints[${i}] is not a valid domain`);
     });
   }
 
   // The injection and danger rules apply to every guide.
   for (const { value, at } of texts(g)) {
-    for (const { pattern, rule } of [...INJECTION_PATTERNS, ...DANGEROUS_PROSE]) if (pattern.test(value)) err(`${at}: text matches ${rule}`);
+    const text = normalizeText(value);
+    for (const { pattern, rule } of [...INJECTION_PATTERNS, ...DANGEROUS_PROSE]) if (pattern.test(text)) err(`${at}: text matches ${rule}`);
   }
   if (!Object.values(shortcuts).every(c => typeof c === 'string' || isObj(c))) err('every shortcut is a chord string or a per-OS object');
   let size = 0;
   try { size = JSON.stringify(g).length; } catch { /* a cyclic value cannot be a parsed guide */ }
   if (size > MAX_BYTES) err(`guide is ${size} bytes; max ${MAX_BYTES}`);
 
-  if (!v2) return { ok: errors.length === 0, errors };
-
-  // ── v2 shape ──
+  // ── v2 shape (the only one: a guide without `kind` is not loaded) ──
   if (!APP_ID_RE.test(g.app)) err('app must be a lowercase id: a-z, 0-9, "-", 2 to 32 characters');
   if (typeof g.name !== 'string' || !g.name.trim()) err('name is required');
   if (g.kind !== 'web' && g.kind !== 'desktop') err('kind must be "web" or "desktop"');
@@ -169,7 +157,7 @@ export function lintGuide(raw: unknown, opts: LintOptions = {}): LintResult {
   const strList = (v: unknown) => Array.isArray(v) && v.length > 0 && v.every(s => typeof s === 'string' && s && s.length <= 100);
   if (g.kind === 'web' && !strList(g.domainHints)) err('a web guide needs domainHints');
   if (g.kind === 'desktop' && !strList(g.processNames)) err('a desktop guide needs processNames');
-  if (Array.isArray(g.processNames) && g.processNames.some(p => typeof p === 'string' && (/.exe$/i.test(p) || /[\/]/.test(p)))) err('processNames are names without ".exe" or a path');
+  if (Array.isArray(g.processNames) && g.processNames.some(p => typeof p === 'string' && (/\.exe$/i.test(p) || /[\\/]/.test(p)))) err('processNames are names without ".exe" or a path');
 
   const names = Object.keys(shortcuts);
   const maxShortcuts = local ? LOCAL_MAX_SHORTCUTS : MAX_SHORTCUTS;
@@ -199,6 +187,7 @@ export function lintGuide(raw: unknown, opts: LintOptions = {}): LintResult {
     const wf = Object.entries(g.workflows);
     if (wf.length > MAX_WORKFLOWS) err(`${wf.length} workflows; max ${MAX_WORKFLOWS}`);
     for (const [id, w] of wf) {
+      if (id.length > MAX_NAME_LEN || !SHORTCUT_NAME_RE.test(id)) err(`workflow id "${id.slice(0, 30)}" must be readable snake_case, at most ${MAX_NAME_LEN} characters`);
       if (typeof w === 'string') continue;
       if (!isObj(w) || !Array.isArray(w.steps)) { err(`workflows.${id} needs steps`); continue; }
       if (typeof w.name !== 'string' || !w.name) err(`workflows.${id}.name must be a non-empty string`);
