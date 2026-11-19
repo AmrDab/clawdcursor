@@ -97,3 +97,54 @@ describe('PSRunner — a command failure is an answer, not a crash', () => {
     await expect(broken).rejects.toThrow('Unknown command: nope');
   });
 });
+
+// Audit 2026-11-19 (23): the timer started when a command was queued, and a timed-out call stayed in the queue, so a
+// command reported as TIMEOUT could still run later and the agent's retry acted twice.
+describe('PSRunner — a queued command is timed from its send, and a timed-out one never runs', () => {
+  beforeEach(() => {
+    procs.length = 0;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  it('does not time a command out while it waits behind another, and sends it when its turn comes', async () => {
+    const runner = new PSRunner();
+    const a = runner.run({ cmd: 'a' });
+    await flush();
+    procs[0].reply({ ready: true });
+    await flush();
+    const b = runner.run({ cmd: 'b' });
+    await flush();
+    expect(procs[0].stdin.write).toHaveBeenCalledTimes(1);   // b is queued behind a
+
+    vi.advanceTimersByTime(15_000);
+    procs[0].reply({ ok: 'a' });
+    await expect(a).resolves.toEqual({ ok: 'a' });
+    await flush();
+    expect(procs[0].stdin.write).toHaveBeenCalledTimes(2);   // b sent at t=15s
+
+    vi.advanceTimersByTime(10_000);                          // t=25s: past 20 s from queueing, 10 s from sending
+    procs[0].reply({ ok: 'b' });
+    await expect(b).resolves.toEqual({ ok: 'b' });
+  });
+
+  it('a command that timed out is never written to a bridge afterwards', async () => {
+    const runner = new PSRunner();
+    const a = runner.run({ cmd: 'a' });
+    await flush();
+    procs[0].reply({ ready: true });
+    await flush();
+    const b = runner.run({ cmd: 'invoke' });
+    const bResult = b.then(() => 'ran', (e: Error) => e.message);
+    await flush();
+
+    vi.advanceTimersByTime(20_000);
+    await expect(a).rejects.toThrow(/timeout/);
+    expect(await bResult).toMatch(/restarted|timeout/);
+    await flush();
+    expect(procs[0].stdin.write).toHaveBeenCalledTimes(1);
+    expect(procs[0].stdin.write.mock.calls.some(c => String(c[0]).includes('invoke'))).toBe(false);
+  });
+});
