@@ -862,9 +862,6 @@ export function buildUnifiedTools(): UnifiedTool[] {
         ctx.platform.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
         const privateTyping = ctx.platform.typingIsPrivate?.() !== false;
         let how = 'keys';
-        // What the field held before: typing that is ✓ only when the whole field is the typed text (or this plus it).
-        const beforeRead = body && !submit ? await Promise.resolve().then(() => ctx.platform.getFocusedElement()).catch(() => null) : null;
-        const before = beforeRead && !beforeRead.secure && typeof beforeRead.value === 'string' && beforeRead.value.length < 1000 ? beforeRead.value : undefined;
         const wantKeys = typesAsKeys(body) && privateTyping;
         // A clipboard of an image or a file cannot be put back after a paste: type the text instead, or refuse.
         const choice = wantKeys || !body ? 'paste'
@@ -902,7 +899,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
           }
         }
         // Read the field back: say whether it shows the text — before Return.
-        const rb = body ? await readBackTyped(() => ctx.platform.getFocusedElement(), body, { submit, exact: true, before }) : { result: 'unknown' as const };
+        const rb = body ? await readBackTyped(() => ctx.platform.getFocusedElement(), body, { submit, exact: true }) : { result: 'unknown' as const };
         // The verdict sits inside the leading "(…)", before any quoted text or window title, so content can never pose as
         // it (result-codes reads it from there).
         // Characters as a person counts them (an emoji is one), not UTF-16 units.
