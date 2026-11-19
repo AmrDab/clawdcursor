@@ -44,6 +44,6 @@ describe('WindowsAdapter.deliverToWindow', () => {
   });
 
   it('is stopped when the user stops clawdcursor, like every other act that does not go through the front window', () => {
-    expect(GUARDED_METHODS.deliverToWindow?.kind).toBe('stop');
+    expect(GUARDED_METHODS.deliverToWindow?.kind).toBe('background');
   });
 });

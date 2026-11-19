@@ -85,7 +85,7 @@ describe('the pill drawn by a host app', () => {
     expect(calls[0].cmd).toBe(HOST[0]);
     expect(calls[0].args).toEqual([...HOST.slice(1), ...pillArgs({})]);
     expect(calls[0].opts.stdio).toEqual(['pipe', 'pipe', 'ignore']);
-    expect(calls[0].opts.env.CLAWD_BANNER_ACTIVITY).toBe('Typing in Edge');
+    expect(calls[0].opts.env.CLAWD_BANNER_ACTIVITY).toBe('running in background · Typing in Edge');
     expect(calls[0].opts.env.CLAWD_BANNER_MODE).toBeUndefined();
     expect(outlines.length).toBe(1);
     expect(warn).not.toHaveBeenCalled();
@@ -120,7 +120,7 @@ describe('the pill drawn by a host app', () => {
     const dodged = controlBanner.dodge(1500);
     await vi.advanceTimersByTimeAsync(100);
     await dodged;
-    expect(written).toEqual(['ACTIVITY Clicking in Edge', 'HIDE 1500']);
+    expect(written).toEqual(['ACTIVITY running in background · Clicking in Edge', 'HIDE 1500']);
     calls[0].child.stdout.write('BANNER_STOP\n');
     await vi.waitFor(() => expect(stop).toHaveBeenCalledTimes(1));
   });

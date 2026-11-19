@@ -110,6 +110,21 @@ export async function guardedInput<R>(method: string, args: unknown[], send: () 
 }
 
 /**
+ * Every guarded method of the input layers, by name, with what the running pill says while it runs (banner.ts). Each one is
+ * in one of the two modes the user sees:
+ *  - `foreground`: real keyboard and mouse input (SendInput and its macOS/Linux kin). It lands in the window in front, so
+ *    it is refused while stopped and when the agent's window is no longer in front. The user sees the full-screen amber
+ *    glow and the pill "requires foreground"; the pill also names that window's app.
+ *  - `background`: acts that do not go through the window in front: by element (accessibility), on a window by handle
+ *    (window messages), in a page (CDP). The user sees only the amber outline round the agent's window and the pill
+ *    "running in background". They still stop when the user does: a handler already running when they stop must not
+ *    carry on (#294). writeClipboard, evaluate (any page script) and switchTab act too (audit 2026-11-05). So does every
+ *    other pointer method (`pointerMethods`: mouseMove — hover opens menus — and mouseMoveRelative), by rule rather than
+ *    by name, so a new one is not left moving after a Stop. Putting the user's own clipboard back after a paste is not
+ *    agent input: those restores run unguarded().
+ *  - `launch`: launchApp, wrapped on its own below (it rebinds the window the agent works in).
+ */
+/**
  * Every guarded method of the input layers, by name, with what the running pill says while it runs (banner.ts).
  *  - `input`: synthetic keyboard and mouse input, refused while stopped and when the agent's window is no longer in
  *    front; the pill names that window's app.
@@ -121,24 +136,24 @@ export async function guardedInput<R>(method: string, args: unknown[], send: () 
  *    those restores run unguarded().
  *  - `launch`: launchApp, wrapped on its own below (it rebinds the window the agent works in).
  */
-export const GUARDED_METHODS: Readonly<Record<string, { kind: 'input' | 'stop' | 'launch'; activity?: string }>> = {
-  mouseClick: { kind: 'input', activity: 'Clicking' }, mouseDoubleClick: { kind: 'input', activity: 'Clicking' },
-  mouseRightClick: { kind: 'input', activity: 'Clicking' }, mouseDown: { kind: 'input', activity: 'Clicking' },
-  mouseDrag: { kind: 'input', activity: 'Dragging' }, mouseScroll: { kind: 'input', activity: 'Scrolling' },
-  typeText: { kind: 'input', activity: 'Typing' }, keyPress: { kind: 'input', activity: 'Pressing keys' },
-  keyDown: { kind: 'input', activity: 'Pressing keys' },
-  invokeElement: { kind: 'stop', activity: 'Clicking' }, deliverToWindow: { kind: 'stop', activity: 'Typing' }, scrollIntoView: { kind: 'stop', activity: 'Scrolling' },
-  setWindowState: { kind: 'stop', activity: 'Arranging windows' }, setWindowBounds: { kind: 'stop', activity: 'Arranging windows' },
-  navigate: { kind: 'stop', activity: 'Opening a page' }, click: { kind: 'stop', activity: 'Clicking' },
-  clickByText: { kind: 'stop', activity: 'Clicking' }, typeInField: { kind: 'stop', activity: 'Typing' },
-  typeByLabel: { kind: 'stop', activity: 'Typing' }, focus: { kind: 'stop', activity: 'Clicking' },
-  selectOption: { kind: 'stop', activity: 'Choosing an option' }, pressKey: { kind: 'stop', activity: 'Pressing keys' },
-  writeClipboard: { kind: 'stop' }, evaluate: { kind: 'stop' }, switchTab: { kind: 'stop' },
+export const GUARDED_METHODS: Readonly<Record<string, { kind: 'foreground' | 'background' | 'launch'; activity?: string }>> = {
+  mouseClick: { kind: 'foreground', activity: 'Clicking' }, mouseDoubleClick: { kind: 'foreground', activity: 'Clicking' },
+  mouseRightClick: { kind: 'foreground', activity: 'Clicking' }, mouseDown: { kind: 'foreground', activity: 'Clicking' },
+  mouseDrag: { kind: 'foreground', activity: 'Dragging' }, mouseScroll: { kind: 'foreground', activity: 'Scrolling' },
+  typeText: { kind: 'foreground', activity: 'Typing' }, keyPress: { kind: 'foreground', activity: 'Pressing keys' },
+  keyDown: { kind: 'foreground', activity: 'Pressing keys' },
+  invokeElement: { kind: 'background', activity: 'Clicking' }, deliverToWindow: { kind: 'background', activity: 'Typing' }, scrollIntoView: { kind: 'background', activity: 'Scrolling' },
+  setWindowState: { kind: 'background', activity: 'Arranging windows' }, setWindowBounds: { kind: 'background', activity: 'Arranging windows' },
+  navigate: { kind: 'background', activity: 'Opening a page' }, click: { kind: 'background', activity: 'Clicking' },
+  clickByText: { kind: 'background', activity: 'Clicking' }, typeInField: { kind: 'background', activity: 'Typing' },
+  typeByLabel: { kind: 'background', activity: 'Typing' }, focus: { kind: 'background', activity: 'Clicking' },
+  selectOption: { kind: 'background', activity: 'Choosing an option' }, pressKey: { kind: 'background', activity: 'Pressing keys' },
+  writeClipboard: { kind: 'background' }, evaluate: { kind: 'background' }, switchTab: { kind: 'background' },
   launchApp: { kind: 'launch', activity: 'Opening an app' },
 };
-const methodsOf = (kind: 'input' | 'stop') => Object.keys(GUARDED_METHODS).filter(m => GUARDED_METHODS[m].kind === kind);
-const INPUT_METHODS = methodsOf('input');
-const STOP_METHODS = methodsOf('stop');
+const methodsOf = (kind: 'foreground' | 'background') => Object.keys(GUARDED_METHODS).filter(m => GUARDED_METHODS[m].kind === kind);
+const FOREGROUND_METHODS = methodsOf('foreground');
+const BACKGROUND_METHODS = methodsOf('background');
 
 /**
  * When the agent's own synthetic input last ended (a key, a click, a move, a focus, putting the user's window back): the OS
@@ -160,7 +175,7 @@ export const gestureInProgress = (): boolean => buttonDown || heldKeys.size > 0;
 /** Innermost, so it is noted only for input that was really sent (a refusal sends nothing). */
 function noteOwnInput(target: object): void {
   const t = target as Record<string, unknown>;
-  for (const m of new Set([...INPUT_METHODS, ...pointerMethods(target), 'keyUp', 'focusWindow', 'launchApp', 'restoreForeground'])) {
+  for (const m of new Set([...FOREGROUND_METHODS, ...pointerMethods(target), 'keyUp', 'focusWindow', 'launchApp', 'restoreForeground'])) {
     const f = t[m];
     if (typeof f !== 'function') continue;
     t[m] = async (...args: unknown[]) => {
@@ -218,7 +233,7 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
       return inInput.run('agent', () => run(g, bound, args, false));
     };
   };
-  for (const m of INPUT_METHODS) {
+  for (const m of FOREGROUND_METHODS) {
     wrap(m, async (g, f, args, nested) => {
       if (nested) return f(...args);
       // Under the test fence, text with Enter or Tab is sent a piece at a time: either key can move the focus to another
@@ -266,8 +281,8 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
     });
   }
   // A release (mouseUp) is never refused; the window-checked pointer input is wrapped above.
-  const pointerOnly = pointerMethods(target).filter(m => m !== 'mouseUp' && !INPUT_METHODS.includes(m));
-  const stopOnly = [...STOP_METHODS, ...pointerOnly];
+  const pointerOnly = pointerMethods(target).filter(m => m !== 'mouseUp' && !FOREGROUND_METHODS.includes(m));
+  const stopOnly = [...BACKGROUND_METHODS, ...pointerOnly];
   for (const m of stopOnly.filter(m => m !== 'invokeElement')) {
     wrap(m, async (g, f, args, nested) => {
       if (nested) return f(...args);

@@ -4,7 +4,7 @@
  * pill, or named on the pill without being guarded.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { guardInputMethods, setInputGuard } from '../platform/pointer-guard';
+import { guardInputMethods, setInputGuard, GUARDED_METHODS } from '../platform/pointer-guard';
 import { activityLabel } from '../core/banner';
 
 const METHODS = [
@@ -67,5 +67,15 @@ describe('guarded methods', () => {
       getUiTree         - | -
       "
     `);
+  });
+});
+
+describe('the two modes of the table', () => {
+  it('real keyboard and mouse input is foreground; by element, by window handle and page acts are background', () => {
+    const kind = (m: string) => GUARDED_METHODS[m].kind;
+    for (const m of ['mouseClick', 'mouseDrag', 'mouseScroll', 'typeText', 'keyPress', 'keyDown']) expect(kind(m)).toBe('foreground');
+    for (const m of ['invokeElement', 'deliverToWindow', 'navigate', 'typeInField', 'evaluate', 'writeClipboard']) expect(kind(m)).toBe('background');
+    expect(kind('launchApp')).toBe('launch');
+    expect(Object.values(GUARDED_METHODS).map(g => g.kind).sort().filter((k, i, a) => a.indexOf(k) === i)).toEqual(['background', 'foreground', 'launch']);
   });
 });

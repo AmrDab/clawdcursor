@@ -1,7 +1,7 @@
 /**
  * Control banner — the on-screen "desktop control in progress" indicators:
  *   - the pill: topmost, never-focused; a small dotted orb (a pulsing dot on Linux), what the agent is doing
- *     ("Typing in Edge", sent as `ACTIVITY <text>` on its stdin), the time since
+ *     ("running in background · Typing in Edge", sent as `ACTIVITY <text>` on its stdin), the time since
  *     it appeared, a Pause button (BANNER_PAUSE: the user holds the agent, control.ts; `HELD ON` makes it Resume) and a
  *     Stop button (a double-click anywhere stops too).
  *   - the outline: a thin, click-through amber border around the window the
@@ -13,6 +13,18 @@
  *   - the glow (Windows, macOS): a click-through amber glow along every screen edge, the FOREGROUND mode of the indicator: up only
  *     while the agent's input goes to the foreground (a guarded keyboard/mouse method, an R2 burst: foreground()) and for
  *     ~1.5 s after; `ON` / `OFF` on its stdin. Background acts (by name, window messages, page acts) get the outline alone.
+ * What the user sees, by state (the mode comes from pointer-guard.ts GUARDED_METHODS: `foreground` or `background`):
+ *
+ *   state                 screen                                   pill
+ *   background            amber outline round the agent's window   "running in background · <activity>"
+ *   foreground            full-screen amber glow (+ the outline)   "requires foreground · <activity>"
+ *   needs the user        full-screen blue glow + the pause card   the card (pause_for_user)
+ *   the user's turn       no glow                                  "Paused — your turn" / "Paused"
+ *
+ * Background is the default. Foreground is on while real keyboard/mouse input is going to the window in front, or an R2
+ * burst runs, and for FOREGROUND_TAIL_MS after the last of it (ControlBanner.foreground()). The mode text carries no
+ * product name: a host's own pill (CLAWD_PILL_CMD) shows the same line.
+ *
  * All exit by themselves when their stdin closes: a host that hard-kills this
  * process must not leave them on screen.
  *
@@ -72,6 +84,10 @@ const PAUSED_LABEL = 'Paused — your turn';
 /** ...and while they hold it (the pill's Pause, or they kept working): Resume on the pill continues. */
 const HELD_LABEL = 'Paused';
 
+/** What the running pill says first, by mode: it comes before the activity, so a cut-off pill loses the activity, not the mode. */
+const MODE_TEXT = { background: 'running in background', foreground: 'requires foreground' } as const;
+type IndicatorMode = keyof typeof MODE_TEXT;
+
 /** How long the full-screen glow stays up after the last foreground input, or after a foreground burst ends. */
 const FOREGROUND_TAIL_MS = 1_500;
 /** A host's pill that is gone this soon without a line on stdout never started: the built-in pill takes over. */
@@ -91,7 +107,7 @@ export interface OverlayMode { paused?: PauseInfo; activity?: string; app?: stri
 export function activityLabel(method: string, processName?: string, appName?: string): string | undefined {
   const g = GUARDED_METHODS[method];
   if (!g?.activity) return undefined;
-  const app = g.kind === 'input' ? appLabel(processName, appName) : undefined;
+  const app = g.kind === 'foreground' ? appLabel(processName, appName) : undefined;
   return app ? `${g.activity} in ${app}` : g.activity;
 }
 type Spawner = (mode: OverlayMode) => ChildProcess;
@@ -386,8 +402,9 @@ class ControlBanner {
     if (this.glowTail) clearTimeout(this.glowTail);
     this.glowTail = null;
     send(this.glowChild, 'ON');
+    this.setMode('foreground');
     if (this.bursts > 0) return;
-    this.glowTail = setTimeout(() => { this.glowTail = null; send(this.glowChild, 'OFF'); }, FOREGROUND_TAIL_MS);
+    this.glowTail = setTimeout(() => { this.glowTail = null; send(this.glowChild, 'OFF'); this.setMode('background'); }, FOREGROUND_TAIL_MS);
     this.glowTail.unref?.();
   }
 
@@ -396,7 +413,6 @@ class ControlBanner {
   private userHold: 'takeover' | 'held' | null = null;
   /** What the pill says for the user's turn, or null while it is the agent's. */
   private turnLabel: string | null = null;
-  private activityBeforeTurn = '';
 
   /**
    * The user's turn as the pill shows it (owner, 2026-11-18): "Paused — your turn" while a burst is paused for them or a
@@ -407,15 +423,15 @@ class ControlBanner {
     const label = this.userHold === 'held' ? HELD_LABEL : (this.burstPaused || this.userHold) ? PAUSED_LABEL : null;
     if (label === this.turnLabel) return;
     if (label && !this.turnLabel) {
-      this.activityBeforeTurn = this.activity;
+      this.mode = 'background'; // no glow in the user's turn; the label replaces the line, and the line is rebuilt after
       if (this.glowTail) clearTimeout(this.glowTail);
       this.glowTail = null;
       if (!this.paused) send(this.glowChild, 'OFF');
     }
     const orbChanged = !label !== !this.turnLabel;
-    this.activity = label ?? this.activityBeforeTurn;
     this.turnLabel = label;
-    if (!this.paused) send(this.child, `ACTIVITY ${this.activity || 'Working'}`);
+    this.activity = label ?? '';
+    if (label) { if (!this.paused) send(this.child, `ACTIVITY ${label}`); } else if (!this.paused) this.showActivity();
     // The orb (owner, 2026-11-18): it stops, in grey, for the user's turn, and works again after. The pause card's waits for
     // the user in blue by itself.
     if (orbChanged && !this.paused) send(this.child, `ORB ${label ? 'paused' : 'working'}`);
@@ -449,18 +465,38 @@ class ControlBanner {
     if (process.platform === 'win32' || process.platform === 'darwin') send(this.outlineChild, `GHOST ${x} ${y}`);
   }
 
-  private activity = '';
+  private mode: IndicatorMode = 'background';
+  private base = '';     // what the agent is doing ("Typing in Edge"), without the mode
+  private activity = ''; // the line the running pill was last sent (the user's turn: its label)
 
-  /** What the agent is doing now ("Typing in Edge"): the running pill shows it; a new pill starts with it. */
-  setActivity(label: string): void {
-    const base = label.replace(/[\r\n]+/g, ' ').trim().slice(0, 60);
-    if (!base) return;
+  /** The running pill's line: the mode, then what the agent is doing, then the takeover count. */
+  private line(): string {
     const n = burstCount(); // R2 foreground bursts this session (D1: allowed when the user is idle, counted and shown)
-    const line = n ? `${base} · ${n} quick takeover${n > 1 ? 's' : ''}` : base;
-    if (this.turnLabel) { this.activityBeforeTurn = line; return; }   // shown once it is the agent's turn again
+    const line = this.base ? `${MODE_TEXT[this.mode]} · ${this.base}` : MODE_TEXT[this.mode];
+    return n ? `${line} · ${n} quick takeover${n > 1 ? 's' : ''}` : line;
+  }
+
+  /** Send the running pill's line when it changed; not while it is the user's turn (the pill says that), shown again after. */
+  private showActivity(): void {
+    if (this.turnLabel) return;
+    const line = this.line();
     if (line === this.activity) return;
     this.activity = line;
     if (!this.paused) send(this.child, `ACTIVITY ${line}`);
+  }
+
+  private setMode(mode: IndicatorMode): void {
+    if (mode === this.mode) return;
+    this.mode = mode;
+    this.showActivity();
+  }
+
+  /** What the agent is doing now ("Typing in Edge"): the running pill shows it after the mode; a new pill starts with it. */
+  setActivity(label: string): void {
+    const base = label.replace(/[\r\n]+/g, ' ').trim().slice(0, 60);
+    if (!base) return;
+    this.base = base;
+    this.showActivity();
   }
 
   /** Wire the double-click → stop callback (the `clawdcursor stop` flow). */
@@ -515,7 +551,8 @@ class ControlBanner {
   showPaused(info: PauseInfo, onAnswer: (a: PauseAnswer, reply?: string, choice?: number) => void, onRefocus?: (pid?: number) => void): void {
     if (!this.enabled) return;
     this.paused = info;
-    this.activity = ''; // after the answer the pill says "Working" until the agent's next input, not what it did before
+    this.activity = ''; // after the answer the pill says only the mode until the agent's next input, not what it did before
+    this.base = '';
     this.onAnswer = onAnswer;
     this.onRefocus = onRefocus;
     // After an idle hide the outline has forgotten the window, but the card still names the app the agent worked in
@@ -624,7 +661,7 @@ class ControlBanner {
     try {
       child = this.spawner(this.paused
         ? { paused: this.paused, app: appLabel(workingIn()?.processName, workingIn()?.appName) }
-        : { activity: this.activity || undefined });
+        : { activity: this.activity = this.turnLabel ?? this.line() });
       // Which pause this pill answers. Its answer counts while that pause is the
       // current one, even if the process already exited (stdout can drain after
       // 'exit'); a pill from an earlier pause can never answer a newer one.
@@ -756,6 +793,7 @@ class ControlBanner {
     this.glowChild = null;
     if (this.glowTail) clearTimeout(this.glowTail);
     this.glowTail = null;
+    this.setMode('background'); // no glow, so no "requires foreground"
     if (g) {
       try { g.kill(); } catch { /* already gone */ }
     }
@@ -773,6 +811,7 @@ class ControlBanner {
     if (c) {
       try { c.kill(); } catch { /* already gone */ }
     }
+    this.activity = ''; // the next pill is built again from the mode and what the agent was doing
     this.killOutline();
     this.killGlow();
   }
@@ -780,6 +819,8 @@ class ControlBanner {
   private forceHide(): void {
     this.clearIdleTimer();
     this.activity = ''; // the next session's pill must not open with this one's last action
+    this.base = '';
+    this.mode = 'background';
     resetBurstCount(); // ...nor with this one's takeover count
     this.working = undefined; // ...nor its outline on this one's window
     this.paused = null;
@@ -811,7 +852,6 @@ class ControlBanner {
     this.burstPaused = false;
     this.userHold = null;
     this.turnLabel = null;
-    this.activityBeforeTurn = '';
     this.hostPillOff = false;
   }
 }
@@ -826,10 +866,11 @@ setOwnUiPids(() => [...controlBanner.overlayPids(), ...foreignOverlayState().pid
 setOnAgentPoint((x, y) => controlBanner.ghost(x, y));
 setOnAgentInput(method => {
   const label = activityLabel(method, workingIn()?.processName, workingIn()?.appName);
+  // The foreground-mode signal: only synthetic keyboard and mouse input lands in the foreground window. First, so the
+  // pill's line never says the old mode next to the new activity.
+  if (GUARDED_METHODS[method]?.kind === 'foreground') controlBanner.foreground();
   if (label) controlBanner.setActivity(label);
   controlBanner.setWorkingWindow(workingWindow());
-  // The foreground-mode signal: only synthetic keyboard and mouse input lands in the foreground window.
-  if (GUARDED_METHODS[method]?.kind === 'input') controlBanner.foreground();
 });
 // ...and every R2 burst, for its whole length.
 setOnBurst(e => controlBanner.burstEvent(e));

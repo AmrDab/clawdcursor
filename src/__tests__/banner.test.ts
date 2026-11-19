@@ -379,6 +379,31 @@ describe('the indicator has two modes', () => {
     expect(outlines[0].killed).toBe(false);   // the window frame is untouched throughout
   });
 
+  it('the pill says the mode first: background by default, foreground with the glow, background again after the tail', async () => {
+    controlBanner.pin();
+    const lines = () => spawned[0].written.filter(l => l.startsWith('ACTIVITY '));
+    const d = guardInputMethods({
+      async invokeElement(_q: unknown) { return { success: true }; }, async typeText(_t: string) {},
+    });
+    await d.invokeElement({ name: 'Save' });
+    expect(lines()).toEqual(['ACTIVITY running in background · Clicking']);
+    await d.typeText('a');
+    expect(lines().at(-1)).toMatch(/^ACTIVITY requires foreground · Typing/);
+    vi.advanceTimersByTime(TAIL + 1);
+    expect(lines().at(-1)).toMatch(/^ACTIVITY running in background · Typing/);   // the glow went down, so did the mode
+    expect(lines().join(' ')).not.toMatch(/clawdcursor/i);                      // a host's own pill shows these lines too
+  });
+
+  it('does not send the same line twice while the mode holds', async () => {
+    controlBanner.pin();
+    const d = guardInputMethods({ async typeText(_t: string) {} });
+    await d.typeText('a');
+    await d.typeText('b');   // the glow is already up and the activity is the same
+    vi.advanceTimersByTime(TAIL - 100);
+    await d.typeText('c');
+    expect(spawned[0].written.filter(l => l.startsWith('ACTIVITY '))).toEqual(['ACTIVITY requires foreground', expect.stringMatching(/^ACTIVITY requires foreground · Typing/)]);   // the mode first, then the activity; nothing after
+  });
+
   it('an R2 burst keeps it up for the whole burst, then the tail', async () => {
     controlBanner.pin();
     const w = { processId: 42, handle: 900 };
@@ -415,7 +440,7 @@ describe('the indicator has two modes', () => {
     expect(spawned[0].written).toContain('ACTIVITY Paused — your turn');
     controlBanner.burstEvent('resume');
     expect(states(glows[0])).toEqual(['ON', 'OFF', 'ON']);
-    expect(spawned[0].written.slice(-2)).toEqual(['ACTIVITY Typing in Edge', 'ORB working']);   // the orb works again
+    expect(spawned[0].written.slice(-3)).toEqual(['ACTIVITY running in background · Typing in Edge', 'ORB working', 'ACTIVITY requires foreground · Typing in Edge']);   // the orb works again, the mode follows the glow
     vi.advanceTimersByTime(10 * TAIL);
     expect(states(glows[0])).toEqual(['ON', 'OFF', 'ON']);   // up for the rest of the burst
     controlBanner.burstEvent('pause');
@@ -498,7 +523,7 @@ describe('the pill\'s Pause and Resume', () => {
     expect(spawned[0].killed).toBe(false);            // its Resume is the way back: never hidden while held
     await fromPill(spawned[0], 'BANNER_RESUME');
     expect(isHeld()).toBe(false);
-    expect(spawned[0].written.slice(-3)).toEqual(['ACTIVITY Clicking in Edge', 'ORB working', 'HELD OFF']);
+    expect(spawned[0].written.slice(-3)).toEqual(['ACTIVITY running in background · Clicking in Edge', 'ORB working', 'HELD OFF']);
     vi.advanceTimersByTime(31_000);
     expect(spawned[0].killed).toBe(true);             // back to the agent: the idle hide counts again
   });
@@ -552,7 +577,7 @@ describe('the pill\'s Pause and Resume', () => {
     expect(spawned[0].written.slice(-2)).toEqual(['ACTIVITY Paused — your turn', 'ORB paused']);
     expect(spawned[0].written).not.toContain('HELD ON');   // no Resume button: it goes on by itself if they stop
     controlBanner.holdEvent('resumed');
-    expect(spawned[0].written.slice(-2)).toEqual(['ACTIVITY Typing in Edge', 'ORB working']);
+    expect(spawned[0].written.slice(-2)).toEqual(['ACTIVITY running in background · Typing in Edge', 'ORB working']);
   });
 });
 
