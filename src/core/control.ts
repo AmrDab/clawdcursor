@@ -334,6 +334,8 @@ interface Foreground { processId: number; processName: string; appName?: string;
 let lease: Foreground | undefined;
 /** A window the agent focused or opened: bound when it is in front (activation can lag the call). */
 let pending: (WindowQuery & { opened?: boolean }) | null = null;
+/** The window that came to the front for `pending`: a later window of the same app is then the agent's own (its dialog). */
+let pendingArrived: Foreground | undefined;
 /** The window in front was brought up by the agent (window focus, open_app): it may be an AI-assistant app. */
 let leaseExplicit = false;
 /** The name of an app the agent launched that surfaced no window: only a window of that app is the agent's doing. */
@@ -378,7 +380,7 @@ const OWN_MOVE_MS = 5_000;
 /** How long the next input waits for a window the agent just focused to come to the front. */
 const FOCUS_ARRIVAL_MS = 1_000;
 
-function resetBinding(): void { lease = undefined; acted = undefined; working = undefined; pending = null; movedAt = 0; leaseExplicit = false; openedName = null; agentSet.length = 0; }
+function resetBinding(): void { lease = undefined; acted = undefined; working = undefined; pending = null; pendingArrived = undefined; movedAt = 0; leaseExplicit = false; openedName = null; agentSet.length = 0; }
 
 const platformForeground = async (): Promise<Foreground | null> => {
   const { getPlatform } = await import('../platform');
@@ -488,11 +490,14 @@ async function before(): Promise<void> {
   let explicit = false;
   if (pending) {
     // Waited for it above: if it is still not in front, the focus did not take (or the user switched), whatever the clock says.
-    if (!matches(pending, now)) {
+    // A dialog the agent's own act opened in that app (an Open box after "Attach files") is the agent's, not the user's switch.
+    const ownDialog = !matches(pending, now) && !!pendingArrived && sameTarget(pendingArrived, now);
+    if (!matches(pending, now) && !ownDialog) {
       throw new Error(`foreground changed: you ${pending.opened ? 'opened' : 'focused'} ${quoteScreenText(pending.processName ?? pending.title ?? (pending.processId !== undefined ? `pid ${pending.processId}` : `window ${pending.handle}`))}, but ${name(now)} is in front — nothing was sent. Focus it again.`);
     }
     pending = null;
-    explicit = true;
+    pendingArrived = undefined;
+    explicit = !ownDialog;
   } else if (lease && !sameTarget(lease, now) && !ownMove && !agentSet.some(w => sameTarget(w, now))) {
     throw new Error(
       `foreground changed: you were working in ${name(lease)}, but ${name(now)} is in front now — the user may have switched. ` +
@@ -632,7 +637,7 @@ async function arrived(): Promise<void> {
   for (let tries = FOCUS_ARRIVAL_MS / 100; ; tries--) {
     const now = await readForeground().catch(() => null);
     if (!now) return;
-    if (mine(now) && !isOwnUiPid(now.processId)) { working = now; remember(now); return; }
+    if (mine(now) && !isOwnUiPid(now.processId)) { working = now; remember(now); if (q) pendingArrived = now; return; }
     if (tries <= 0 || pending !== q) return;
     await new Promise(r => setTimeout(r, 100));
   }
@@ -641,6 +646,7 @@ async function arrived(): Promise<void> {
 /** The agent focused a window: the next input binds to it, not to whatever else is in front. */
 async function focused(q: WindowQuery): Promise<void> {
   pending = q;
+  pendingArrived = undefined;
   movedAt = Date.now();
   await arrived();
 }
@@ -653,6 +659,7 @@ async function focused(q: WindowQuery): Promise<void> {
  */
 async function launched(r?: { pid?: number; title?: string }, appName?: string): Promise<void> {
   movedAt = Date.now();
+  pendingArrived = undefined;
   if (r?.pid || r?.title) pending = { processId: r.pid || undefined, title: r.title || undefined, opened: true };
   else {
     lease = undefined;

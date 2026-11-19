@@ -142,3 +142,33 @@ describe('the outline follows the agent\'s own focus and launches', () => {
     expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300 1440 100']);
   });
 });
+
+describe('a dialog the agents own act opened', () => {
+  const OPEN_DIALOG: Win = { processId: 100, processName: 'msedge', title: 'Open', handle: 0x6c1 };
+  const OTHER: Win = { processId: 500, processName: 'notepad', title: 'Untitled', handle: 0x8d3 };
+
+  it('a window of the same app in front after the agent opened its window is not refused, and becomes the working window', async () => {
+    const d = fakeDesktop({ onOpen: () => ({ title: 'Inbox - Edge' }) });
+    await d.launchApp('Edge');                 // pending: the Edge window, which is in front
+    fg = OPEN_DIALOG;                          // "Attach files" opened Edge's Open box before the next input
+    await d.keyPress('a');
+    expect(d.sent).toEqual(['key a']);
+    expect(workingWindow()).toEqual({ processId: 100, handle: 0x6c1 });
+  });
+
+  it('another app in front is still refused', async () => {
+    const d = fakeDesktop({ onOpen: () => ({ title: 'Inbox - Edge' }) });
+    await d.launchApp('Edge');
+    fg = OTHER;
+    await expect(d.keyPress('a')).rejects.toThrow(/foreground changed: you opened "Inbox - Edge", but "notepad" \(pid 500\) is in front/);
+    expect(d.sent).toEqual([]);
+  });
+
+  it('a focus that never came to the front is still refused, even with the same app in front', async () => {
+    const d = fakeDesktop();
+    await d.keyPress('a');
+    await d.focusWindow({ title: 'RC1527 Test' });
+    fg = OPEN_DIALOG;
+    await expect(d.keyPress('b')).rejects.toThrow(/foreground changed: you focused "RC1527 Test"/);
+  });
+});

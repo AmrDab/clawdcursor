@@ -163,6 +163,15 @@ describe('a launch that surfaced no window excuses nothing it did not start', ()
     expect(d.sent).toEqual(['type a']);
   });
 
+  it('a second window of the assistant that came up after the launch is not excused by the own-dialog rule', async () => {
+    fg = { ...CLAUDE, title: 'Claude' };
+    const d = fakeLayer({ launch: { title: 'Claude' } });
+    await d.launchApp('Claude');
+    fg = { ...CLAUDE, title: 'Settings' };
+    await expect(d.typeText('hi')).rejects.toThrow(/Claude", an AI assistant/);
+    expect(d.sent).toEqual([]);
+  });
+
   it('launching the assistant itself, surfacing nothing yet, is asking for it', async () => {
     const d = fakeLayer();
     await d.launchApp('Claude');

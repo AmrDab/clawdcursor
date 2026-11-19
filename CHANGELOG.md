@@ -5,6 +5,7 @@ All notable changes to Clawd Cursor will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **A dialog the agent's own action opened is no longer refused as a window switch.** After an action such as "Attach files" opens the app's own Open dialog, input goes to that dialog and the outline follows it; a different app in front is still refused.
 - **A takeover no longer says "paused by the user" when they did not press Pause.** While the user is using the computer, the call waits and replies "the user is using the computer, clawdcursor is waiting for them" (code `USER_ACTIVE`): call the same step again. The pill's Pause keeps `PAUSED`, and a pause card waiting for an answer is now `PAUSE_PENDING`.
 - **When you take over, the agent carries on by itself once you are idle.** No 5 s wait and no Resume click: nothing more is sent while you work, and the next step runs once you have been idle for 1 s. Only the pill's Pause holds the agent until Resume.
 - **A hold no longer outlives the session that made it.** A hold whose process has exited is ignored and removed, so a new session does not start paused.
