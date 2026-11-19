@@ -27,6 +27,13 @@ describe('computer: computer-use argument names', () => {
     expect(seen).toEqual([{ tool: 'key_press', params: { key: 'ctrl+l' } }, { tool: 'key_press', params: { key: 'Return' } }]);
   });
 
+  it('coordinate:[x,y] is x and y; given x and y win', async () => {
+    seen.length = 0;
+    await computer().handler({ action: 'mouse_move', coordinate: [100, 200] }, ctx);
+    await computer().handler({ action: 'mouse_move', coordinate: [100, 200], x: 5, y: 6 }, ctx);
+    expect(seen.map(s => s.params)).toEqual([{ x: 100, y: 200 }, { x: 5, y: 6, coordinate: [100, 200] }]);
+  });
+
   it('mouse_move is move (the pointer goes there, nothing is pressed)', async () => {
     seen.length = 0;
     await computer().handler({ action: 'mouse_move', x: 5, y: 6 }, ctx);

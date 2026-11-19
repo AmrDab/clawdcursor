@@ -384,6 +384,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // A missed find, an empty clipboard or a timeout says nothing about the window. Only the tool's own words count,
         // never the screen text inside the block.
         if (sessionLog.summary.blind > blindBefore) {
+          nudgedThisStreak = false;   // a blind read ends the run of screenshots; clicks between screenshots do not
           const own = (result.text ?? '').split('</untrusted-screen-content>').pop()!;
           blindFoundNothing = cls === 'blind' && (own.startsWith('(empty a11y tree') || own.includes(OPAQUE_MARK));
         }
@@ -394,7 +395,6 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // 5th was noise). Where the last blind read found nothing (a canvas),
         // say instead how to use screenshots well there (#356).
         const streak = sessionLog.visionOnlyStreak;
-        if (streak <= 1) nudgedThisStreak = false;
         // The first screenshot of a session that has read nothing yet is the cheapest moment to say it.
         const firstBlind = streak === 1 && sessionLog.summary.blind === 0;
         if (cls === 'vision' && !result.isError && !nudgedThisStreak && (blindFoundNothing || firstBlind || streak >= 3)) {

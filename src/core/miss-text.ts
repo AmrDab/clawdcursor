@@ -24,7 +24,7 @@ function namedOf(raw: unknown): Named {
   const o = (raw ?? {}) as Record<string, unknown>;
   return {
     name: String(o.name ?? '').replace(/\s+/g, ' ').slice(0, 80),
-    controlType: String(o.controlType ?? '').replace(/^ControlType\./, '').slice(0, 40),
+    controlType: String(o.controlType ?? '').replace(/^ControlType\./, '').replace(/[^A-Za-z0-9 ]/g, '').slice(0, 40),   // a macOS AXRole is the app's own string, shown unquoted
   };
 }
 

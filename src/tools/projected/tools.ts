@@ -1804,7 +1804,7 @@ function truncateTitle(s: string): string {
  * Returns a loud, actionable suffix telling the agent to verify focus before
  * typing; empty string when the click looks clean.
  */
-export function focusTheftWarning(
+function focusTheftWarning(
   activation: { activated: boolean; title?: string; processName?: string; reason?: string; action?: string } | void,
   before: WindowRead,
   after: WindowRead,

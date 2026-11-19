@@ -419,6 +419,21 @@ describe('the first screenshot of a session that read nothing is nudged to blind
     for (let i = 0; i < 3; i++) expect(text(await capturedHandlers.get('computer')!({ action: 'screenshot' }))).not.toMatch(/\[clawdcursor\]/);
   });
 
+  // #410: a click between two screenshots left the streak at 1 and reset the flag, so the canvas advice came a second time.
+  it('the canvas advice is not repeated after a click between two screenshots', async () => {
+    const tree = [{ name: 'Board app', controlType: 'Window', bounds: { x: 0, y: 0, width: 1000, height: 800 } },
+      ...Array.from({ length: 9 }, (_, i) => ({ name: `Tool ${i}`, controlType: 'Button', bounds: { x: i * 40, y: 0, width: 36, height: 36 } })),
+      { name: 'Board', controlType: 'Pane', bounds: { x: 0, y: 100, width: 1000, height: 700 } }];
+    const base = shotCtx();
+    const ctx = { ...base, platform: { ...base.platform, getUiTree: vi.fn(async () => tree), lastTreeTruncated: false, mouseClick: vi.fn(async () => {}) } };
+    await createMcpServer({ ctx, compact: true });
+    await capturedHandlers.get('accessibility')!({ action: 'read_tree' });
+    const hints = [text(await capturedHandlers.get('computer')!({ action: 'screenshot' }))];
+    await capturedHandlers.get('computer')!({ action: 'click', x: 500, y: 400, space: 'screen' });
+    hints.push(text(await capturedHandlers.get('computer')!({ action: 'screenshot' })));
+    expect(hints.filter(t => /strokes/.test(t))).toHaveLength(1);
+  });
+
   // A missed name says nothing about the window: an agent on a form whose button is "Send", not "Submit", gets no drawing advice.
   it('after a find that missed a name, the screenshot gets no canvas advice', async () => {
     const base = shotCtx();
