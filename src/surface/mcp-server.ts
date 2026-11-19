@@ -154,6 +154,9 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'on a screen, you can. Use it on your own whenever a request needs an app, a window, a website or anything on the screen; ' +
       'the user does not have to name it. Do not tell the user you cannot reach their desktop or an app, and do not ask them to do ' +
       'a step you can do with these tools. You drive the tools yourself. ' +
+      // Live runs (audit 2026-11-19, and the 2026-11-19 terminal runs): the first call often went to a bare `window`, which
+      // the host does not have, because it lists the tools with its own prefix.
+      'The tool names in this text are short: call each tool by the full name your host lists for it (hosts add a prefix). ' +
       (compact
         // Compact tools carry no per-tool cost prefix, so name the actions.
         ? 'TO SEE: (1) accessibility read_tree lists the window\'s elements by name; ' +
