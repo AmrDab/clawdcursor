@@ -142,7 +142,7 @@ In tool terms:
 - **Acting by name:** pressing "Send" because it is called Send, not because it sits at a spot on the screen.
 - **OCR:** text recognition, reading the words in a picture of the screen. It runs on your computer.
 - **Playwright and CDP:** Playwright is a library that controls Chrome and Edge from the inside, over the Chrome DevTools Protocol (CDP), the browser's own debugging connection. Apps built on a browser engine (Electron or WebView2) can be reached the same way; `system detect_webview` finds them.
-- **Compact tools:** the six tools your AI sees with `--compact`. Without it there are 89 smaller tools, one per action. See [The tools](#the-tools).
+- **Compact tools:** the six tools your AI sees with `--compact`. Without it there are 90 smaller tools, one per action. See [The tools](#the-tools).
 - **The pill and the three screen states:** while your AI is working, a pill on screen says what it is doing ("Typing in Edge"). An amber outline around the agent's window means background work, while you keep using the computer. An amber glow on the whole screen means it is using the mouse and keyboard. A blue glow on the whole screen means it needs you for a step. Clicks go through the pill, and it stays out of your AI's screenshots.
 
 ---
@@ -189,6 +189,16 @@ Privacy:
 - **Pauses.** A pause times out after 15 minutes (`CLAWD_PAUSE_TIMEOUT_MIN`). `CLAWD_NO_PAUSE=1` turns pausing off for CI and unattended runs.
 
 [SECURITY.md](SECURITY.md) has the threat model, the limits of each guarantee, and how to report a vulnerability privately.
+
+---
+
+## App guides
+
+An app guide lists one app's keyboard shortcuts for your OS, a few workflows and tips. Your AI reads it with `system shortcuts_list` (`context` = the app or site, `query` = only matching shortcuts), and `open_app`, `open_url`, `browser navigate` and `window focus` mention a guide once per app per session when there is one.
+
+- **Where they come from:** the guides in [AmrDab/clawdcursor-guides](https://github.com/AmrDab/clawdcursor-guides), the verified ones, shipped in the npm package as one pack. Every guide is checked on load; one that fails is skipped.
+- **The refresh:** at most once every 7 days, after the server starts, Clawd Cursor downloads `https://clawdcursor.com/app-guides/pack.json` (the whole pack, at most 2 MB, 10 second timeout). The request does not name any app. If it fails, the guides you have stay. Set `CLAWD_NO_GUIDE_REFRESH=1` to turn it off.
+- **Saving:** your AI can call `system save_guide` with what it learned about an app. Nothing is saved unless you pick **Save** on the pause card; **Save and suggest to clawdcursor-guides** also opens a prefilled GitHub issue in your browser for you to review and send. Saved guides are in `~/.clawdcursor/guides/` on your PC and are never uploaded. With pausing off (`CLAWD_NO_PAUSE=1`), nothing is saved.
 
 ---
 
@@ -394,14 +404,14 @@ Earlier releases are in the [changelog](CHANGELOG.md).
 Two surfaces run the same code behind the same guards.
 
 - **Compact** (`--compact`, recommended): six tools, each with an `action` parameter. About 7,000 tokens of `tools/list`.
-- **Granular** (the default without `--compact`): 89 tools, one per action. About 19,000 tokens. Use it when a runtime needs every primitive as its own tool, or when you want your host to prompt per kind of action.
+- **Granular** (the default without `--compact`): 90 tools, one per action. About 19,000 tokens. Use it when a runtime needs every primitive as its own tool, or when you want your host to prompt per kind of action.
 
 (Token figures are the `tools/list` JSON of 2.0.0, characters ÷ 3.5.)
 
 | Tool | Actions |
 |---|---|
 | `accessibility` | `read_tree`, `find`, `get_element`, `focused`, `invoke`, `focus`, `set_value`, `get_value`, `expand`, `collapse`, `toggle`, `select`, `state`, `list_children`, `wait_for`, `compile_ui`, `find_button`, `find_field`, `smart_click`, `smart_type`, `smart_read` |
-| `system` | `clipboard_read`, `clipboard_write`, `copy_all_text`, `report`, `system_time`, `ocr`, `undo`, `shortcuts_list`, `shortcuts_run`, `pause_for_user`, `detect_webview`, `relaunch_with_cdp`, `build_uri`, `open_uri`, `open_app`, `open_file`, `open_url` |
+| `system` | `clipboard_read`, `clipboard_write`, `copy_all_text`, `report`, `system_time`, `ocr`, `undo`, `shortcuts_list`, `shortcuts_run`, `save_guide`, `pause_for_user`, `detect_webview`, `relaunch_with_cdp`, `build_uri`, `open_uri`, `open_app`, `open_file`, `open_url` |
 | `window` | `list`, `active`, `focus`, `maximize`, `minimize`, `restore`, `close`, `resize`, `list_displays`, `screen_size`, `open_app`, `open_file`, `open_url`, `switch_tab`, `navigate` |
 | `browser` | `navigate`, `connect`, `page_context`, `read_text`, `click`, `type`, `select_option`, `evaluate`, `wait_for`, `list_tabs`, `switch_tab`, `scroll` |
 | `computer` | `click`, `double_click`, `right_click`, `middle_click`, `triple_click`, `hover`, `move`, `move_relative`, `scroll`, `scroll_horizontal`, `drag`, `drag_path`, `mouse_down`, `mouse_up`, `type`, `key`, `key_press`, `key_down`, `key_up`, `wait`, `screenshot`, `screenshot_region`, `zoom` |

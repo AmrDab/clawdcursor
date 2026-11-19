@@ -113,13 +113,13 @@ clawdcursor never runs a model.
 ## Tool surface (compact — recommended, ~7,000 tokens of catalog vs ~19,000 granular)
 
 - accessibility — drive UI by element name; compile a fused el_NN UI map and act on {element_id, snapshot_id} (survives layout shifts)
-- system — page text (copy_all_text; find for one value in a long page), OCR, clipboard, shortcuts, webview detection, pause_for_user (hand the desktop to the user at a roadblock)
+- system — page text (copy_all_text; find for one value in a long page), OCR, clipboard, shortcuts and app guides, webview detection, pause_for_user (hand the desktop to the user at a roadblock)
 - window — list, focus, resize, close windows; open apps, files and URLs
 - browser — Chrome DevTools Protocol for browsers and Electron / WebView2 apps
 - computer — raw keyboard and mouse (type, keys, scroll, drag); click x,y and screenshot are the last resort
 - batch — run a guarded sequence of the above in one call
 
-89 granular tools (one schema per action) are available by omitting `--compact`
+90 granular tools (one schema per action) are available by omitting `--compact`
 (granular is the default surface) — enumerate them with `tools/list` on either
 transport, if your runtime needs every primitive as a top-level tool.
 
@@ -160,6 +160,10 @@ the pause card (use `choices` when there are options), not in your own chat.
 (`{placeholder?, multiline?}`, a text box); the answer is `{status:"replied", choice:"<exact option text>"}`
 or `{status:"replied", reply:"..."}`. It is the user's answer to your question: follow it. No tool call of yours can pick a
 choice. Never ask for a password or secret on it.
+
+## App guides
+
+App guides (keyboard shortcuts, workflows and tips per app) ship in the package and refresh weekly from clawdcursor.com (CLAWD_NO_GUIDE_REFRESH=1 turns that off). When a result names a guide, read it with system {"action":"shortcuts_list","context":"<app>"}; after working out shortcuts for an app that has no guide (or finding a listed one wrong), call system {"action":"save_guide"} once at the end of the task, and the user decides.
 
 ## Error reports
 

@@ -22,7 +22,8 @@ source: https://github.com/AmrDab/clawdcursor
 privacy: >
   All processing runs locally. Server binds to 127.0.0.1 only - not
   network-accessible. Screenshots stay in memory and go only to the MCP
-  client that requested them; clawdcursor calls no model itself. It sends
+  client that requested them; clawdcursor calls no model itself. It refreshes
+  its app-guide pack from clawdcursor.com at most weekly (CLAWD_NO_GUIDE_REFRESH=1 turns it off) and sends
   anonymous error reports by default (result codes, timings and its own
   file:line, never screen content; https://github.com/AmrDab/clawdcursor/blob/main/docs/telemetry.md).
   When the user asks to turn them off, call system
@@ -69,10 +70,10 @@ metadata:
 > - MCP stdio (editor host): add `"args": ["mcp", "--compact"]` to your config.
 > - MCP over HTTP (daemon mode): start the daemon with `--compact` (or set
 >   `CLAWD_MCP_COMPACT=1`) so `/mcp` serves the 6 compound tools (incl. `batch`). The surface is
->   fixed at startup — a daemon serves EITHER the compact tools OR the 89
+>   fixed at startup — a daemon serves EITHER the compact tools OR the 90
 >   granular ones, not both. Default (no flag) is granular.
 >
-> Granular mode's 89 tools are kept for back-compat. Compact's tools are much smaller and reduce mis-tool-selection. Use granular only if your runtime MUST have every primitive as its own top-level schema.
+> Granular mode's 90 tools are kept for back-compat. Compact's tools are much smaller and reduce mis-tool-selection. Use granular only if your runtime MUST have every primitive as its own top-level schema.
 
 **You drive the tools yourself. clawdcursor never runs a model.**
 
@@ -167,8 +168,8 @@ clawdcursor exposes one protocol (**MCP**) over two transports. It never runs a 
 
 | Mode | Command | Transport | Brain | Tools available |
 |------|---------|-----------|-------|-----------------|
-| `mcp` | `clawdcursor mcp [--compact]` | stdio | **You** (editor host) | 89 granular (default) or compact surface (`--compact`) |
-| `agent` | `clawdcursor agent [--compact]` | HTTP `/mcp` | **You** (HTTP client) | 89 granular (default) **or** compact surface — pass `--compact` (or `CLAWD_MCP_COMPACT=1`). One surface per daemon, chosen at startup — NOT both at once |
+| `mcp` | `clawdcursor mcp [--compact]` | stdio | **You** (editor host) | 90 granular (default) or compact surface (`--compact`) |
+| `agent` | `clawdcursor agent [--compact]` | HTTP `/mcp` | **You** (HTTP client) | 90 granular (default) **or** compact surface — pass `--compact` (or `CLAWD_MCP_COMPACT=1`). One surface per daemon, chosen at startup — NOT both at once |
 
 ---
 
@@ -188,7 +189,7 @@ clawdcursor exposes one protocol (**MCP**) over two transports. It never runs a 
 }
 ```
 
-**Granular - 89 individual tools (power-user, back-compat, larger prompt budget):**
+**Granular - 90 individual tools (power-user, back-compat, larger prompt budget):**
 ```json
 {
   "mcpServers": {
@@ -255,7 +256,7 @@ Every GUI task follows the same shape regardless of surface:
 4. REPEAT   until done
 ```
 
-**Use this OS's keys.** The server instructions name the OS and its shortcut modifier (cmd on macOS, ctrl on Windows and Linux); `mod` always means that modifier (`mod+s`). Never send another OS's shortcut (no `alt+f4` or `win+r` on a Mac, no `cmd+q` on Windows); `system {"action":"shortcuts_list"}` lists this OS's chords. `ctrl+…` on macOS is sent as the real Ctrl key (right in a terminal, wrong for copy/paste).
+**Use this OS's keys.** The server instructions name the OS and its shortcut modifier (cmd on macOS, ctrl on Windows and Linux); `mod` always means that modifier (`mod+s`). Never send another OS's shortcut (no `alt+f4` or `win+r` on a Mac, no `cmd+q` on Windows); `system {"action":"shortcuts_list"}` lists this OS's chords. `ctrl+…` on macOS is sent as the real Ctrl key (right in a terminal, wrong for copy/paste). When a result names a guide, read it with system {"action":"shortcuts_list","context":"<app>"}; after working out shortcuts for an app that has no guide (or finding a listed one wrong), call system {"action":"save_guide"} once at the end of the task, and the user decides.
 
 **Keystrokes always go to whatever has focus.** If focus is wrong (terminal instead of Excel), your `mod+s` - `Ctrl+S` on Windows/Linux, `Cmd+S` on macOS - saves your terminal session, not the spreadsheet. So: **focus first, act, verify.**
 
@@ -402,7 +403,7 @@ with the same semantics. Full reference via the MCP `tools/list` request.
 | `computer`      | mouse_click, mouse_{double,right,middle,triple}_click, mouse_hover, mouse_move_relative, mouse_drag, mouse_drag_stepped, mouse_down, mouse_up, mouse_scroll, mouse_scroll_horizontal, type_text, key_press, key_down, key_up, wait, desktop_screenshot, desktop_screenshot_region |
 | `accessibility` | read_screen, find_element, a11y_get_element, get_focused_element, invoke_element, focus_element, set_field_value, a11y_get_value, a11y_expand, a11y_collapse, a11y_toggle, a11y_select, get_element_state, a11y_list_children, wait_for_element |
 | `window`        | get_windows, get_active_window, focus_window, maximize_window, minimize_window_to_taskbar, restore_window, close_window, resize_window, list_displays, get_screen_size, open_app, open_file, open_url, switch_tab_os, navigate_browser |
-| `system`        | read_clipboard, write_clipboard, get_system_time, ocr_read_screen, undo_last, shortcuts_list, shortcuts_execute |
+| `system`        | read_clipboard, write_clipboard, get_system_time, ocr_read_screen, undo_last, shortcuts_list, shortcuts_execute, save_guide |
 | `browser`       | cdp_connect, cdp_page_context, cdp_read_text, cdp_click, cdp_type, cdp_select_option, cdp_evaluate, cdp_wait_for_selector, cdp_list_tabs, cdp_switch_tab, cdp_scroll |
 | `batch`         | ordered list of tool calls in one round-trip — see Execution playbook |
 
@@ -497,6 +498,6 @@ Hit a clawdcursor bug (a tool throws/crashes or behaves contrary to this doc —
 
 ## Full documentation
 
-- **Tool catalog (89 granular or compact):** `tools/list` JSON-RPC over stdio MCP or HTTP `/mcp`
+- **Tool catalog (90 granular or compact):** `tools/list` JSON-RPC over stdio MCP or HTTP `/mcp`
 - **Architecture detail:** README.md in the repo
 - **Changelog:** CHANGELOG.md
