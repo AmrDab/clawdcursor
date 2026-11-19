@@ -6,7 +6,7 @@
  */
 import type { PlatformAdapter } from '../../platform/types';
 import { ocrEngine } from '../../platform/ocr-engine';
-import { parseAssertions, checkAssertions, renderReport, validateExpect } from '../verify/assertions';
+import { parseAssertions, checkAssertions, renderReport, validateExpect, type RegionProbe } from '../verify/assertions';
 
 export interface ReactiveInput {
   /** Raw `expect` arg from the tool call (assertions array), or undefined. */
@@ -17,6 +17,8 @@ export interface ReactiveInput {
   adapter: PlatformAdapter;
   /** Lazy OCR reader for ocr_contains assertions; omit when unavailable. */
   ocrText?: () => Promise<string>;
+  /** Frames taken before the action, for region_changed / region_unchanged. */
+  regions?: RegionProbe;
   /** Settle budget for hard checks (ms). Defaults to SETTLE_BUDGET_MS. */
   settleMs?: number;
 }
@@ -45,7 +47,7 @@ export function expectRefusal(expect: unknown): string | null {
 }
 
 /** `expect` after the action: the result with its verdict at the end of the text, or null when there is nothing to check. */
-export async function checkExpect(expect: unknown, result: ReactiveOutcome, adapter: PlatformAdapter): Promise<ReactiveOutcome | null> {
+export async function checkExpect(expect: unknown, result: ReactiveOutcome, adapter: PlatformAdapter, regions?: RegionProbe | null): Promise<ReactiveOutcome | null> {
   if (expect === undefined || expect === null) return null;
   return reactiveCheck({
     expect,
@@ -53,6 +55,7 @@ export async function checkExpect(expect: unknown, result: ReactiveOutcome, adap
     toolSuccess: result.success,
     adapter,
     ocrText: async () => (await ocrEngine().recognizeScreen()).fullText ?? '',
+    regions: regions ?? undefined,
   }).catch(() => null);
 }
 
@@ -68,10 +71,10 @@ export async function reactiveCheck(input: ReactiveInput): Promise<ReactiveOutco
     }
     const budget = input.settleMs ?? SETTLE_BUDGET_MS;
     const deadline = Date.now() + budget;
-    let report = await checkAssertions(parsed.assertions, { adapter: input.adapter, ocrText: input.ocrText });
+    let report = await checkAssertions(parsed.assertions, { adapter: input.adapter, ocrText: input.ocrText, regions: input.regions });
     while (!report.ok && Date.now() < deadline) {
       await new Promise(r => setTimeout(r, SETTLE_INTERVAL_MS));
-      report = await checkAssertions(parsed.assertions, { adapter: input.adapter, ocrText: input.ocrText });
+      report = await checkAssertions(parsed.assertions, { adapter: input.adapter, ocrText: input.ocrText, regions: input.regions });
     }
     if (report.ok) {
       return { success: input.toolSuccess, text: `${input.toolText} — verified ${report.passed} check(s)` };
