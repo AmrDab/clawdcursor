@@ -129,8 +129,12 @@ export async function notSelectableReason(
   if (named.some(h => isSelectableItem(h.controlType))) return undefined;
   if (!named.length) {
     const combos = await platform.findElements({ controlType: 'ComboBox', processId: q.processId }).catch(() => []);
-    const dropdown = (Array.isArray(combos) ? combos : []).map(c => String(c.name ?? '').trim()).find(Boolean);
-    return dropdown ? `no list item or tab has that name; if it is an option of a dropdown, call accessibility {action:"select", name:${JSON.stringify(dropdown)}, value:${JSON.stringify(q.name)}}` : undefined;
+    const names = [...new Set((Array.isArray(combos) ? combos : []).map(c => String(c.name ?? '').trim()).filter(Boolean))].slice(0, 5);
+    if (!names.length) return undefined;
+    const call = (dropdown: string) => `call accessibility {action:"select", name:${dropdown}, value:${JSON.stringify(q.name)}}`;
+    return names.length === 1
+      ? `no list item or tab has that name; if it is an option of a dropdown, ${call(JSON.stringify(names[0]))}`
+      : `no list item or tab has that name; if it is an option of one of the dropdowns ${names.map(n => JSON.stringify(n)).join(', ')}, ${call('"<that dropdown>"')}`;
   }
   return `${quoteScreenText(q.name)} is not a list item or tab to select (it is a ${[...new Set(named.map(h => h.controlType))].join(', ')}); to pick an option inside a dropdown, pass value`;
 }
