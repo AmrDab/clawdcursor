@@ -6,7 +6,8 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ### Changed
 - **`window list` shows open apps, not every window title.** It lists each app's process name and pid, with a window count
-  when an app has several windows; the title, bounds and size appear only for windows clawdcursor opened or worked in. A
+  when an app has several windows; the title, bounds and size appear only for windows clawdcursor opened or worked in, and for one app's windows when the
+  call names it (`processName` or `processId`). A
   document's title can hold private text.
 
 ### Fixed
