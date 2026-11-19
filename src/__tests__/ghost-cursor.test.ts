@@ -1,6 +1,6 @@
 /**
- * Plan (h) ghost cursor: every act on an agent window that has a point tells the outline process to draw a pointer there
- * (`GHOST <x> <y>`). It is only drawn: nothing here ever moves the real cursor.
+ * Plan (h) ghost cursor: a BACKGROUND act on an agent window that has a point (an element acted on by name) tells the outline
+ * process to draw a pointer there (`GHOST <x> <y>`). Real mouse input never draws one: it moves the user's own cursor.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
@@ -56,16 +56,12 @@ function desktop() {
 }
 
 describe('the ghost cursor', () => {
-  it('a click on the agent window tells the outline where: GHOST x y', async () => {
-    await desktop().mouseClick(640, 360);
-    expect(ghosts()).toEqual(['GHOST 640 360']);
-  });
-
-  it('a scroll has a point too; a key press has none', async () => {
+  it('real mouse input draws no ghost: it moves the user’s own cursor, and a second one must not follow it', async () => {
     const d = desktop();
-    await d.keyPress('a');
+    await d.mouseClick(640, 360);
     await d.mouseScroll(10, 20);
-    expect(ghosts()).toEqual(['GHOST 10 20']);
+    await d.keyPress('a');
+    expect(ghosts()).toEqual([]);
   });
 
   it('an act by name with element bounds goes to the centre of the element; reading a value has no point', async () => {
@@ -80,13 +76,13 @@ describe('the ghost cursor', () => {
     const dir = (await import('os')).tmpdir();
     __setControlDirForTests(dir);
     stopControl('test');
-    try { await expect(desktop().mouseClick(1, 2)).rejects.toThrow(/stopped/); } finally { resumeControl('test'); }
+    try { await expect(desktop().invokeElement({ name: 'Save' })).rejects.toThrow(/stopped/); } finally { resumeControl('test'); }
     expect(ghosts()).toEqual([]);
   });
 
   it('is only sent where the outline is drawn by this protocol (Windows)', async () => {
     Object.defineProperty(process, 'platform', { value: 'linux' });
-    await desktop().mouseClick(5, 6);
+    await desktop().invokeElement({ name: 'Save' });
     expect(ghosts()).toEqual([]);
   });
 

@@ -70,7 +70,10 @@ let onAgentInput: ((method: string) => void) | null = null;
 export function setOnAgentInput(f: ((method: string) => void) | null): void {
   onAgentInput = f;
 }
-/** Told where an agent act that passed the guard happens on screen (a click, a scroll, an element acted on by name): the ghost cursor is drawn there. */
+/**
+ * Told where a BACKGROUND act that passed the guard lands on screen (an element acted on by name): the ghost cursor is drawn
+ * there. Never for real mouse input: that moves the user's own cursor, and the ghost must not follow it.
+ */
 let onAgentPoint: ((x: number, y: number) => void) | null = null;
 export function setOnAgentPoint(f: ((x: number, y: number) => void) | null): void {
   onAgentPoint = f;
@@ -246,7 +249,8 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
       await confirmCheck(m, args, target);
       await g.before();
       announce(m);
-      if (m.startsWith('mouse') && m !== 'mouseMoveRelative') pointAt(args[0], args[1]);
+      // No ghost here: real input moves the user's own cursor, and a second one drawn next to it (owner, 2026-11-19) only
+      // says the same thing twice. The ghost is the background mode's pointer alone (invokeElement below).
       const r = await f(...args);
       g.done(movesFocus(m, args));
       return r;
