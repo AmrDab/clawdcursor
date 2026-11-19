@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, vitest, the shipped `parseAssertions`/`checkAssertions`/`renderReport` (verify engine), the loop's existing `postSnapshot`/`fingerprintChanged`.
 
-**Spec:** `docs/superpowers/specs/2026-06-07-ui-state-compiler-layer-c-design.md`. **Branch:** `v1.5.0`.
+**Spec:** `notes/superpowers/specs/2026-06-07-ui-state-compiler-layer-c-design.md`. **Branch:** `v1.5.0`.
 
 **Scope fence:** NO fixed recipes/flows, NO separate pursue loop, NO find-and-act combinators, NO request_approval/HITL, NO vision fusion, NO change to by-name/no-`expect` behavior (additive), NO `process.platform` branching.
 
@@ -118,7 +118,7 @@ describe('reactiveCheck', () => {
  * agent-stated expected effect (hard) or a tolerant "did anything change" net
  * (soft), so the agent never blindly proceeds on an action that didn't take.
  * Pure over its inputs + PlatformAdapter reads (OS-agnostic, unit-testable).
- * See docs/superpowers/specs/2026-06-07-ui-state-compiler-layer-c-design.md.
+ * See notes/superpowers/specs/2026-06-07-ui-state-compiler-layer-c-design.md.
  */
 import type { PlatformAdapter } from '../../platform/types';
 import { parseAssertions, checkAssertions, renderReport } from '../verify/assertions';

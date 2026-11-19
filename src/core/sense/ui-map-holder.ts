@@ -2,7 +2,7 @@
  * Session-scoped cache of recently compiled UIMaps, enabling safe el_NN element
  * references (resolve {snapshot_id, element_id} -> live element). Strict by
  * design: only the CURRENT, non-invalidated, in-TTL map resolves. See
- * docs/superpowers/specs/2026-06-07-ui-state-compiler-part2-design.md §2.
+ * notes/superpowers/specs/2026-06-07-ui-state-compiler-part2-design.md §2.
  */
 import type { UIMap, MaxCost } from './ui-map-types';
 

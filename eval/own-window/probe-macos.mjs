@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Plan (h) step 1, macOS: while a fake "user" window (ClawdUser, our own Cocoa window) stays in front, which apps accept
- * input addressed to a BACKGROUND app? Measurement only; no product code. (docs/internal/own-window-plan.md, README.md "macOS".)
+ * input addressed to a BACKGROUND app? Measurement only; no product code. (notes/internal/own-window-plan.md, README.md "macOS".)
  *
  * Targets (each skipped with a reason if missing; everything is started by this script and closed at the end):
  *   native    our own Cocoa window ClawdTarget (a text field, buttons ClawdGo / ClawdReset, a status label): the baseline

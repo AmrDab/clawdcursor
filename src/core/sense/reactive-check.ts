@@ -2,7 +2,7 @@
  * Layer C — reactive step discipline. After an action, verify the agent-stated
  * expected effect (`expect`), so the agent never blindly proceeds on an action that didn't take.
  * Pure over its inputs + PlatformAdapter reads (OS-agnostic, unit-testable).
- * See docs/superpowers/specs/2026-06-07-ui-state-compiler-layer-c-design.md.
+ * See notes/superpowers/specs/2026-06-07-ui-state-compiler-layer-c-design.md.
  */
 import type { PlatformAdapter } from '../../platform/types';
 import { ocrEngine } from '../../platform/ocr-engine';

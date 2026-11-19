@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, vitest, existing `compileUIMap`/`renderUIMap`/`defaultCompileDeps`, invoke-cascade, `set_field_value`, the MCP projection (`project-mcp.ts`).
 
-**Spec:** `docs/superpowers/specs/2026-06-07-ui-state-compiler-part2-design.md`. **Branch:** `v1.5.0`.
+**Spec:** `notes/superpowers/specs/2026-06-07-ui-state-compiler-part2-design.md`. **Branch:** `v1.5.0`.
 
 **Scope fence:** NO vision-element fusion, NO Layer B (`find_*`/`verify_state`/`request_approval`), NO Layer C, NO new standalone action tool, NO change to by-name behavior, NO `automationId` on `UIElement`.
 
@@ -110,7 +110,7 @@ describe('UIMapHolder', () => {
  * Session-scoped cache of recently compiled UIMaps, enabling safe el_NN element
  * references (resolve {snapshot_id, element_id} -> live element). Strict by
  * design: only the CURRENT, non-invalidated, in-TTL map resolves. See
- * docs/superpowers/specs/2026-06-07-ui-state-compiler-part2-design.md §2.
+ * notes/superpowers/specs/2026-06-07-ui-state-compiler-part2-design.md §2.
  */
 import type { UIMap } from './ui-map-types';
 

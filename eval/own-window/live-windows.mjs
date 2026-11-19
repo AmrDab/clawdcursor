@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Plan (h), one live Windows measurement: does the agent work in its own windows while the user keeps theirs?
- * (docs/internal/own-window-plan.md, eval/own-window/README.md.)
+ * (notes/internal/own-window-plan.md, eval/own-window/README.md.)
  *
  * It starts the built clawdcursor MCP server over stdio (isolated home, telemetry off), a fake "user" window
  * (ClawdUser, in front), Notepad and a WinForms target (ClawdTarget), and a 50 ms sampler of the foreground window and the

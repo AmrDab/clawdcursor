@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, vitest, the shipped `compileUIMap`/`defaultCompileDeps`/`UIMapHolder`/`normText`.
 
-**Spec:** `docs/superpowers/specs/2026-06-07-ui-state-compiler-layer-b-design.md`. **Branch:** `v1.5.0`.
+**Spec:** `notes/superpowers/specs/2026-06-07-ui-state-compiler-layer-b-design.md`. **Branch:** `v1.5.0`.
 
 **Scope fence:** NO find-and-act combinators, NO request_approval/HITL, NO Layer C, NO vision fusion, NO LLM in the matcher, NO `process.platform` branching anywhere in Layer B.
 

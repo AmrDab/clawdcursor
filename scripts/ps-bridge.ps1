@@ -67,7 +67,7 @@ try {
 "@
 } catch { }
 
-# The own-window rungs (docs/internal/own-window-plan.md): window messages to a control in another process (R1), the
+# The own-window rungs (notes/internal/own-window-plan.md): window messages to a control in another process (R1), the
 # foreground-lock workaround and the user's idle time (R2). Win32 return codes are passed on: 5 = access denied (UIPI).
 try {
     Add-Type @"

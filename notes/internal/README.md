@@ -1,4 +1,4 @@
-# docs/internal/
+# notes/internal/
 
 Maintainer-only design records. Not published as part of the website
 (which is served from `docs/`), not linked from the README, not

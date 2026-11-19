@@ -1,6 +1,6 @@
 # own-window probe (Windows)
 
-Step 1 of `docs/internal/own-window-plan.md`. Measurement only; no product code changes.
+Step 1 of `notes/internal/own-window-plan.md`. Measurement only; no product code changes.
 
 ## What it measures
 

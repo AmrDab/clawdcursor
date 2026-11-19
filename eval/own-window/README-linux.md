@@ -1,6 +1,6 @@
 # own-window probe: Linux X11
 
-Step 1 of `docs/internal/own-window-plan.md`, Linux part. Measurement only; no product code changes.
+Step 1 of `notes/internal/own-window-plan.md`, Linux part. Measurement only; no product code changes.
 Question: which apps accept input addressed to a **background** window while the user's window stays in front?
 
 ## Run it (on the Linux test VM only)

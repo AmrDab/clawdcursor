@@ -104,7 +104,7 @@ Expected: FAIL — cannot find module `../core/sense/ui-map-types`.
 // src/core/sense/ui-map-types.ts
 /**
  * UI State Compiler (Layer A) data model. See
- * docs/superpowers/specs/2026-06-07-ui-state-compiler-design.md.
+ * notes/superpowers/specs/2026-06-07-ui-state-compiler-design.md.
  */
 export const SOURCES = ['window', 'a11y', 'ocr', 'vision', 'dom', 'cursor'] as const;
 export type Source = typeof SOURCES[number];
@@ -654,7 +654,7 @@ Expected: FAIL — cannot find module `../core/sense/ui-map`.
  * UI State Compiler (Layer A). Fuses a11y + OCR + (lazy) vision + window/display
  * metadata into one UIMap. Pure orchestration over injected sources so it is
  * unit-testable with no real UIA/OCR. See the design spec
- * docs/superpowers/specs/2026-06-07-ui-state-compiler-design.md.
+ * notes/superpowers/specs/2026-06-07-ui-state-compiler-design.md.
  */
 import type { PlatformAdapter, ScreenshotResult } from '../../platform/types';
 import type { Snapshot } from './types';

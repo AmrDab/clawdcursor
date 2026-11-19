@@ -1,6 +1,6 @@
 /**
  * UI State Compiler (Layer A) data model. See
- * docs/superpowers/specs/2026-06-07-ui-state-compiler-design.md.
+ * notes/superpowers/specs/2026-06-07-ui-state-compiler-design.md.
  */
 import type { Platform } from './types';
 
