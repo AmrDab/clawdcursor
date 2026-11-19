@@ -133,14 +133,14 @@ export function findInstalledCopies(roots: CopyRoots = defaultRoots()): Installe
   return copies;
 }
 
-/** Semver-ish compare: >0 if a > b. */
+/** Semver-ish compare: >0 if a > b. x.y.z by number; a pre-release (`-rc.1`) ranks below the same x.y.z. */
 export function compareVersions(a: string, b: string): number {
-  const pa = a.split('.').map(n => parseInt(n, 10) || 0);
-  const pb = b.split('.').map(n => parseInt(n, 10) || 0);
+  const core = (v: string) => v.split('-')[0].split('.').map(n => parseInt(n, 10) || 0);
+  const pa = core(a), pb = core(b);
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) - (pb[i] ?? 0);
   }
-  return 0;
+  return Number(!a.includes('-')) - Number(!b.includes('-'));
 }
 
 const LABEL: Record<CopyKind, string> = {
