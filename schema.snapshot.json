@@ -722,7 +722,7 @@
               },
               "count": {
                 "type": "number",
-                "description": "1=single, 2=double"
+                "description": "1=single (default), 2=double, 3=triple"
               },
               "space": {
                 "type": "string",
@@ -2813,13 +2813,14 @@
                 "type": "string",
                 "enum": [
                   "left",
-                  "right"
+                  "right",
+                  "middle"
                 ],
-                "description": "Mouse button to click: \"left\" (default) or \"right\""
+                "description": "Mouse button to click: \"left\" (default), \"right\" or \"middle\""
               },
               "count": {
                 "type": "number",
-                "description": "1=single, 2=double"
+                "description": "1=single (default), 2=double, 3=triple"
               },
               "space": {
                 "type": "string",

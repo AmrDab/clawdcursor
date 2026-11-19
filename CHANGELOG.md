@@ -2,6 +2,27 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **A tree read or an invoke that timed out is reported as a timeout**, not as an empty window ("app may be custom-canvas",
+  with advice to take a screenshot) or an element that was not found. Windows and Linux.
+- **`window` close, minimize and focus act on one window and name it.** Every field given must match (`processName` and
+  `title` together pick the dialog, not the first window of that app); two or more matches are listed and nothing is done; a
+  `pid` with a `title` that matches none of its windows is "not found". `close` waits a second and says whether the window
+  closed or is still open (it may be asking to save). On Linux a close goes by window id, not by title text.
+- **`click` honours `button:"middle"` and `count:3`**, and refuses a button or count it cannot send instead of left-clicking once.
+- **`key "ctrl + s"` presses Ctrl+S**, and a trailing `+` is the plus key (`ctrl++`), instead of tapping Ctrl and typing "+s".
+- **A bridge command that timed out never runs afterwards**, and its time limit starts when it is sent, not when it is queued, so
+  a retry no longer acts twice.
+- **Linux: a failed key press is an error**, and the keys are released either way, so a failure no longer leaves Ctrl held. On
+  Wayland with no input tool (`ydotool`, `wtype`), clicking and typing say so instead of reporting done.
+- **`invoke` with `automationId` looks the element up by that id** (Windows, macOS), not as a name that never matched.
+- **`open_file` on a path that does not exist fails** instead of saying `Opened`.
+- **The granular `minimize_window` really minimizes**, as `minimize_window_to_taskbar` does; it used to press Win+Down, which
+  restored a maximized window.
+
+
 ## [2.2.0] - 2026-11-18
 
 ### Added

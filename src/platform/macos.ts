@@ -42,7 +42,7 @@ import { clampRegion } from './grab-image';
 import { wheelUnitsPerNotch } from './wheel';
 import { readMainScreenInfo, readDisplayList } from './mac-screen';
 import { MAC_MODIFIER, MacKeyboardGuard, hasNonAscii, refuseNonAsciiChord, runAppleScript, typeTextMac, utf8ClipboardEnv } from './mac-keyboard';
-import { modifierOf } from './keys';
+import { modifierOf, splitCombo } from './keys';
 import {
   defaultMacAx, MacAxError,
   type AppState, type FrontmostInfo, type InvokeResult, type MacAx, type SkippedApp,
@@ -904,7 +904,7 @@ export class MacOSAdapter implements PlatformAdapter {
       return;
     }
 
-    const parts = combo.split('+').map(s => s.trim()).filter(Boolean);
+    const parts = splitCombo(combo);
     const key = parts[parts.length - 1];
     // Every token is interpolated into an AppleScript program, so anything
     // that isn't a known modifier/key is refused (like the Windows adapter)

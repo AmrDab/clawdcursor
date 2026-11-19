@@ -50,10 +50,11 @@ import type {
 import { waitForLaunchedWindow, buildAppPredicate, type AppPredicate } from './launch-poll';
 import { getPackageRoot } from '../paths';
 import { llmSize } from './coord-scale';
-import { windowTextIncludes } from './window-text';
+import { matchWindows, selectionProblem, describeWindow } from './window-match';
+import { sleep } from '../sleep';
 import { structuredMissFields, targetOf } from '../core/miss-text';
 import { wellFormed } from './mac-ax';
-import { modifierOf, type Modifier } from './keys';
+import { modifierOf, splitCombo, type Modifier } from './keys';
 
 const execFileAsync = promisify(execFile);
 
@@ -463,8 +464,17 @@ export class LinuxAdapter implements PlatformAdapter {
     return f;
   }
 
+  /** What the last focusWindow / setWindowState acted on, or why it did not: the reply names the window. Taken once. */
+  private windowNote: string | null = null;
+  takeWindowNote(): string | null {
+    const n = this.windowNote;
+    this.windowNote = null;
+    return n;
+  }
+
   async focusWindow(query: { processName?: string; processId?: number; title?: string }): Promise<boolean> {
     this.focusFailure = null;
+    this.windowNote = null;
     if (!(await this.hasBinary('wmctrl'))) {
       this.focusFailure = 'Focusing a window needs wmctrl, which is not installed — install it with your package manager.';
       return false;
@@ -474,22 +484,23 @@ export class LinuxAdapter implements PlatformAdapter {
     // not pid, so we find the matching id from the list first).
     try {
       const windows = await this.listWindows();
-      const match = windows.find(w => {
-        if (query.processId !== undefined && w.processId === query.processId) return true;
-        if (query.processName && w.processName.toLowerCase() === query.processName.toLowerCase()) return true;
-        if (query.title && windowTextIncludes(w.title, query.title)) return true;
-        return false;
-      });
+      // Every given field must match one window (AND); several matches are listed, not guessed between.
+      const matches = matchWindows(windows, query);
+      // A pid alone means "that process" (the callers that re-focus an app they just used): its first window, as before.
+      if (matches.length > 1 && (query.title || query.processName)) { this.focusFailure = selectionProblem(query, matches); return false; }
+      const match = matches[0];
 
       if (match?.handle !== undefined) {
         const handleHex = typeof match.handle === 'number'
           ? '0x' + match.handle.toString(16)
           : String(match.handle);
         await execFileAsync('wmctrl', ['-i', '-a', handleHex], { timeout: TOOL_TIMEOUT_MS });
+        this.windowNote = `Focused window ${describeWindow(match)}.`;
         return true;
       }
 
-      if (query.title) {
+      // wmctrl -a takes the first window whose title contains the text: only when the title is the whole selector.
+      if (query.title && query.processId === undefined && !query.processName) {
         await execFileAsync('wmctrl', ['-a', query.title], { timeout: TOOL_TIMEOUT_MS });
         return true;
       }
@@ -505,9 +516,11 @@ export class LinuxAdapter implements PlatformAdapter {
     state: WindowState,
     query?: { processName?: string; processId?: number; title?: string },
   ): Promise<boolean> {
+    this.windowNote = null;
     if (!(await this.hasBinary('wmctrl'))) return false;
     const target = await this.resolveWindowHandle(query);
     if (!target) return false;
+    const named = this.resolvedWindow;
 
     try {
       if (state === 'maximize') {
@@ -522,20 +535,19 @@ export class LinuxAdapter implements PlatformAdapter {
         // WM map it again — same path focus-by-title takes.
         await execFileAsync('wmctrl', ['-i', '-a', target], { timeout: TOOL_TIMEOUT_MS });
       } else if (state === 'close') {
-        // wmctrl -c sends _NET_CLOSE_WINDOW — the app can prompt / refuse.
-        // wmctrl's -c takes a name-substring, not a window id, so we hand
-        // it a title match where we can, else fall back to a generic match.
-        if (query?.title) {
-          await execFileAsync('wmctrl', ['-c', query.title], { timeout: TOOL_TIMEOUT_MS });
-        } else {
-          // xdotool lets us close by window id directly.
-          if (await this.hasBinary('xdotool')) {
-            await execFileAsync('xdotool', ['windowclose', target], { timeout: TOOL_TIMEOUT_MS });
-          } else {
-            return false;
-          }
-        }
+        // wmctrl -i -c sends _NET_CLOSE_WINDOW to that window id — the app can prompt / refuse. By id: wmctrl -c <text>
+        // closes the first window whose title contains the text, which can be another app's.
+        await execFileAsync('wmctrl', ['-i', '-c', target], { timeout: TOOL_TIMEOUT_MS });
+        // A sent request is not a closed window: give it a moment and look.
+        const who = named ? describeWindow(named) : 'the window';
+        await sleep(1000);
+        const stillOpen = (await this.listWindows()).some(w => typeof w.handle === 'number' && '0x' + w.handle.toString(16) === target);
+        this.windowNote = stillOpen
+          ? `Sent close to ${who}, but it is still open after 1 s (it may be asking to save or confirm: look at the screen).`
+          : `Closed ${who}.`;
+        return true;
       }
+      if (named) this.windowNote = `${state === 'minimize' ? 'Minimized' : state === 'maximize' ? 'Maximized' : 'Restored'} window ${describeWindow(named)}.`;
       return true;
     } catch {
       return false;
@@ -570,7 +582,11 @@ export class LinuxAdapter implements PlatformAdapter {
     }
   }
 
+  /** The window the last resolveWindowHandle picked (null for the active window, or none). */
+  private resolvedWindow: WindowInfo | null = null;
+
   private async resolveWindowHandle(query?: { processName?: string; processId?: number; title?: string }): Promise<string | null> {
+    this.resolvedWindow = null;
     if (!query) {
       if (await this.hasBinary('xdotool')) {
         try {
@@ -584,14 +600,15 @@ export class LinuxAdapter implements PlatformAdapter {
       return null;
     }
 
-    const windows = await this.listWindows();
-    const match = windows.find(w => {
-      if (query.processId !== undefined && w.processId === query.processId) return true;
-      if (query.processName && w.processName.toLowerCase() === query.processName.toLowerCase()) return true;
-      if (query.title && windowTextIncludes(w.title, query.title)) return true;
-      return false;
-    });
-    if (match && typeof match.handle === 'number') {
+    // Every given field must match (AND), into ONE window. None or several: said, with the candidates, never a guess.
+    const matches = matchWindows(await this.listWindows(), query);
+    if (matches.length !== 1) {
+      if (query.processId !== undefined || query.processName || query.title) this.windowNote = selectionProblem(query, matches);
+      return null;
+    }
+    const match = matches[0];
+    if (typeof match.handle === 'number') {
+      this.resolvedWindow = match;
       return '0x' + match.handle.toString(16);
     }
     return null;
@@ -619,8 +636,11 @@ export class LinuxAdapter implements PlatformAdapter {
       this.lastTreeTruncated = data.truncated === true;
       const raw = Array.isArray(data.elements) ? data.elements : [];
       return this.offsetWindowRelative(raw, raw.map(this.normalizeAtspiElement));
-    } catch {
-      return [];
+    } catch (err) {
+      // A read that timed out or crashed is not an empty window: an empty result sends the agent to "custom canvas" and pixels.
+      const e = err as { killed?: boolean; code?: unknown; message?: string };
+      const timedOut = e?.killed === true || e?.code === 'ETIMEDOUT';
+      throw new Error(timedOut ? `UI tree read timed out after ${A11Y_TIMEOUT_MS}ms` : `UI tree read failed: ${e?.message ?? String(err)}`);
     }
   }
 
@@ -774,6 +794,8 @@ export class LinuxAdapter implements PlatformAdapter {
   async invokeElement(query: {
     name?: string;
     controlType?: string;
+    /** Not supported here (AT-SPI has none); an id-only query is refused. */
+    automationId?: string;
     processId?: number;
     action?: InvokeAction;
     value?: string;
@@ -784,6 +806,8 @@ export class LinuxAdapter implements PlatformAdapter {
     data?: Record<string, unknown>;
   }> {
     if (!this.atspiAvailable) return { success: false };
+    // AT-SPI has no AutomationId: an id-only query would search with no filter, so it is refused, not run.
+    if (!query.name && query.automationId) return { success: false, data: { error: 'an automationId cannot be looked up on this platform: pass the element name' } };
     try {
       const args = ['--cmd', 'invoke', '--action', query.action ?? 'click'];
       if (query.controlType) args.push(`--role=${atspiRoleQuery(query.controlType)}`);
@@ -816,7 +840,10 @@ export class LinuxAdapter implements PlatformAdapter {
         ...(bounds ? { bounds } : {}),
         ...(Object.keys(data).length ? { data } : {}),
       };
-    } catch {
+    } catch (err) {
+      // A bridge timeout is not "element not found": the agent must hear it, and not retry the act blind.
+      const e = err as { killed?: boolean; code?: unknown };
+      if (e?.killed === true || e?.code === 'ETIMEDOUT') throw new Error(`invoke timed out after ${A11Y_TIMEOUT_MS}ms`);
       return { success: false };
     }
   }
@@ -931,7 +958,8 @@ export class LinuxAdapter implements PlatformAdapter {
       await this.wayland.mouseClick(btn, count);
       return;
     }
-    // X11 (or Wayland without ydotool): nut-js.
+    this.requireWaylandInput('mouse');
+    // X11: nut-js.
     await mouse.setPosition(new Point(x, y));
     this.lastCursor = { x, y };
     await this.delay(30);
@@ -1070,6 +1098,7 @@ export class LinuxAdapter implements PlatformAdapter {
       await this.wayland.mouseDown(button ?? 'left');
       return;
     }
+    this.requireWaylandInput('mouse');
     await mouse.pressButton(this.toNutButton(button));
   }
 
@@ -1078,6 +1107,7 @@ export class LinuxAdapter implements PlatformAdapter {
       await this.wayland.mouseUp(button ?? 'left');
       return;
     }
+    this.requireWaylandInput('mouse');
     await mouse.releaseButton(this.toNutButton(button));
   }
 
@@ -1094,6 +1124,7 @@ export class LinuxAdapter implements PlatformAdapter {
       await this.wayland.typeText(text);
       return;
     }
+    this.requireWaylandInput('keyboard');
     if (await this.xdotoolType(text)) return;
     await keyboard.type(text);
   }
@@ -1118,12 +1149,24 @@ export class LinuxAdapter implements PlatformAdapter {
     });
   }
 
+  /**
+   * On a Wayland session with no input tool for it (ydotool for the mouse, ydotool or wtype for keys) nut-js reaches no
+   * window: its events are dropped by the compositor and the call would say it was done. Said instead, before anything is sent.
+   */
+  private requireWaylandInput(kind: 'mouse' | 'keyboard'): void {
+    if (this.environment !== 'wayland') return;
+    throw new Error(kind === 'mouse'
+      ? 'No input backend on this Wayland session: clicking needs ydotool with ydotoold running. Nothing was sent.'
+      : 'No input backend on this Wayland session: typing and key presses need ydotool (with ydotoold running) or wtype. Nothing was sent.');
+  }
+
   async keyPress(combo: PortableKeyCombo): Promise<void> {
     if (!combo) return;
     if (this.wayland.canKeyboard()) {
       await this.wayland.keyPress(combo);
       return;
     }
+    this.requireWaylandInput('keyboard');
 
     // Literal "+" — can't split on it.
     if (combo === '+') {
@@ -1131,7 +1174,7 @@ export class LinuxAdapter implements PlatformAdapter {
       return;
     }
 
-    const parts = combo.split('+').map(s => s.trim()).filter(Boolean);
+    const parts = splitCombo(combo);
     const keyName = parts[parts.length - 1];
     const modNames = parts.slice(0, -1);
 
@@ -1140,7 +1183,9 @@ export class LinuxAdapter implements PlatformAdapter {
       if (k === null) throw new Error(`Unknown key: "${m}"`);
       return k;
     });
-    const mainKey = this.resolveKey(keyName);
+    let mainKey = this.resolveKey(keyName);
+    // The plus key in a chord ("ctrl++"): Shift and the = key, as on a US layout.
+    if (mainKey === null && keyName === '+' && modKeys.length > 0) { modKeys.push(Key.LeftShift); mainKey = Key.Equal; }
 
     if (mainKey === null) {
       // A single printable character with no Key entry ("*", "!") is typed
@@ -1154,16 +1199,12 @@ export class LinuxAdapter implements PlatformAdapter {
       throw new Error(`Unknown key: "${keyName}"`);
     }
 
+    // A failed press is an error the caller sees, and the keys are released either way: a press that failed part-way
+    // must not leave Ctrl held.
     try {
-      if (modKeys.length > 0) {
-        await keyboard.pressKey(...modKeys, mainKey);
-        await keyboard.releaseKey(...modKeys, mainKey);
-      } else {
-        await keyboard.pressKey(mainKey);
-        await keyboard.releaseKey(mainKey);
-      }
-    } catch {
-      /* non-fatal — caller likely has a retry or fallback */
+      await keyboard.pressKey(...modKeys, mainKey);
+    } finally {
+      await keyboard.releaseKey(...modKeys, mainKey);
     }
   }
 
@@ -1172,20 +1213,21 @@ export class LinuxAdapter implements PlatformAdapter {
       await this.wayland.keyDown(key);
       return;
     }
+    this.requireWaylandInput('keyboard');
     const lower = key.trim().toLowerCase();
     const modKey = this.resolveModifier(lower);
     if (modKey !== null) {
-      await keyboard.pressKey(modKey).catch(() => {});
+      await keyboard.pressKey(modKey);
       return;
     }
     const k = this.resolveKey(lower.length === 1 ? lower : lower);
     if (k !== null) {
-      await keyboard.pressKey(k).catch(() => {});
+      await keyboard.pressKey(k);
       return;
     }
     // Printable char without nut-js Key mapping — type it (no hold semantics).
     if (key.length === 1) {
-      await this.typeText(key).catch(() => {});
+      await this.typeText(key);
       return;
     }
     throw new Error(`Unknown key: "${key}"`);   // a chord or an unknown name: nothing was held
@@ -1196,15 +1238,16 @@ export class LinuxAdapter implements PlatformAdapter {
       await this.wayland.keyUp(key);
       return;
     }
+    this.requireWaylandInput('keyboard');
     const lower = key.trim().toLowerCase();
     const modKey = this.resolveModifier(lower);
     if (modKey !== null) {
-      await keyboard.releaseKey(modKey).catch(() => {});
+      await keyboard.releaseKey(modKey);
       return;
     }
     const k = this.resolveKey(lower.length === 1 ? lower : lower);
     if (k !== null) {
-      await keyboard.releaseKey(k).catch(() => {});
+      await keyboard.releaseKey(k);
       return;
     }
     // A single printable char with no key mapping: no-op — nothing was held. Anything else (a chord, an unknown name)

@@ -1112,12 +1112,8 @@ function Cmd-FocusWindow {
                 if ($tl -and (ConvertTo-TitleKey $w.Current.Name).Contains($tl)) { $target = $w; break }
             } catch {}
         }
-        # Fall back to pid-only if no title match (caller may have passed a stale title)
-        if ($null -eq $target) {
-            foreach ($w in $allWins) {
-                try { if ($w.Current.ProcessId -eq $wpid) { $target = $w; break } } catch {}
-            }
-        }
+        # No fallback to pid-only: a title that matched nothing is "not found", never another window of the same process
+        # (it would be focused and reported as the match).
     } elseif ($wpid -gt 0) {
         foreach ($w in $allWins) {
             try { if ($w.Current.ProcessId -eq $wpid) { $target = $w; break } } catch {}

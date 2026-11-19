@@ -40,7 +40,7 @@
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { modifierOf, type Modifier } from './keys';
+import { modifierOf, splitCombo, type Modifier } from './keys';
 import { sleep } from '../sleep';
 
 const execFileAsync = promisify(execFile);
@@ -262,7 +262,7 @@ export class WaylandBackend {
    * native combo syntax (e.g. `wtype -M ctrl -k s`).
    */
   async keyPress(combo: string): Promise<void> {
-    if (this.kind === 'none') return;
+    if (this.kind === 'none') throw new Error('No input backend on this Wayland session: key presses need ydotool or wtype. Nothing was sent.');
 
     // Special case: literal "+"
     if (combo === '+') {
@@ -274,7 +274,7 @@ export class WaylandBackend {
       return;
     }
 
-    const parts = combo.split('+').map(s => s.trim()).filter(Boolean);
+    const parts = splitCombo(combo);
     if (parts.length === 0) return;
 
     if (this.kind === 'wtype-keyboard-only') {
@@ -293,7 +293,7 @@ export class WaylandBackend {
         // this chord, or by an earlier key_down) "ll" is Super+L twice, past the hard key list, which knows no key "ll".
         throw new Error(`Unknown key: "${key}"`);
       }
-      await execFileAsync('wtype', args, { timeout: TIMEOUT_MS }).catch(() => {});
+      await execFileAsync('wtype', args, { timeout: TIMEOUT_MS });
       return;
     }
 
@@ -337,10 +337,13 @@ export class WaylandBackend {
         await execFileAsync('ydotool', ['type', '--', mainName], { timeout: TIMEOUT_MS });
       }
     } finally {
+      // Every modifier gets its release even if one fails; a failed release is said, not swallowed (a key may be held).
+      let stuck: unknown;
       for (let i = modCodes.length - 1; i >= 0; i--) {
         await execFileAsync('ydotool', ['key', `${modCodes[i]}:0`], { timeout: TIMEOUT_MS })
-          .catch(() => {});
+          .catch(err => { stuck ??= err; });
       }
+      if (stuck) throw new Error(`A modifier key may still be held: releasing it failed (${stuck instanceof Error ? stuck.message : String(stuck)})`);
     }
   }
 
@@ -371,7 +374,8 @@ export class WaylandBackend {
   }
 
   async typeText(text: string): Promise<void> {
-    if (this.kind === 'none' || !text) return;
+    if (!text) return;
+    if (this.kind === 'none') throw new Error('No input backend on this Wayland session: typing needs ydotool or wtype. Nothing was sent.');
     if (this.kind === 'ydotool') {
       // Small delay so fast apps don't drop chars. 0.1.x (boost options) rejects the unknown --key-hold; 1.x knows it
       // (1.0.4) or skips it (older 1.x getopt, which in --file mode ignores the stray value).

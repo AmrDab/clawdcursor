@@ -134,6 +134,26 @@ export function normalizeKey(key: string, platform: NodeJS.Platform = process.pl
 const OS_DEPENDENT = new Set(['mod', 'cmd', 'command', 'meta']);
 const MODIFIER_KEY: Record<Modifier, string> = { ctrl: 'Control', shift: 'Shift', alt: 'Alt', super: 'Super' };
 
+/**
+ * The keys of one combo: "ctrl+s" is ctrl and s. A trailing "+" is the plus key ("ctrl++" is ctrl and +), not a separator
+ * with nothing after it, which would drop the key and tap Ctrl alone.
+ */
+export function splitCombo(combo: string): string[] {
+  const c = combo.trim();
+  if (c === '+') return ['+'];
+  const plus = c.length > 1 && c.endsWith('+');
+  const parts = (plus ? c.slice(0, -1) : c).split('+').map(s => s.trim()).filter(Boolean);
+  return plus ? [...parts, '+'] : parts;
+}
+
+/**
+ * The combos a key input names, in order: whitespace separates a sequence ("Down Down End"), but spaces around a "+" are
+ * part of the chord ("ctrl + s" is ctrl+s, as hard-keys.ts reads it).
+ */
+export function comboSequence(input: string): string[] {
+  return input.trim().replace(/\s*\+\s*/g, '+').split(/\s+/).filter(Boolean);
+}
+
 /** A modifier key, as an executor presses it. `super` is Cmd on macOS and the Super / Windows key elsewhere. */
 export type Modifier = 'ctrl' | 'shift' | 'alt' | 'super';
 

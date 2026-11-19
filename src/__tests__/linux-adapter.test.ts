@@ -964,3 +964,156 @@ describe('`xdg-open <target>` (open_file / open_url / open_uri) is the desktop\'
     await expect(new LinuxAdapter().launchApp('xdg-open', { url: TARGET })).rejects.toThrow(/xdg-open could not be started/);
   });
 });
+
+// ─── 2.3: a failure is reported as a failure (audit 2026-11-19, items 19, 20, 25, 26) ───────────────────────────
+describe('19 — a timed-out AT-SPI read or invoke is not "an empty window" or "not found"', () => {
+  const timedOut = () => Object.assign(new Error('Command failed'), { killed: true, signal: 'SIGTERM' });
+
+  it('getUiTree throws on a timeout, and on a crash; it is not []', async () => {
+    h.exec = defaultExec(() => { throw timedOut(); });
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    await expect(adapter.getUiTree(4242)).rejects.toThrow(/UI tree read timed out/);
+    h.exec = defaultExec(() => { throw new Error('python3 crashed'); });
+    await expect(adapter.getUiTree(4242)).rejects.toThrow(/UI tree read failed: python3 crashed/);
+  });
+
+  it('invokeElement throws on a timeout; any other failure is still { success: false }', async () => {
+    h.exec = defaultExec(() => { throw timedOut(); });
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    await expect(adapter.invokeElement({ name: 'OK', processId: 4242 })).rejects.toThrow(/invoke timed out/);
+    h.exec = defaultExec(() => { throw new Error('python3 crashed'); });
+    expect(await adapter.invokeElement({ name: 'OK', processId: 4242 })).toEqual({ success: false });
+  });
+});
+
+describe('26 — an automationId-only invoke is refused on Linux, not run as an unfiltered search', () => {
+  it('no bridge call is made', async () => {
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    const before = bridgeCalls().length;
+    const r = await adapter.invokeElement({ automationId: 'btnSave', processId: 4242 });
+    expect(r.success).toBe(false);
+    expect(r.data?.error).toMatch(/automationId cannot be looked up/);
+    expect(bridgeCalls().length).toBe(before);
+  });
+});
+
+describe('20 — close, minimize and focus act on one window, by its id', () => {
+  const wmctrl = () => h.calls.filter(c => c.cmd === 'wmctrl').map(c => c.args);
+  // close waits a second before it looks: that second is driven, not waited for.
+  async function close(adapter: LinuxAdapter, q: { processId?: number; title?: string }) {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    try {
+      const p = adapter.setWindowState('close', q);
+      await vi.advanceTimersByTimeAsync(1000);
+      return await p;
+    } finally { vi.useRealTimers(); }
+  }
+
+  it('close sends wmctrl -i -c <id>, never wmctrl -c <title>, and says the window is still open when it is', async () => {
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    expect(await close(adapter, { processId: 5555, title: 'Mousepad' })).toBe(true);
+    expect(wmctrl()).toContainEqual(['-i', '-c', '0x3c00004']);
+    expect(wmctrl().some(a => a[0] === '-c')).toBe(false);
+    expect(adapter.takeWindowNote()).toMatch(/^Sent close to "Untitled - Mousepad" \[.*\] pid:5555, but it is still open after 1 s/);
+  });
+
+  it('close says closed once the window has left the list', async () => {
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    let closed = false;
+    const base = defaultExec();
+    h.exec = (cmd, args) => {
+      if (cmd === 'wmctrl' && args[0] === '-i' && args[1] === '-c') closed = true;
+      if (cmd === 'wmctrl' && args[0] === '-l' && closed) return { stdout: WMCTRL.split('\n')[0] + '\n' };
+      return base(cmd, args);
+    };
+    expect(await close(adapter, { processId: 5555 })).toBe(true);
+    expect(adapter.takeWindowNote()).toMatch(/^Closed "Untitled - Mousepad"/);
+  });
+
+  it('every given field must match: a pid with a title that is not its window closes nothing', async () => {
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    expect(await adapter.setWindowState('close', { processId: 4242, title: 'Mousepad' })).toBe(false);
+    expect(wmctrl().some(a => a.includes('-c'))).toBe(false);
+    expect(adapter.takeWindowNote()).toBe('No open window matches processId 4242 and title "Mousepad".');
+  });
+
+  it('two matches are an error that lists them; nothing is closed or focused', async () => {
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    expect(await adapter.setWindowState('close', { title: 'u' })).toBe(false);   // "gnome-calculator" and "Untitled - Mousepad"
+    expect(adapter.takeWindowNote()).toMatch(/^2 windows match title "u", so nothing was done: .*gnome-calculator.*Untitled - Mousepad/);
+    expect(await adapter.focusWindow({ title: 'u' })).toBe(false);
+    expect(adapter.takeFocusFailure()).toMatch(/^2 windows match title "u"/);
+    expect(wmctrl().some(a => a.includes('-c') || a.includes('-a'))).toBe(false);
+  });
+
+  it('focus names the window it raised, by id', async () => {
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    expect(await adapter.focusWindow({ processId: 5555, title: 'Mousepad' })).toBe(true);
+    expect(wmctrl()).toContainEqual(['-i', '-a', '0x3c00004']);
+    expect(adapter.takeWindowNote()).toMatch(/^Focused window "Untitled - Mousepad"/);
+  });
+
+  it('focus with a pid and a title that match nothing does not fall back to wmctrl -a <title>', async () => {
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    expect(await adapter.focusWindow({ processId: 4242, title: 'Mousepad' })).toBe(false);
+    expect(wmctrl().some(a => a[0] === '-a')).toBe(false);
+  });
+});
+
+describe('25 — X11 key errors are not swallowed, and the keys are released whatever happens', () => {
+  it('a failed press throws, and Ctrl is released', async () => {
+    h.keyboard.pressKey = vi.fn(async () => { throw new Error('XTest refused'); });
+    const adapter = new LinuxAdapter();
+    await expect(adapter.keyPress('ctrl+s')).rejects.toThrow('XTest refused');
+    expect(h.keyboard.releaseKey).toHaveBeenCalledWith(Key.LeftControl, Key.S);
+  });
+
+  it('a failed key_down / key_up throws', async () => {
+    h.keyboard.pressKey = vi.fn(async () => { throw new Error('XTest refused'); });
+    h.keyboard.releaseKey = vi.fn(async () => { throw new Error('XTest refused'); });
+    const adapter = new LinuxAdapter();
+    await expect(adapter.keyDown('ctrl')).rejects.toThrow('XTest refused');
+    await expect(adapter.keyUp('ctrl')).rejects.toThrow('XTest refused');
+  });
+
+  it('"ctrl++" presses Ctrl, Shift and = (the plus key), not Ctrl alone', async () => {
+    const adapter = new LinuxAdapter();
+    await adapter.keyPress('ctrl++');
+    expect(h.keyboard.pressKey).toHaveBeenCalledWith(Key.LeftControl, Key.LeftShift, Key.Equal);
+  });
+});
+
+describe('25 — on Wayland with no input tool, clicking, typing and keys throw instead of sending nothing', () => {
+  async function noToolAdapter() {
+    process.env.XDG_SESSION_TYPE = 'wayland';
+    const base = defaultExec();
+    h.exec = (cmd, args) => {
+      if ((cmd === 'command' || cmd === 'which') && /^(ydotool|wtype)$/.test(args[args.length - 1])) throw new Error('not found');
+      return base(cmd, args);
+    };
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    return adapter;
+  }
+
+  it('mouseClick, typeText, keyPress, keyDown and keyUp refuse, and nut-js is never touched', async () => {
+    const adapter = await noToolAdapter();
+    await expect(adapter.mouseClick(5, 5)).rejects.toThrow(/No input backend/);
+    await expect(adapter.typeText('hi')).rejects.toThrow(/No input backend/);
+    await expect(adapter.keyPress('ctrl+a')).rejects.toThrow(/No input backend/);
+    await expect(adapter.keyDown('ctrl')).rejects.toThrow(/No input backend/);
+    await expect(adapter.keyUp('ctrl')).rejects.toThrow(/No input backend/);
+    expect(h.keyboard.type).not.toHaveBeenCalled();
+    expect(h.keyboard.pressKey).not.toHaveBeenCalled();
+    expect(h.calls.some(c => c.cmd === 'xdotool' && c.args[0] === 'type')).toBe(false);
+  });
+});
