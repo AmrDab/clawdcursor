@@ -2,62 +2,68 @@
  * The clipboard is put back only after the paste has landed. Ctrl/Cmd+V is only posted; a busy app reads the clipboard
  * later, and if it read the RESTORED one it typed the user's own clipboard where the text should go.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { waitForPaste } from '../tools/paste-guard';
 import { getSmartTools } from '../tools/smart';
 import type { ToolContext } from '../tools/types';
 
 describe('waitForPaste', () => {
+  // Fake timers: the waits are virtual, so a loaded test run cannot change the outcome.
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+  /** Advances the fake clock 5 ms at a time until the wait ends (leftover race timers must not count) and returns the fake ms it took. */
+  const timed = async (p: Promise<void>): Promise<number> => {
+    let done = false;
+    void p.then(() => { done = true; }, () => { done = true; });
+    const t0 = Date.now();
+    for (let i = 0; i < 1000 && !done; i++) await vi.advanceTimersByTimeAsync(5);
+    await p;
+    return Date.now() - t0;
+  };
+
   it('returns as soon as the focused field shows the text', async () => {
     let calls = 0;
     const read = vi.fn(async () => (++calls >= 3 ? 'before hello after' : 'before '));
-    const t0 = Date.now();
-    await waitForPaste(read, 'hello', { minMs: 10, stepMs: 10, maxMs: 2000 });
+    const took = await timed(waitForPaste(read, 'hello', { minMs: 10, stepMs: 10, maxMs: 2000 }));
     expect(read).toHaveBeenCalledTimes(3);
-    expect(Date.now() - t0).toBeLessThan(1000);
+    expect(took).toBeGreaterThanOrEqual(30);
+    expect(took).toBeLessThan(50);
   });
 
   it('a field that changes but never shows the text is waited on up to the limit, not forever', async () => {
     let n = 0;
-    const t0 = Date.now();
-    await waitForPaste(async () => `typing ${n++}`, 'hello', { minMs: 10, stepMs: 10, blindMs: 50, maxMs: 200 });
-    const took = Date.now() - t0;
-    expect(took).toBeGreaterThanOrEqual(190);
-    expect(took).toBeLessThan(5000);   // "not forever" — loose: timers stretch under a loaded test run
+    const took = await timed(waitForPaste(async () => `typing ${n++}`, 'hello', { minMs: 10, stepMs: 10, blindMs: 50, maxMs: 200 }));
+    expect(took).toBeGreaterThanOrEqual(200);
+    expect(took).toBeLessThan(220);
   });
 
-  // Flaky under a loaded test run: the first sleep outlasted the blind wait, and one read could not see the change.
+  // The first sleep outlasts the blind wait: one read could not see the change.
   it('a first sleep that outlasts the blind wait still reads twice before giving up on a changing field', async () => {
     let n = 0;
     const reads: number[] = [];
-    await waitForPaste(async () => { reads.push(Date.now()); return `typing ${n++}`; }, 'hello', { minMs: 120, stepMs: 10, blindMs: 50, maxMs: 300 });
+    await timed(waitForPaste(async () => { reads.push(Date.now()); return `typing ${n++}`; }, 'hello', { minMs: 120, stepMs: 10, blindMs: 50, maxMs: 300 }));
     expect(reads.length).toBeGreaterThanOrEqual(2);
   });
 
   it('a field whose value never changes (a code editor that does not report its text) gets only the blind wait', async () => {
-    const t0 = Date.now();
-    await waitForPaste(async () => '', 'hello', { minMs: 10, stepMs: 10, blindMs: 100, maxMs: 2000 });
-    const took = Date.now() - t0;
-    expect(took).toBeGreaterThanOrEqual(95);
-    expect(took).toBeLessThan(600);
+    const took = await timed(waitForPaste(async () => '', 'hello', { minMs: 10, stepMs: 10, blindMs: 100, maxMs: 2000 }));
+    expect(took).toBeGreaterThanOrEqual(100);
+    expect(took).toBeLessThan(120);
   });
 
   it('a read that hangs (a slow AT-SPI call) cannot push the wait past the limit', async () => {
-    const t0 = Date.now();
-    await waitForPaste(() => new Promise<string>(() => {}), 'hello', { minMs: 10, maxMs: 150 });
-    expect(Date.now() - t0).toBeLessThan(600);
+    const took = await timed(waitForPaste(() => new Promise<string>(() => {}), 'hello', { minMs: 10, maxMs: 150 }));
+    expect(took).toBeLessThanOrEqual(210);   // the limit plus one step
   });
 
   it('a field that exposes no value (a password box) gets the fixed blind wait', async () => {
-    const t0 = Date.now();
-    await waitForPaste(async () => undefined, 'hunter2', { minMs: 10, stepMs: 10, blindMs: 150, maxMs: 2000 });
-    const took = Date.now() - t0;
-    expect(took).toBeGreaterThanOrEqual(140);
-    expect(took).toBeLessThan(1000);
+    const took = await timed(waitForPaste(async () => undefined, 'hunter2', { minMs: 10, stepMs: 10, blindMs: 150, maxMs: 2000 }));
+    expect(took).toBeGreaterThanOrEqual(150);
+    expect(took).toBeLessThan(170);
   });
 
   it('a read that throws counts as no value, and never escapes', async () => {
-    await expect(waitForPaste(async () => { throw new Error('bridge down'); }, 'x', { minMs: 1, stepMs: 5, blindMs: 30 })).resolves.toBeUndefined();
+    await expect(timed(waitForPaste(async () => { throw new Error('bridge down'); }, 'x', { minMs: 1, stepMs: 5, blindMs: 30 }))).resolves.toBeGreaterThanOrEqual(30);
   });
 });
 

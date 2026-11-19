@@ -137,7 +137,7 @@ describe('what is sent', () => {
   it('the 200-event cap is per UTC day: a long-running daemon reports again the next day', async () => {
     const bodies = enableForTest();
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date('2030-01-01T12:00:00Z'));
       for (let i = 0; i < 201; i++) logger.info('tool.done', { tool: 'x', ms: 1, outcome: 'error' });
