@@ -50,6 +50,7 @@ jobs:
           persist-credentials: true
 
       - name: Fetch guides from clawdcursor-guides
+        id: fetch
         run: |
           set -euo pipefail
           mkdir -p docs/app-guides
@@ -72,18 +73,25 @@ jobs:
           # (guide deletions upstream should propagate).
           for f in docs/app-guides/*.json; do
             name=$(basename "$f" .json)
-            if [ "$name" = "index" ]; then continue; fi
+            if [ "$name" = "index" ] || [ "$name" = "pack" ]; then continue; fi
             case " ${APPS} " in
               *" ${name} "*) ;;
               *) echo "  removing stale ${name}.json"; rm -f "$f" ;;
             esac
           done
 
+          # 4) The pack is rebuilt only when a guide or the index changed: most hourly runs change nothing.
+          if [ -n "$(git status --porcelain -- docs/app-guides/)" ] || [ ! -f docs/app-guides/pack.json ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-node@v4
+        if: steps.fetch.outputs.changed == 'true'
         with:
           node-version: 20
 
       - name: Build pack.json
+        if: steps.fetch.outputs.changed == 'true'
         run: |
           set -euo pipefail
           npm ci --ignore-scripts --no-audit --no-fund
