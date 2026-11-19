@@ -486,8 +486,9 @@ export class LinuxAdapter implements PlatformAdapter {
       const windows = await this.listWindows();
       // Every given field must match one window (AND); several matches are listed, not guessed between.
       const matches = matchWindows(windows, query);
-      // A pid alone means "that process" (the callers that re-focus an app they just used): its first window, as before.
-      if (matches.length > 1 && (query.title || query.processName)) { this.focusFailure = selectionProblem(query, matches); return false; }
+      // A title that several windows hold is a guess, so it is an error that lists them. An app named alone (a pid or a
+      // process name) means "bring that app up": its first window, named in the reply.
+      if (matches.length > 1 && query.title) { this.focusFailure = selectionProblem(query, matches); return false; }
       const match = matches[0];
 
       if (match?.handle !== undefined) {

@@ -109,10 +109,16 @@ describe('WindowsAdapter — close, minimize and focus act on one named window',
     expect(adapter.takeWindowNote()).toBe('Minimized window "Inbox - Google Chrome" [chrome] pid:10.');
   });
 
-  it('focus with two matches is an error that lists them, and the bridge is not asked', async () => {
-    expect(await adapter.focusWindow({ processName: 'chrome' })).toBe(false);
-    expect(adapter.takeFocusFailure()).toMatch(/windows match processName "chrome"/);
+  it('focus with a title two windows hold is an error that lists them, and the bridge is not asked', async () => {
+    expect(await adapter.focusWindow({ processName: 'chrome', title: 'e' })).toBe(false);
+    expect(adapter.takeFocusFailure()).toMatch(/windows match processName "chrome" and title "e"/);
     expect(run.mock.calls.filter(c => (c[0] as { cmd: string }).cmd === 'focus-window')).toHaveLength(0);
+  });
+
+  it('focus by an app name alone brings up its first window and names it (not an error)', async () => {
+    run.mockResolvedValue({ success: true, foreground: true, processId: 10, title: 'Inbox - Google Chrome' });
+    expect(await adapter.focusWindow({ processName: 'chrome' })).toBe(true);
+    expect(adapter.takeWindowNote()).toContain('Inbox - Google Chrome');
   });
 
   it('focus by a pid alone still goes to the process (callers that re-focus an app they used): no list error', async () => {

@@ -437,8 +437,9 @@ export class WindowsAdapter implements PlatformAdapter {
     if (!byHandle && (processId !== undefined || title || query.processName)) {
       const sel = { processName: query.processName, processId, title };
       const matches = matchWindows(await this.listWindows(), sel);
-      // A pid alone means "that process" (the callers that re-focus an app they just used): its first window, as before.
-      if (matches.length > 1 && (title || query.processName)) { this.focusFailure = selectionProblem(sel, matches); return false; }
+      // A title that several windows hold is a guess, so it is an error that lists them. An app named alone (a pid or a
+      // process name) means "bring that app up": its first window, as before, named in the reply. Close stays strict.
+      if (matches.length > 1 && title) { this.focusFailure = selectionProblem(sel, matches); return false; }
       if (matches.length === 1 && typeof matches[0].handle === 'number' && matches[0].handle > 0) {
         const ok = await this.focusWindow({ handle: matches[0].handle });
         if (ok) this.windowNote = `Focused window ${describeWindow(matches[0])}.`;
