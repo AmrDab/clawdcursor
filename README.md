@@ -35,6 +35,8 @@ Clawd Cursor is a free, open-source (MIT) MCP server. Your AI (Claude, Codex, Cu
 
 It sees the parts of an app by name, through the same data screen readers use: "Email field", "Confirm button". Your AI acts on those parts by name: type into Email, press Confirm, choose High. After each change Clawd Cursor reads the result back and reports `confirmed`, `unverified` or `failed`. Text is read exactly.
 
+**Uninterrupted workflow.** When your AI needs you for a step only you can take, such as a sign-in, a 2FA code or a choice, it tells you on screen: the screen glows blue and a card says what it needs. You do that one step, and your AI carries on with the task where it left off, with nothing to redo. If you take the mouse or keyboard mid-task, it waits and then picks up again ([details](#what-protects-you)).
+
 Clawd Cursor has no model and no API key of its own: your AI makes every decision. Use it for the steps that only exist in a GUI. If an API, a command-line tool or a file edit does the job, use that instead.
 
 ---
