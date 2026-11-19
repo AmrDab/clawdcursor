@@ -44,6 +44,9 @@ describe('outcomeOf', () => {
     expect(outcomeOf(false, 'Session report — blind reads that came back empty / timed out: 1')).toBe('ok');
     expect(outcomeOf(false, 'Invoked "Save" via a11y.')).toBe('ok');
     expect(outcomeOf(true, 'boom')).toBe('error');
+    // a waiting reply is a guard working, not an error
+    expect(outcomeOf(true, 'the user is using the computer — clawdcursor is waiting for them, and nothing was sent.')).toBe('refused');
+    expect(outcomeOf(true, 'paused by the user — they have the desktop, and nothing was sent.')).toBe('refused');
   });
 });
 
@@ -168,7 +171,7 @@ describe('session report', () => {
     log.record('computer', 'click', false, 5, 'click failed: no window', undefined, { outcome: 'error' });
     const r = buildSessionReport();
     expect(r.session?.errors).toEqual(['UNKNOWN']);  // a code, never the error text
-    expect(r.session?.refusals).toEqual(['PAUSED']);
+    expect(r.session?.refusals).toEqual(['PAUSE_PENDING']);
     expect(reportMarkdown(r)).toMatch(/errors: 1; refused by a guard: 1/);
   });
 });

@@ -10,7 +10,7 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   __setControlDirForTests, __setForegroundReaderForTests, __setIdleReaderForTests, turnTiming, holdControl, releaseHold,
-  isHeld, setOnHold, stopControl, isGuardRefusal, STOPPED_TEXT, withTurnBudget, type HoldEvent,
+  isHeld, setOnHold, setPillAvailable, giveControlBack, stopControl, isGuardRefusal, STOPPED_TEXT, withTurnBudget, type HoldEvent,
 } from '../core/control';
 import { guardInputMethods, ownInputAt, _resetHeldKeys } from '../platform/pointer-guard';
 import { withForegroundBurst } from '../platform/foreground-burst';
@@ -65,6 +65,7 @@ beforeEach(async () => {
 afterEach(() => {
   _resetHeldKeys();
   setOnHold(null);
+  setPillAvailable(null);
   __setIdleReaderForTests(null);
   Object.assign(turnTiming, DEFAULTS);
   __setControlDirForTests(null);
@@ -202,6 +203,77 @@ describe('real input waits for the user', () => {
   });
 });
 
+describe('a takeover says what it is, and holds only where Resume can be clicked', () => {
+  it('a takeover that outlasts the call is the user at work, not their Pause: its own words and code', async () => {
+    const d = fakeDesktop();
+    typing = true;
+    turnTiming.waitMs = 200;
+    const err = await refused(d.mouseClick(1, 1));
+    turnTiming.waitMs = 2000;
+    expect(err.message).toMatch(/^the user is using the computer — clawdcursor is waiting for them, and nothing was sent/);
+    expect(err.message).toMatch(/call the same step again/);
+    expect(err.message).toMatch(/click Resume on the pill/);
+    expect(err.message).not.toMatch(/paused by the user/);
+    expect(isGuardRefusal(err)).toBe(true);
+    expect(classifyResult(`Error: ${err.message}`, true, true)).toMatchObject({ outcome: 'refused', code: 'USER_ACTIVE' });
+    expect(d.sent).toEqual([]);
+  });
+
+  it('the Pause button keeps its words and its own code; a pause card has a third', () => {
+    expect(classifyResult('paused by the user — they have the desktop, and nothing was sent.', true, true)?.code).toBe('PAUSED');
+    expect(classifyResult('paused — a pause is waiting for the user on screen, and nothing runs', true, true)?.code).toBe('PAUSE_PENDING');
+  });
+
+  it('with no pill: nothing is written, the call waits for idle within its budget and returns the waiting reply', async () => {
+    setPillAvailable(() => false);
+    const d = fakeDesktop();
+    typing = true;
+    turnTiming.waitMs = 200;
+    const err = await refused(d.mouseClick(1, 1));
+    turnTiming.waitMs = 2000;
+    expect(err.message).toMatch(/^the user is using the computer — clawdcursor is waiting for them, and nothing was sent/);
+    expect(err.message).not.toMatch(/Resume/);   // no pill, no button to name
+    expect(classifyResult(`Error: ${err.message}`, true, true)?.code).toBe('USER_ACTIVE');
+    expect(isHeld()).toBe(false);
+    expect(fs.existsSync(path.join(dir, 'held.json'))).toBe(false);
+    expect(events).not.toContain('held');
+    expect(d.sent).toEqual([]);
+  });
+
+  it('with no pill, a user who goes idle lets the call go on by itself', async () => {
+    setPillAvailable(() => false);
+    const d = fakeDesktop();
+    typing = true;
+    const click = d.mouseClick(1, 1);
+    await sleep(turnTiming.takeoverMs + 40);
+    expect(d.sent).toEqual([]);
+    typing = false;
+    await click;
+    expect(d.sent).toEqual(['click 1,1']);
+    expect(isHeld()).toBe(false);
+  });
+
+  it('a hold whose writing process is gone is stale: not held, and the file is removed', () => {
+    const file = path.join(dir, 'held.json');
+    fs.writeFileSync(file, JSON.stringify({ by: 'takeover', pid: 2 ** 30, at: Date.now() }));   // no such process
+    expect(isHeld()).toBe(false);
+    expect(fs.existsSync(file)).toBe(false);
+  });
+
+  it('a hold whose writer is alive still holds', () => {
+    fs.writeFileSync(path.join(dir, 'held.json'), JSON.stringify({ by: 'pill', pid: process.pid, at: Date.now() }));
+    expect(isHeld()).toBe(true);
+  });
+
+  it('resume clears a hold with no Stop set', () => {
+    holdControl('pill');
+    expect(isHeld()).toBe(true);
+    expect(giveControlBack('cli')).toBe(true);
+    expect(isHeld()).toBe(false);
+    expect(giveControlBack('cli')).toBe(false);   // nothing left to give back
+  });
+});
+
 describe('the pill\'s Pause', () => {
   it('holds background acts too (by name, a page script), not reads; Resume on the pill lets them go', async () => {
     const d = fakeDesktop();
@@ -286,7 +358,7 @@ describe('the pill\'s Pause', () => {
   it('a Pause from another clawdcursor process holds this one too, and this pill offers Resume; its Resume lets it go', async () => {
     const d = fakeDesktop();
     const file = path.join(dir, 'held.json');
-    fs.writeFileSync(file, JSON.stringify({ by: 'pill', pid: 1, at: Date.now() }));   // as another process's Pause writes it
+    fs.writeFileSync(file, JSON.stringify({ by: 'pill', pid: process.pid, at: Date.now() }));   // as another process's Pause writes it
     expect(isHeld()).toBe(true);
     const click = d.mouseClick(1, 1);
     await sleep(40);

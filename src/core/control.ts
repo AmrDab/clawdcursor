@@ -75,6 +75,13 @@ export function resumeControl(by: string): void {
   releaseHold(by);
 }
 
+/** `clawdcursor resume`: ends a stop and a hold, whichever is set. False when there was neither. */
+export function giveControlBack(by: string): boolean {
+  if (!isStopped() && !isHeld()) return false;
+  resumeControl(by);
+  return true;
+}
+
 // The tool's own name, not one surface's call syntax: tool text is renamed per surface (compact.ts toCompactNames), and a
 // literal `system {"action":"pause_for_user"}` came out mangled inside a batch step on the real Mac. The exact call is in the
 // result line's `next` (result-codes.ts STOPPED).
@@ -127,6 +134,10 @@ let ownBase: Promise<number | null> = Promise.resolve(null);
  */
 const holdFile = () => (dir ? path.join(dir, 'held.json') : null);
 let heldHere: { by: string; since: number } | null = null;
+/** Can the user's pill show here (banner.ts sets it)? Without it nobody can click Resume, so a takeover never holds. */
+let pillCanShow: () => boolean = () => true;
+export function setPillAvailable(f: (() => boolean) | null): void { pillCanShow = f ?? (() => true); }
+const aliveProcess = (pid: number) => { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; } };
 /** When the user last clicked Resume on the pill, or this process saw a hold end. */
 let resumedAt = 0;
 /** This process's pill was told 'held' (it offers Resume): it is told 'resumed' when the hold ends, wherever it ended. */
@@ -142,14 +153,20 @@ const tell = (e: HoldEvent) => {
   try { onHold?.(e); } catch { /* cosmetic */ }
 };
 
-/** The hold now, read fresh: another process's Pause or Resume must reach this one at once. */
+/**
+ * The hold now, read fresh: another process's Pause or Resume must reach this one at once. A hold whose writer process is
+ * gone has no pill left to Resume it: it is removed here, so a new session never inherits it.
+ */
 function holdInfo(): { by: string; since: number } | null {
   if (heldHere) return heldHere;
   const file = holdFile();
   if (!file) return null;
   let raw: string;
   try { raw = fs.readFileSync(file, 'utf8'); } catch { return null; }   // no file: not held
-  try { const h = JSON.parse(raw); return { by: String(h?.by ?? ''), since: Number(h?.at) || Date.now() }; } catch { return { by: '', since: Date.now() }; }
+  let h: { by?: unknown; at?: unknown; pid?: unknown };
+  try { h = JSON.parse(raw); } catch { return { by: '', since: Date.now() }; }
+  if (typeof h?.pid === 'number' && !aliveProcess(h.pid)) { try { fs.rmSync(file, { force: true }); } catch { /* gone */ } return null; }
+  return { by: String(h?.by ?? ''), since: Number(h?.at) || Date.now() };
 }
 
 export function isHeld(): boolean { return holdInfo() !== null; }
@@ -187,10 +204,18 @@ export function releaseHold(by: string): void {
 }
 
 // Not a guard refusal's "Do not retry": the agent must call the same step again, as with pause_for_user's waiting reply.
-const heldText = (since: number) =>
-  'paused by the user — they have the desktop, and nothing was sent. Waiting is normal: call the same step again to keep ' +
-  'waiting; it runs the moment they click Resume on the pill. Do not end the task, give up or act some other way meanwhile ' +
-  `(waitedSec: ${Math.round((Date.now() - since) / 1000)}).`;
+// The Pause button says "paused by the user"; a takeover is the user at work, not a Pause they pressed, and says so.
+const waitedFor = (since: number) => `(waitedSec: ${Math.round((Date.now() - since) / 1000)}).`;
+const NO_GIVING_UP = 'Do not end the task, give up or act some other way meanwhile ';
+const heldText = (since: number, by: string) => by === 'takeover'
+  ? 'the user is using the computer — clawdcursor is waiting for them, and nothing was sent. Waiting is normal: call the same step again ' +
+    `to keep waiting; it runs once they click Resume on the pill. ${NO_GIVING_UP}${waitedFor(since)}`
+  : 'paused by the user — they have the desktop, and nothing was sent. Waiting is normal: call the same step again to keep ' +
+    `waiting; it runs the moment they click Resume on the pill. ${NO_GIVING_UP}${waitedFor(since)}`;
+// No pill to Resume from: nothing is held, the call only waits for the user to be idle.
+const activeText = (since: number) =>
+  'the user is using the computer — clawdcursor is waiting for them, and nothing was sent. Waiting is normal: call the same step again ' +
+  `to keep waiting; it runs once they are idle. ${NO_GIVING_UP}${waitedFor(since)}`;
 
 type Idle = { tick: number; idleMs: number } | null;
 // Off under the test runner unless a test sets a reader. Null: this OS cannot tell (Linux), and then nothing waits.
@@ -238,7 +263,7 @@ async function waitWhileHeld(): Promise<void> {
     if (!pillHeld) tell('held');   // held from another process, or from before this one started: this pill offers Resume too
     waited = true;
     stopCheck();
-    if (Date.now() >= until) throw new Error(heldText(h.since));
+    if (Date.now() >= until) throw new Error(heldText(h.since, h.by));
     await sleep(turnTiming.pollMs);
   }
   if (waited) {
@@ -249,6 +274,18 @@ async function waitWhileHeld(): Promise<void> {
   stopCheck();
 }
 
+/** With no pill: wait, up to the call's budget, until the user is idle (true) or another process holds (false). Throws the waiting reply, or STOPPED. */
+async function waitUntilIdle(since: number): Promise<boolean> {
+  const until = byDeadline(Date.now() + turnTiming.waitMs);
+  for (;;) {
+    stopCheck();
+    if (isHeld()) return false;
+    if (await userIsIdle()) return true;
+    if (Date.now() >= until) throw new Error(activeText(since));
+    await sleep(turnTiming.pollMs);
+  }
+}
+
 /**
  * The user took over: busy when the agent wanted to start, or their input in the middle of a burst (whose window and
  * cursor are already theirs again). Nothing is sent. After takeoverMs: idle → resolves, the step goes on; still working
@@ -256,6 +293,7 @@ async function waitWhileHeld(): Promise<void> {
  */
 export async function takeover(): Promise<void> {
   if (!isHeld()) {
+    const started = Date.now();
     tell('takeover');
     try {
       movedAt = 0;   // a window that comes up meanwhile is the user's doing, not the agent's
@@ -265,7 +303,8 @@ export async function takeover(): Promise<void> {
       }
       stopCheck();
       if (!isHeld() && await userIsIdle()) return;
-      holdControl('takeover');
+      if (pillCanShow()) holdControl('takeover');
+      else if (await waitUntilIdle(started)) return;   // no Resume to click, so nothing is held: only their being idle lets it go
     } finally {
       // Not held (idle again, or stopped): the agent's turn again as far as the pill goes, never "your turn" left up.
       if (!isHeld()) tell('resumed');
@@ -493,7 +532,7 @@ const AI_HOST_REFUSAL = (n: string, kind: 'list' | 'ancestor') =>
  */
 export function isGuardRefusal(err: unknown): boolean {
   const m = err instanceof Error ? err.message : String(err);
-  return m.startsWith('stopped by the user') || m.startsWith('paused by the user') || m.startsWith('foreground changed: ') || isFenceRefusal(err)
+  return m.startsWith('stopped by the user') || m.startsWith('paused by the user') || m.startsWith('the user is using the computer') || m.startsWith('foreground changed: ') || isFenceRefusal(err)
     || / is clawdcursor's own on-screen control — /.test(m)
     || m.startsWith('held: confirm mode') || m.startsWith('not confirmed: confirm mode')
     || /^the window in front is .+ — nothing was sent. Focus your target window first/.test(m);

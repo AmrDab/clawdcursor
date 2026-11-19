@@ -82,6 +82,11 @@ export function outcomeOf(isError: boolean, text: string): Outcome {
   // report) can contain these words as content.
   const head = text.slice(0, 300);
   if (isError && fenceActive() && head.startsWith('FENCED: ')) return 'refused';   // the test fence (core/fence.ts) stopped it before it ran
+  // A waiting reply (the user's Pause, the user at work, a pause card up) is the guard working, not an error.
+  if (isError) {
+    const code = classifyResult(text, true, false)?.code;
+    if (code === 'PAUSED' || code === 'USER_ACTIVE' || code === 'PAUSE_PENDING') return 'refused';
+  }
   if (/PSRunner timeout|timed out after|ETIMEDOUT|walk timed out/i.test(head)) return 'timeout';
   if (/UI TREE \(PARTIAL|"truncated":\s*true/i.test(head)) return 'partial';
   if (head.startsWith('(no elements found)') || head.startsWith('(empty a11y tree')

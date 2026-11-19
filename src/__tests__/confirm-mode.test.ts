@@ -257,7 +257,7 @@ describe('confirm mode (#373)', () => {
     await vi.advanceTimersByTimeAsync(46_000);
     const err = await first;
     expect(err?.message).toMatch(/^held: confirm mode is on and a pause is waiting for the user on screen/);
-    expect(classifyResult(err!.message, true, true)).toMatchObject({ code: 'PAUSED', outcome: 'refused' });
+    expect(classifyResult(err!.message, true, true)).toMatchObject({ code: 'PAUSE_PENDING', outcome: 'refused' });
     expect(pauseGate.current()?.message).toMatch(/close the window in "Untitled - Notepad"/);
     // The agent waits on the same card with pause_for_user and the message it was given.
     const message = /\nMessage: (.+)$/.exec(err!.message)![1];

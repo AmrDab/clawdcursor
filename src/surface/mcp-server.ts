@@ -19,6 +19,7 @@ import { controlBanner } from '../core/banner';
 import { osKeysGuide } from '../platform/keys';
 import { enableHostAncestry } from '../core/ai-hosts';
 import { actedIn, actRecord, withTurnBudget } from '../core/control';
+import { asPauseOwner, pauseGate } from '../core/pause-gate';
 import { logger } from '../core/observability/logger';
 import { COMPOUND_ROUTE_INDEX, compactCall } from '../tools/compact-routes';
 
@@ -128,6 +129,8 @@ export function batchActs(steps: unknown): boolean {
  * The caller is responsible for connecting a transport via `server.connect(...)`.
  * Use `startMcpStdio` for editor integrations and `startMcpHttp` for the daemon.
  */
+let sessionSeq = 0;
+
 export async function createMcpServer(options: CreateMcpServerOptions): Promise<McpServerHandle> {
   const { compact, ctx } = options;
   // Dynamic import: the SDK is ESM and our build is CJS. The specifier cast is
@@ -186,6 +189,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'prefer it over pixel coordinates. Pass `expect` on consequential actions so a failed one ' +
       'reports a DEVIATION instead of a hollow success. Each action result and error ends with one line: ' +
       '[confirmed | unverified | refused · CODE · hint · next | failed · CODE · hint · next] — follow its next call instead of guessing. ' +
+      'A reply that says the user is using the computer, or paused clawdcursor (PAUSED, USER_ACTIVE), means nothing was sent and the user has the desktop: call the same step again until it runs, and do not give up or act another way meanwhile. A STOPPED reply is different: do not retry it. ' +
       'A native API, CLI or direct file edit that does the same job is cheaper: use it when it exists, and never decline a task ' +
       'because none does. Full usage guide: the `clawdcursor` skill registered in your agent, or ' +
       'https://clawdcursor.com/llms.txt.';
@@ -264,6 +268,14 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
   let sessionStartedAt: number | undefined;
   const lowLevel = (server as unknown as { server?: { oninitialized?: () => void } }).server;
   if (lowLevel) lowLevel.oninitialized = () => { sessionStartedAt = Date.now(); setHost(clientInfo()?.name); };
+  // This session's pause card comes down when the session ends (stdio closing, an HTTP session closed): nobody is left to read
+  // the answer, and the card would keep every other agent out. A process exit takes its own overlay down (banner.ts).
+  const sessionId = `mcp-${process.pid}-${++sessionSeq}`;
+  const lowClose = server as unknown as { server?: { onclose?: () => void } };
+  if (lowClose.server) {
+    const prior = lowClose.server.onclose;
+    lowClose.server.onclose = () => { prior?.(); pauseGate.withdrawFor(sessionId); };
+  }
 
   for (const tool of tools) {
     // Convert parameter defs to a Zod schema map. The MCP SDK uses zod
@@ -347,7 +359,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         const releasePill = controlBanner.hold();  // the call has control until it returns, waits included
         sessionLog.running(tool.name, action, clientInfo());
         // withTurnBudget: the call's waits for the user (control.ts) end before a host's 60 s call limit.
-        const run = await withSteps(tool.name, action, () => inMcpSession(sessionStartedAt ?? started, () => withTurnBudget(() => tool.handler(params, ctx))));  // where the call's time went
+        const run = await withSteps(tool.name, action, () => inMcpSession(sessionStartedAt ?? started, () => withTurnBudget(() => asPauseOwner(sessionId, () => tool.handler(params, ctx)))));  // where the call's time went
         releasePill();
         if (!run.ok) {
           // A handler throw (e.g. projected tools' toolContextToAgent when the

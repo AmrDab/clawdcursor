@@ -65,7 +65,7 @@ import dotenv from 'dotenv';
 import pc from 'picocolors';
 import { migrateFromLegacyDir } from '../paths';
 import { stopHostApp } from '../platform/native-helper';
-import { stopControl, resumeControl, isStopped } from '../core/control';
+import { stopControl, giveControlBack } from '../core/control';
 import { foreignOverlayState } from '../core/overlay-state';
 
 dotenv.config({ quiet: true });
@@ -356,15 +356,15 @@ program
 
 program
   .command('resume')
-  .description('Continue a task the daemon paused for you (same as the on-screen Resume), or --end it; a stdio MCP server\'s pause is answered on its card. After a stop, gives control back.')
+  .description('Continue a task the daemon paused for you (same as the on-screen Resume), or --end it; a stdio MCP server\'s pause is answered on its card. After a stop or a hold (the pill\'s Pause), gives control back.')
   .option('--end', 'End the paused task')
   .option('--port <port>', 'API server port (default: the running daemon\'s port, else 3847)')
   .action(async (opts) => {
     const port = clientPort(opts.port);
     const answer = opts.end ? 'end' : 'resume';
-    const gaveBack = !opts.end && isStopped();
+    // A stop and a hold (the pill's Pause, or a takeover the user kept working through) both end here, whichever is set.
+    const gaveBack = !opts.end && giveControlBack('cli');
     if (gaveBack) {
-      resumeControl('cli');
       console.log(`${e('▶', '>')} control given back: clawdcursor may act again`);
     }
     if (!(await isClawdInstance(port))) {

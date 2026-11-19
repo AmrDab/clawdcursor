@@ -16,7 +16,7 @@ import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import type { ChildProcess } from 'child_process';
 import { controlBanner, type OverlayMode } from '../core/banner';
-import { pauseGate } from '../core/pause-gate';
+import { pauseGate, asPauseOwner } from '../core/pause-gate';
 import { macOverlayBinary } from '../platform/mac-swift-binary';
 
 class FakeChild extends EventEmitter {
@@ -273,6 +273,18 @@ describe('pauseGate', () => {
     await expect(a).resolves.toBe('resumed');
     await expect(b).resolves.toBe('resumed');
     expect(pauseGate.current()).toBeNull();           // not shown a second time
+  });
+
+  it('a pause card comes down when the session that asked for it ends; a card another session asked for stays', async () => {
+    const mine = asPauseOwner('session-a', () => pauseGate.requestWithReply({ message: 'Sign in' }));
+    await flush();
+    expect(pauseGate.current()?.message).toBe('Sign in');
+    pauseGate.withdrawFor('session-b');           // some other session ending: not this card
+    expect(pauseGate.current()?.message).toBe('Sign in');
+    pauseGate.withdrawFor('session-a');
+    await expect(mine).resolves.toEqual({ outcome: 'ended' });
+    expect(pauseGate.current()).toBeNull();
+    expect(livePill().slice(-1)[0].mode.paused).toBeUndefined();   // the pill is back to its running form, no card left up
   });
 
   it('an abort signal ends the pause', async () => {

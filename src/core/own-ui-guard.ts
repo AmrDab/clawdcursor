@@ -51,7 +51,11 @@ export function isStopSafeCall(toolName: string, action?: string): boolean {
 
 const OWN = (what: string) => `${what} is clawdcursor's own on-screen control — it is the user's, never read or acted on. Target the app instead.`;
 
-export function ownUiRefusal(args: Record<string, unknown> | undefined, pauseSafe: boolean, stopSafe = false): string | null {
+/**
+ * `acts`: the call sends real input or changes a window (result-codes.ts isActingAction). Another clawdcursor process's pause
+ * stops those only: this process's agent can still read, and a card its own asker abandoned never locks the reads out.
+ */
+export function ownUiRefusal(args: Record<string, unknown> | undefined, pauseSafe: boolean, stopSafe = false, acts = true): string | null {
   // The user stopped clawdcursor (control.ts): nothing runs until they give control back.
   if (!stopSafe && isStopped()) return STOPPED_TEXT;
   // This process's overlay, and every other live clawdcursor process's (a daemon's pause is the user's to a stdio server too).
@@ -67,7 +71,7 @@ export function ownUiRefusal(args: Record<string, unknown> | undefined, pauseSaf
   }
   // An `expect` (the post-check) or `verify`'s `assertions` make any call a screen read — OCR, element reads — so never pause-safe.
   const safe = pauseSafe && READ_ARGS.every(k => args?.[k] === undefined || args?.[k] === null);
-  if (!safe && (pauseGate.current() || foreign.paused)) {
+  if (!safe && (pauseGate.current() || (foreign.paused && acts))) {
     const whose = !pauseGate.current() && foreign.pausedBy ? ` (shown by clawdcursor process ${foreign.pausedBy})` : '';
     return `paused — a pause is waiting for the user on screen${whose}, and nothing runs until they answer it. Keep waiting; do not read, press, type or click.`;
   }
