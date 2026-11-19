@@ -136,7 +136,7 @@ function buildHint(fp: WebViewFingerprint, cdpPort: number | null, title: string
     `${fp.displayName} ("${title}") is a ${fp.kind} app whose accessibility tree is largely empty — ` +
     `its UI is inside an embedded Chromium. To get a reliable DOM-level bridge, ask the user to relaunch it ` +
     `with \`${flag}\` (e.g. \`${fp.processNames[0]} ${flag}\`). Then call ` +
-    `\`browser({"action":"connect"})\` (or \`cdp_connect\` in granular mode) to attach. ` +
+    `\`browser({"action":"connect","port":${/=(\d+)/.exec(flag)?.[1] ?? 9222}})\` (or \`cdp_connect\` in granular mode) to attach. ` +
     `Until then, fall back to \`system({"action":"ocr"})\` + coord clicks, OR \`accessibility({"action":"invoke","name":"..."})\` against whatever names DO show up.`
   );
 }

@@ -554,6 +554,10 @@
                 "type": "string",
                 "description": "URL to navigate to"
               },
+              "port": {
+                "type": "number",
+                "description": "Attach to the browser or app already listening for CDP on this port (e.g. the port relaunch_with_cdp opened). Omit to use the agent browser."
+              },
               "selector": {
                 "type": "string",
                 "description": "click, type, select_option, wait_for: CSS selector of the element (required for select_option and wait_for). read_text: CSS selector to read (default: the whole page)."
@@ -3644,7 +3648,12 @@
           "description": "[act] Open/attach a dedicated browser the agent controls via the DOM (reliable for web pages — no pixels). Call this FIRST for any website task, then use navigate_browser, cdp_page_context, cdp_click, cdp_type. If it fails, fall back to ocr_read_screen/smart_click.",
           "inputSchema": {
             "type": "object",
-            "properties": {}
+            "properties": {
+              "port": {
+                "type": "number",
+                "description": "Attach to the browser or app already listening for CDP on this port (e.g. the port relaunch_with_cdp opened). Omit to use the agent browser."
+              }
+            }
           },
           "annotations": {
             "readOnlyHint": false,
@@ -3713,7 +3722,7 @@
             "properties": {
               "text": {
                 "type": "string",
-                "description": "Text to type."
+                "description": "Text to type. A trailing newline is not typed: it presses Enter after the text (e.g. to submit a search)."
               },
               "selector": {
                 "type": "string",

@@ -1363,14 +1363,30 @@ export function buildUnifiedTools(): UnifiedTool[] {
     {
       name: 'browser_connect',
       description: 'Open/attach a dedicated browser the agent controls via the DOM (reliable for web pages — no pixels). Call this FIRST for any website task, then use navigate_browser, cdp_page_context, cdp_click, cdp_type. If it fails, fall back to ocr_read_screen/smart_click.',
-      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      inputSchema: { type: 'object', properties: {
+        port: { type: 'number', description: 'Attach to the browser or app already listening for CDP on this port (e.g. the port relaunch_with_cdp opened). Omit to use the agent browser.' },
+      }, additionalProperties: false },
       changesScreen: true,
-      async execute(_args, ctx) {
+      async execute(args, ctx) {
         if (!ctx.cdp) return { success: false, text: 'cdp_connect: CDP not available in this build — use ocr_read_screen/smart_click for the page instead.' };
         // Same policy as navigate_browser (CLAWD_AGENT_CDP_OFF=1 → attach-only),
         // so both land on the one driver instance.
         const connectOpts = agentBrowserConnectOptions();
-        const ok = await ctx.cdp.ensureConnected(connectOpts).catch(() => false);
+        const port = args.port;
+        if (port !== undefined && (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535)) {
+          return { success: false, isError: true, text: 'cdp_connect: port must be a whole number from 1 to 65535.' };
+        }
+        let ok: boolean;
+        if (port !== undefined) {
+          // A named port is that browser or nothing: never the agent's own browser in its place.
+          if (await ctx.cdp.isConnected().catch(() => false)) await ctx.cdp.disconnect();
+          ok = await ctx.cdp.connect(port).catch(() => false);
+        } else {
+          ok = await ctx.cdp.ensureConnected(connectOpts).catch(() => false);
+        }
+        if (!ok && port !== undefined) {
+          return { success: false, text: `cdp_connect: could not attach to a CDP browser on port ${port}: ${ctx.cdp.getConnectError() || 'no reason given'}. Nothing was launched in its place.` };
+        }
         if (!ok) {
           // Why, and what to do: the driver already waited for an attach-only port (#378).
           const why = ctx.cdp.getConnectError() || 'no reason given';
@@ -1409,7 +1425,12 @@ export function buildUnifiedTools(): UnifiedTool[] {
         if (!ctx.cdp || !(await ctx.cdp.isConnected())) return { success: false, text: 'cdp_page_context: not connected — call cdp_connect first.' };
         const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
         const frame = frameArg(args);
-        const text = selector ? await ctx.cdp.readText(selector, 3000, frame) : await ctx.cdp.getPageContext(frame);
+        let text: string;
+        try {
+          text = selector ? await ctx.cdp.readText(selector, 3000, frame) : await ctx.cdp.getPageContext(frame);
+        } catch (e) {
+          return { success: false, isError: true, text: `cdp_page_context failed: ${e instanceof Error ? e.message : String(e)}` };   // a selector that matches nothing
+        }
         // Page content is the highest-risk injection surface — always delimited.
         return { success: true, text: wrapUntrustedScreenContent(text) };
       },
@@ -1434,7 +1455,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
         if (!text && !selector) return { success: false, isError: true, text: 'cdp_click: provide text or selector.' };
         const frame = frameArg(args);
         const r = text ? await ctx.cdp.clickByText(text, Infinity, frame) : await ctx.cdp.click(selector, frame);
-        return r.success ? { success: true, text: `cdp_click: clicked ${text ? `"${text}"` : selector} (${r.method})${r.frame ? ` in iframe ${quoteScreenText(r.frame)}` : ''}` } : { success: false, text: `cdp_click failed: ${r.error}. Call cdp_page_context to see the actual elements, then retry.` };
+        return r.success ? { success: true, text: `cdp_click: clicked ${text ? `"${text}"` : selector} (${r.method})${r.clicked ? `: hit ${quoteScreenText(r.clicked)}` : ''}${r.frame ? ` in iframe ${quoteScreenText(r.frame)}` : ''}` } : { success: false, text: `cdp_click failed: ${r.error}. Call cdp_page_context to see the actual elements, then retry.` };
       },
     },
     {
@@ -1443,7 +1464,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
       inputSchema: {
         type: 'object',
         properties: {
-          text: { type: 'string', description: 'Text to type.' },
+          text: { type: 'string', description: 'Text to type. A trailing newline is not typed: it presses Enter after the text (e.g. to submit a search).' },
           selector: { type: 'string', description: 'CSS selector for the input.' },
           label: { type: 'string', description: 'Label text associated with the input (alternative to selector).' },
           frame: FRAME_ARG,
@@ -1454,7 +1475,10 @@ export function buildUnifiedTools(): UnifiedTool[] {
       changesScreen: true,
       async execute(args, ctx) {
         if (!ctx.cdp || !(await ctx.cdp.isConnected())) return { success: false, text: 'cdp_type: not connected — call cdp_connect first.' };
-        const text = String(args.text ?? '');
+        // A trailing newline means Enter, as in computer type: fill the field, then press it (never type the newline into the field).
+        const raw = String(args.text ?? '');
+        const enter = /\r?\n$/.test(raw);
+        const text = enter ? raw.replace(/\r?\n$/, '') : raw;
         const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
         const label = typeof args.label === 'string' ? args.label.trim() : '';
         if (!selector && !label) return { success: false, isError: true, text: 'cdp_type: provide selector or label.' };
@@ -1462,7 +1486,14 @@ export function buildUnifiedTools(): UnifiedTool[] {
         const r = label ? await ctx.cdp.typeByLabel(label, text, frame) : await ctx.cdp.typeInField(selector, text, frame);
         if (!r.success) return { success: false, text: `cdp_type failed: ${r.error}` };
         // The fill replaced the field's text: read it back, as every set is (#399).
-        return setVerdict(await readBackTyped(async () => r.read?.() ?? null, text, { whole: true }), text, selector || label, ` (browser)${r.frame ? ` in iframe ${quoteScreenText(r.frame)}` : ''}`);
+        const where = ` (browser)${r.frame ? ` in iframe ${quoteScreenText(r.frame)}` : ''}`;
+        const verdict = setVerdict(await readBackTyped(async () => r.read?.() ?? null, text, { whole: true }), text, selector || label, where);
+        if (!enter) return verdict;
+        // Enter goes after the read-back (it may submit or clear the field), and never over a field that did not take the text.
+        if (!verdict.success) return { ...verdict, text: `${verdict.text} Enter was NOT pressed.` };
+        const key = await ctx.cdp.pressKey('Enter');
+        if (!key.success) return { success: false, text: `${verdict.text} Enter failed: ${key.error}` };
+        return { ...verdict, text: `${verdict.text} Then pressed Enter.` };
       },
     },
   ];
