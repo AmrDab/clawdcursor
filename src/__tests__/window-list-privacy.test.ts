@@ -1,7 +1,7 @@
 /**
  * `window list` / list_windows named every open window by title, so an unrelated document's name (with private text in it)
- * reached the model. Now: apps only, with a count; a title only for windows the agent opened or worked in. The tool takes no
- * filter parameter today, so there is no "on request" listing to test.
+ * reached the model. Now: apps only, with a count; a title only for windows the agent opened or worked in.  An app's titles come on request,
+ * with processName or processId.
  */
 import { describe, it, expect, vi } from 'vitest';
 
@@ -33,5 +33,29 @@ describe('list_windows', () => {
     expect(r.text).toContain('pid=100');
     expect(r.text).toMatch(/\["chrome"\] pid=200 \(2 windows\)/);
     expect(r.text).toContain('scratch.txt');
+  });
+
+  const run = (args: Record<string, unknown>, windows: ReturnType<typeof win>[]) =>
+    buildUnifiedTools().find(t => t.name === 'list_windows')!.execute(args, {
+      platform: { platform: 'win32', listWindows: async () => windows, getActiveWindow: async () => windows[0] }, mcpSurface: true,
+    } as never);
+  const two = [win('chrome', 200, 'Inbox - Mail'), win('chrome', 200, 'Bank statement'), win('winword', 100, `${SECRET}.docx`)];
+
+  it('processName lists one app in full and no other app', async () => {
+    const r = await run({ processName: 'CHROME' }, two);
+    expect(r.text).toContain('Inbox - Mail');
+    expect(r.text).toContain('Bank statement');
+    expect(r.text).toContain('→');
+    expect(r.text).not.toContain('sk-live');
+  });
+
+  it('processId does the same', async () => {
+    const r = await run({ processId: 100 }, two);
+    expect(r.text).toContain('sk-live');
+    expect(r.text).not.toContain('Inbox');
+  });
+
+  it('the unfiltered header says how to get titles', async () => {
+    expect((await run({}, two)).text).toContain('pass processName or processId');
   });
 });

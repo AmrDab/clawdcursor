@@ -426,11 +426,11 @@
               },
               "processName": {
                 "type": "string",
-                "description": "Process name to focus (e.g. \"notepad\", \"msedge\")"
+                "description": "List only this app's windows, with titles (name contains this, any case)"
               },
               "processId": {
                 "type": "number",
-                "description": "Process ID to focus"
+                "description": "List only this process's windows, with titles"
               },
               "title": {
                 "type": "string",
@@ -2390,10 +2390,19 @@
         },
         {
           "name": "get_windows",
-          "description": "[inspect] List the open apps (process name, pid, and how many windows each has), and the title, process and bounds of the windows clawdcursor itself opened or worked in. The titles of other windows are not listed: a document title can hold private text. Useful when the active window is wrong or missing; target an app by processName or pid.",
+          "description": "[inspect] List the open apps (process name, pid, and how many windows each has), and the title, process and bounds of the windows clawdcursor itself opened or worked in. The titles of other windows are not listed: a document title can hold private text. To see one app's window titles (to focus or close the right one), pass processName or processId: that app's windows are then listed in full.",
           "inputSchema": {
             "type": "object",
-            "properties": {}
+            "properties": {
+              "processName": {
+                "type": "string",
+                "description": "List only this app's windows, with titles (name contains this, any case)"
+              },
+              "processId": {
+                "type": "number",
+                "description": "List only this process's windows, with titles"
+              }
+            }
           },
           "annotations": {
             "readOnlyHint": true

@@ -177,14 +177,39 @@ export function buildUnifiedTools(): UnifiedTool[] {
 
     {
       name: 'list_windows',
-      description: 'List the open apps (process name, pid, and how many windows each has), and the title, process and bounds of the windows clawdcursor itself opened or worked in. The titles of other windows are not listed: a document title can hold private text. Useful when the active window is wrong or missing; target an app by processName or pid.',
-      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      description: 'List the open apps (process name, pid, and how many windows each has), and the title, process and bounds of the windows clawdcursor itself opened or worked in. The titles of other windows are not listed: a document title can hold private text. To see one app\'s window titles (to focus or close the right one), pass processName or processId: that app\'s windows are then listed in full.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          processName: { type: 'string', description: 'List only this app\'s windows, with titles (name contains this, any case)' },
+          processId: { type: 'number', description: 'List only this process\'s windows, with titles' },
+        },
+        additionalProperties: false,
+      },
       changesScreen: false,
-      async execute(_args, ctx) {
-        const windows = await ctx.platform.listWindows();
+      async execute(args, ctx) {
+        const all = await ctx.platform.listWindows();
         const active = await ctx.platform.getActiveWindow();
+        const wantName = typeof args.processName === 'string' ? args.processName.trim().toLowerCase() : '';
+        const wantPid = typeof args.processId === 'number' ? args.processId : undefined;
+        const filtered = !!wantName || wantPid !== undefined;
+        const windows = filtered
+          ? all.filter(w => (wantPid === undefined || w.processId === wantPid)
+            && (!wantName || String(w.processName ?? '').toLowerCase().includes(wantName)))
+          : all;
+        const line = (w: (typeof all)[number]) => {
+          const isActive = active && w.processId === active.processId && w.title === active.title;
+          return `${isActive ? '→' : ' '} [${quoteScreenText(String(w.processName ?? ''))}] ${quoteScreenText(String(w.title ?? ''))} pid=${w.processId} ${w.bounds.width}×${w.bounds.height}`;
+        };
+        const partial = ctx.platform.lastWindowListPartial ? `\n${ctx.platform.lastWindowListPartial}` : '';
+        if (filtered) {
+          const shown = windows.slice(0, 20).map(line);
+          const more = windows.length > 20 ? `\n… +${windows.length - 20} more windows` : '';
+          return { success: true, text: `Windows of that app (${windows.length}):\n${shown.join('\n')}${more}${partial}` };
+        }
         // Titles of windows the user has open are theirs: one list put an unrelated document's name, with a
-        // credential-like string in it, into the model's context. Only the agent's own windows show a title.
+        // credential-like string in it, into the model's context. Only the agent's own windows show a title,
+        // and an app's titles come on request (processName or processId).
         const mine = windows.filter(w => isAgentWindow({ handle: w.handle, processId: w.processId }));
         const apps = new Map<number, { name: string; count: number; active: boolean }>();
         for (const w of windows) {
@@ -196,16 +221,12 @@ export function buildUnifiedTools(): UnifiedTool[] {
           apps.set(w.processId, a);
         }
         const lines = [
-          ...mine.map(w => {
-            const isActive = active && w.processId === active.processId && w.title === active.title;
-            return `${isActive ? '→' : ' '} [${quoteScreenText(String(w.processName ?? ''))}] ${quoteScreenText(String(w.title ?? ''))} pid=${w.processId} ${w.bounds.width}×${w.bounds.height}`;
-          }),
+          ...mine.map(line),
           ...[...apps].map(([pid, a]) => `${a.active ? '→' : ' '} [${quoteScreenText(a.name)}] pid=${pid}${a.count > 1 ? ` (${a.count} windows)` : ''}`),
         ];
         const shown = lines.slice(0, 20);
         const more = lines.length > 20 ? `\n… +${lines.length - 20} more` : '';
-        const partial = ctx.platform.lastWindowListPartial ? `\n${ctx.platform.lastWindowListPartial}` : '';
-        return { success: true, text: `Windows (${windows.length}; titles are shown only for windows clawdcursor opened or worked in):\n${shown.join('\n')}${more}${partial}` };
+        return { success: true, text: `Windows (${windows.length}; titles: pass processName or processId):\n${shown.join('\n')}${more}${partial}` };
       },
     },
 
