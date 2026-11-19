@@ -2,6 +2,18 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- **`window list` shows open apps, not every window title.** It lists each app's process name and pid, with a window count
+  when an app has several windows; the title, bounds and size appear only for windows clawdcursor opened or worked in. A
+  document's title can hold private text.
+
+### Fixed
+- **Unticking "Allow clawdcursor to control this computer" in the Claude Desktop extension now withdraws consent.** The host
+  sends `CLAWDCURSOR_CONSENT=false` (or `0`), which removes the recorded consent for that copy; an unset variable changes
+  nothing.
+
 ## [2.2.0] - 2026-11-18
 
 ### Added

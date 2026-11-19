@@ -33,7 +33,7 @@ describe('acceptConsentFromEnv', () => {
     expect(JSON.parse(fs.readFileSync(consentFile, 'utf8')).source).toBe('host-setting:CLAWDCURSOR_CONSENT');
   });
 
-  it.each([undefined, '', 'false', '0', 'yes', '${user_config.allow_desktop_control}'])('does nothing for %j', (v) => {
+  it.each([undefined, '', 'yes', '${user_config.allow_desktop_control}'])('does nothing for %j', (v) => {
     expect(acceptConsentFromEnv(v === undefined ? {} : { CLAWDCURSOR_CONSENT: v })).toBe(false);
     expect(hasConsent()).toBe(false);
   });
@@ -43,5 +43,24 @@ describe('acceptConsentFromEnv', () => {
     fs.writeFileSync(consentFile, '{"accepted":true,"source":"cli"}');
     expect(acceptConsentFromEnv({ CLAWDCURSOR_CONSENT: 'true' })).toBe(false);
     expect(fs.readFileSync(consentFile, 'utf8')).toBe('{"accepted":true,"source":"cli"}');
+  });
+
+  it.each(['false', 'FALSE', '0', ' false '])('revokes recorded consent for an explicit %j (box unticked)', (v) => {
+    fs.mkdirSync(path.dirname(consentFile), { recursive: true });
+    fs.writeFileSync(consentFile, '{"accepted":true,"source":"host-setting:CLAWDCURSOR_CONSENT"}');
+    expect(acceptConsentFromEnv({ CLAWDCURSOR_CONSENT: v })).toBe(false);
+    expect(hasConsent()).toBe(false);
+  });
+
+  it('does not create consent for an explicit false', () => {
+    expect(acceptConsentFromEnv({ CLAWDCURSOR_CONSENT: 'false' })).toBe(false);
+    expect(hasConsent()).toBe(false);
+  });
+
+  it.each([undefined, '', '${user_config.allow_desktop_control}'])('keeps recorded consent when the variable is %j', (v) => {
+    fs.mkdirSync(path.dirname(consentFile), { recursive: true });
+    fs.writeFileSync(consentFile, '{"accepted":true,"source":"cli"}');
+    acceptConsentFromEnv(v === undefined ? {} : { CLAWDCURSOR_CONSENT: v });
+    expect(hasConsent()).toBe(true);
   });
 });
