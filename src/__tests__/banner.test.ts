@@ -12,9 +12,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
-import { controlBanner, outlineFlags, glowFlags, glowColorFlags, outlineWindowNumber } from '../core/banner';
+import { controlBanner, outlineFlags, glowFlags, glowColorFlags, outlineWindowNumber, overlayEnv, type OverlayMode } from '../core/banner';
 import { stopControl, __setControlDirForTests, __setForegroundReaderForTests, isHeld, releaseHold } from '../core/control';
-import { guardInputMethods, setOwnUiPids } from '../platform/pointer-guard';
+import { guardInputMethods, setOwnUiPids, agentWaiting } from '../platform/pointer-guard';
 import { withForegroundBurst } from '../platform/foreground-burst';
 import type { ChildProcess } from 'child_process';
 import { readFileSync } from 'fs';
@@ -293,7 +293,7 @@ describe('no overlay outlives its parent', () => {
   const read = (...p: string[]) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', ...p), 'utf8');
   it('every drawer exits on stdin EOF, the pill included', () => {
     for (const ps of [read('banner.ps1'), read('window-outline.ps1')]) {
-      expect(ps).toMatch(/while \(\(line = Console\.In\.ReadLine\(\)\) != null\) \{[\s\S]*?\n {16}\}\n {16}Environment\.Exit\(0\);/);
+      expect(ps).toMatch(/while \(\(line = (?:stdin|Console\.In)\.ReadLine\(\)\) != null\) \{[\s\S]*?\n {16}\}\n {16}Environment\.Exit\(0\);/);
     }
     expect(read('mac', 'overlay.swift')).toMatch(/if data\.isEmpty \{[^}]*NSApp\.terminate\(nil\)/);
     expect(read('linux', 'overlay.py').match(/if not chunk:\n\s+Gtk\.main_quit\(\)/g)).toHaveLength(2);
@@ -390,8 +390,53 @@ describe('the indicator has two modes', () => {
     await d.typeText('a');
     expect(lines().at(-1)).toMatch(/^ACTIVITY requires foreground · Typing/);
     vi.advanceTimersByTime(TAIL + 1);
-    expect(lines().at(-1)).toMatch(/^ACTIVITY running in background · Typing/);   // the glow went down, so did the mode
+    // The glow went down, so did the mode, and what the foreground act did is not shown next to "background".
+    expect(lines().at(-1)).toBe('ACTIVITY running in background');
     expect(lines().join(' ')).not.toMatch(/clawdcursor/i);                      // a host's own pill shows these lines too
+  });
+
+  it('a background act keeps its activity when the glow tail ends', async () => {
+    controlBanner.pin();
+    const lines = () => spawned[0].written.filter(l => l.startsWith('ACTIVITY '));
+    const d = guardInputMethods({
+      async invokeElement(_q: unknown) { return { success: true }; }, async typeText(_t: string) {},
+    });
+    await d.typeText('a');
+    await d.invokeElement({ name: 'Save' });   // inside the tail: still "requires foreground"
+    vi.advanceTimersByTime(TAIL + 1);
+    expect(lines().at(-1)).toBe('ACTIVITY running in background · Clicking');
+  });
+
+  it('while the agent waits the pill says so, not a mode; the next act ends it', async () => {
+    controlBanner.pin();
+    const lines = () => spawned[0].written.filter(l => l.startsWith('ACTIVITY '));
+    agentWaiting('waiting for Designcenter to load');
+    expect(lines().at(-1)).toBe('ACTIVITY waiting for Designcenter to load');
+    agentWaiting(null);
+    expect(lines().at(-1)).toBe('ACTIVITY running in background');
+    agentWaiting('waiting');
+    const d = guardInputMethods({ async invokeElement(_q: unknown) { return { success: true }; } });
+    await d.invokeElement({ name: 'Save' });
+    expect(lines().at(-1)).toBe('ACTIVITY running in background · Clicking');
+  });
+
+  it('the appear ring is for the first pill of this process only: a pill back after an idle hide does not ring', () => {
+    const modes: OverlayMode[] = [];
+    controlBanner.__setSpawnerForTests(m => { modes.push(m); const c = new FakeChild(); spawned.push(c); return c as unknown as ChildProcess; });
+    controlBanner.touch();
+    vi.advanceTimersByTime(31_000);   // the idle hide
+    controlBanner.touch();
+    expect(modes.map(m => m.ring)).toEqual([true, false]);
+    expect(overlayEnv({ ring: false }).CLAWD_BANNER_RING).toBe('0');
+    expect(overlayEnv({}).CLAWD_BANNER_RING).toBe('1');
+  });
+
+  it('the Windows pill reads stdin as UTF-8 and keeps a fixed width', () => {
+    const ps = readFileSync(join(__dirname, '..', '..', 'scripts', 'banner.ps1'), 'utf8');
+    expect(ps).toContain('new System.Text.UTF8Encoding(false)');   // "·" and "—" came out as box-drawing characters
+    expect(ps).toContain('$activity.AutoEllipsis = $true');
+    expect(ps).toContain('$x += $activity.Width + 6');              // never its preferred (text) width
+    expect(ps).toContain("if ($env:CLAWD_BANNER_RING -eq '0') { return }");
   });
 
   it('does not send the same line twice while the mode holds', async () => {

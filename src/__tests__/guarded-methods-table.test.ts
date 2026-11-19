@@ -4,7 +4,7 @@
  * pill, or named on the pill without being guarded.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { guardInputMethods, setInputGuard, GUARDED_METHODS, isForegroundInput } from '../platform/pointer-guard';
+import { guardInputMethods, setInputGuard, GUARDED_METHODS, isForegroundInput, setOnAgentWait } from '../platform/pointer-guard';
 import { activityLabel } from '../core/banner';
 
 const METHODS = [
@@ -82,5 +82,25 @@ describe('the two modes of the table', () => {
   it('the indicator shows foreground for real input and for a pointer move (it moves the real cursor), not for a background act', () => {
     for (const m of ['mouseClick', 'keyPress', 'mouseMove', 'mouseMoveRelative']) expect(isForegroundInput(m)).toBe(true);
     for (const m of ['invokeElement', 'deliverToWindow', 'navigate', 'click', 'writeClipboard', 'launchApp']) expect(isForegroundInput(m)).toBe(false);
+  });
+});
+
+describe('a launch tells the pill it waits for the app', () => {
+  it('"waiting for <app> to load" while the launch runs, and cleared after, a failed one too', async () => {
+    const seen: Array<string | null> = [];
+    setOnAgentWait(w => seen.push(w));
+    setInputGuard({ stopCheck: () => {}, before: async () => {}, done: () => {}, focused: async () => {}, launched: async () => {}, byName: async () => {} });
+    let during: Array<string | null> = [];
+    const layer = guardInputMethods({
+      async launchApp(_n: string) { during = [...seen]; return { pid: 1 }; },
+    });
+    await layer.launchApp('Notepad');
+    expect(during).toEqual(['waiting for Notepad to load']);
+    expect(seen).toEqual(['waiting for Notepad to load', null]);
+    seen.length = 0;
+    const failing = guardInputMethods({ async launchApp(_n: string): Promise<{ pid: number }> { throw new Error('no such app'); } });
+    await expect(failing.launchApp('Nope')).rejects.toThrow('no such app');
+    expect(seen).toEqual(['waiting for Nope to load', null]);
+    setOnAgentWait(null);
   });
 });

@@ -394,7 +394,10 @@ def run_pill():
         activity_label = Gtk.Label(label=os.environ.get('CLAWD_BANNER_ACTIVITY') or 'Working')
         activity_label.get_style_context().add_class('activity')
         activity_label.set_ellipsize(Pango.EllipsizeMode.END)
-        activity_label.set_max_width_chars(60)
+        # A fixed width (owner, 2026-11-19: the pill must not grow and shrink as its text changes); longer text is cut.
+        activity_label.set_width_chars(44)
+        activity_label.set_max_width_chars(44)
+        activity_label.set_xalign(0)
         clock = Gtk.Label(label='0:00')
         clock.get_style_context().add_class('clock')
         stop = Gtk.Button(label='Stop')

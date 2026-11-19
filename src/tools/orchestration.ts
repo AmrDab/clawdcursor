@@ -9,6 +9,7 @@ import type { ToolDefinition } from './types';
 import { agentBrowserConnectOptions } from '../platform/browser-config';
 import { resolveAlias, appNameRefusal, startedNoWindowText, notConfirmedText, startMenuNote } from '../platform/app-aliases';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../core/control';
+import { agentWaiting } from '../platform/pointer-guard';
 import { timeWait } from '../core/observability/steps';
 import { psOpts, powershellExe, windowsDirExe } from '../platform/ps-spawn';
 import * as os from 'os';
@@ -158,7 +159,11 @@ export function getOrchestrationTools(): ToolDefinition[] {
       safetyTier: 0,
       handler: async ({ seconds }) => {
         // Ends early when the user stops clawdcursor: a wait is exactly when they step in (#294).
-        if (await timeWait(() => sleepUnlessStopped(seconds * 1000))) return { text: `wait: ${STOPPED_TEXT}`, isError: true };
+        // The pill says "waiting" for its length, not "running in background" (owner, 2026-11-19).
+        agentWaiting('waiting');
+        let stopped: boolean;
+        try { stopped = await timeWait(() => sleepUnlessStopped(seconds * 1000)); } finally { agentWaiting(null); }
+        if (stopped) return { text: `wait: ${STOPPED_TEXT}`, isError: true };
         return { text: `Waited ${seconds}s` };
       },
     },

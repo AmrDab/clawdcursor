@@ -66,7 +66,7 @@ import { psOpts, powershellExe } from '../platform/ps-spawn';
 import * as readline from 'readline';
 import { getPackageRoot } from '../paths';
 import { macOverlayBinary } from '../platform/mac-swift-binary';
-import { setBeforePointerPress, setBeforeCapture, setOwnUiPids, isOwnUiPid, setOnAgentInput, setOnAgentPoint, GUARDED_METHODS, isForegroundInput } from '../platform/pointer-guard';
+import { setBeforePointerPress, setBeforeCapture, setOwnUiPids, isOwnUiPid, setOnAgentInput, setOnAgentPoint, setOnAgentWait, GUARDED_METHODS, isForegroundInput } from '../platform/pointer-guard';
 import type { PauseAnswer, PauseInfo } from './pause-gate';
 import { publishOverlayState, foreignOverlayState } from './overlay-state';
 import { agentWindows, holdControl, isStopped, releaseHold, setOnHold, workingIn, workingWindow, type HoldEvent } from './control';
@@ -97,7 +97,7 @@ const HOST_PILL_START_MS = 2_000;
  * Which form of the overlay to draw: running (default) or paused for the user. `activity` is what the running pill says
  * ("Typing in Edge"); `app` names the agent's window on the paused card.
  */
-export interface OverlayMode { paused?: PauseInfo; activity?: string; app?: string }
+export interface OverlayMode { paused?: PauseInfo; activity?: string; app?: string; ring?: boolean }
 
 /**
  * "Typing in Edge" — what the running pill shows for a guarded method (pointer-guard.ts GUARDED_METHODS); undefined for
@@ -158,6 +158,8 @@ export const overlayEnv = (mode: OverlayMode, extra: NodeJS.ProcessEnv = {}): No
   // Always set, so a stray variable in our own environment never shows.
   CLAWD_BANNER_ACTIVITY: mode.activity ?? '',
   CLAWD_BANNER_APP: mode.app ?? '',
+  // The amber ring when the pill appears: the first pill of a session only (ring: false after it).
+  CLAWD_BANNER_RING: mode.ring === false ? '0' : '1',
   // The message is model-written: say so on screen, so injected text can't pose
   // as clawdcursor's own instructions. The drawer plays a short system sound when
   // the paused pill appears, so a user who isn't looking hears it's their turn
@@ -466,11 +468,16 @@ class ControlBanner {
   }
 
   private mode: IndicatorMode = 'background';
+  private waiting: string | null = null; // the pill's line while the agent waits ("waiting for Notepad to load")
+  private baseFg = false;                // `base` came from a foreground act: dropped once the agent is back in the background
+  private ringShown = false;             // the pill's appear ring was shown this session
   private base = '';     // what the agent is doing ("Typing in Edge"), without the mode
   private activity = ''; // the line the running pill was last sent (the user's turn: its label)
 
   /** The running pill's line: the mode, then what the agent is doing, then the takeover count. */
   private line(): string {
+    // The agent is waiting (a wait it chose, or an app it started that is still coming up): the pill says that, not a mode.
+    if (this.waiting) return this.waiting;
     const n = burstCount(); // R2 foreground bursts this session (D1: allowed when the user is idle, counted and shown)
     const line = this.base ? `${MODE_TEXT[this.mode]} · ${this.base}` : MODE_TEXT[this.mode];
     return n ? `${line} · ${n} quick takeover${n > 1 ? 's' : ''}` : line;
@@ -488,14 +495,26 @@ class ControlBanner {
   private setMode(mode: IndicatorMode): void {
     if (mode === this.mode) return;
     this.mode = mode;
+    // "running in background · Pressing keys" says two things at once (owner, 2026-11-19): what a foreground act did is
+    // not shown once the agent is back in the background.
+    if (mode === 'background' && this.baseFg) { this.base = ''; this.baseFg = false; }
+    this.showActivity();
+  }
+
+  /** The agent waits (a wait call, an app it started still loading): "waiting", or the text given; null ends it. */
+  setWaiting(text: string | null): void {
+    const w = text ? text.replace(/[\r\n]+/g, ' ').trim().slice(0, 60) || null : null;
+    if (w === this.waiting) return;
+    this.waiting = w;
     this.showActivity();
   }
 
   /** What the agent is doing now ("Typing in Edge"): the running pill shows it after the mode; a new pill starts with it. */
-  setActivity(label: string): void {
+  setActivity(label: string, foreground = false): void {
     const base = label.replace(/[\r\n]+/g, ' ').trim().slice(0, 60);
     if (!base) return;
     this.base = base;
+    this.baseFg = foreground;
     this.showActivity();
   }
 
@@ -659,9 +678,11 @@ class ControlBanner {
     let forPause: number | undefined;
     const hosted = this.hostPill() !== null;
     try {
+      const ring = !this.ringShown;
       child = this.spawner(this.paused
-        ? { paused: this.paused, app: appLabel(workingIn()?.processName, workingIn()?.appName) }
-        : { activity: this.activity = this.turnLabel ?? this.line() });
+        ? { paused: this.paused, app: appLabel(workingIn()?.processName, workingIn()?.appName), ring }
+        : { activity: this.activity = this.turnLabel ?? this.line(), ring });
+      this.ringShown = true;
       // Which pause this pill answers. Its answer counts while that pause is the
       // current one, even if the process already exited (stdout can drain after
       // 'exit'); a pill from an earlier pause can never answer a newer one.
@@ -822,6 +843,8 @@ class ControlBanner {
     this.base = '';
     this.mode = 'background';
     resetBurstCount(); // ...nor with this one's takeover count
+    this.waiting = null;
+    this.baseFg = false;
     this.working = undefined; // ...nor its outline on this one's window
     this.paused = null;
     this.onAnswer = undefined;
@@ -843,6 +866,7 @@ class ControlBanner {
   __setPlatformEnabledForTests(v: boolean): void { this.enabled = v; this.ready = () => v; this.glowSpawner = () => { throw new Error('no glow unless a test gives one'); }; }
   __resetForTests(): void {
     this.forceHide();
+    this.ringShown = false;
     this.pinned = false;
     this.onStopRequested = undefined;
     this.capturable = process.platform === 'linux';
@@ -868,10 +892,14 @@ setOnAgentInput(method => {
   const label = activityLabel(method, workingIn()?.processName, workingIn()?.appName);
   // The foreground-mode signal: only synthetic keyboard and mouse input lands in the foreground window. First, so the
   // pill's line never says the old mode next to the new activity.
-  if (isForegroundInput(method)) controlBanner.foreground();
-  if (label) controlBanner.setActivity(label);
+  const fg = isForegroundInput(method);
+  controlBanner.setWaiting(null);   // an act ends any wait the pill was showing
+  if (fg) controlBanner.foreground();
+  if (label) controlBanner.setActivity(label, fg);
   controlBanner.setWorkingWindow(workingWindow());
 });
+// The agent waits (a wait call, an app that is still starting): the pill says "waiting", not a mode.
+setOnAgentWait(w => controlBanner.setWaiting(w));
 // ...and every R2 burst, for its whole length.
 setOnBurst(e => controlBanner.burstEvent(e));
 setOnHold(e => controlBanner.holdEvent(e));

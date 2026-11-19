@@ -105,7 +105,10 @@ public class NoActivateBannerForm : Form {
         var t = new System.Threading.Thread(() => {
             try {
                 string line;
-                while ((line = Console.In.ReadLine()) != null) {
+                // UTF-8, never the console's code page: "·" and "—" in an ACTIVITY line came out as box-drawing
+                // characters (owner, 2026-11-19), because a redirected stdin is read in the OEM code page by default.
+                var stdin = new System.IO.StreamReader(Console.OpenStandardInput(), new System.Text.UTF8Encoding(false));
+                while ((line = stdin.ReadLine()) != null) {
                     line = line.Trim();
                     int ms;
                     if (line.StartsWith("HIDE ") && int.TryParse(line.Substring(5), out ms)) {
@@ -392,6 +395,9 @@ function Enable-Drag($c) {
 # the owner (2026-11-17).
 $script:edgeW = 1
 function Start-Pulse {
+    # Only the first pill of a session (banner.ts sets CLAWD_BANNER_RING=0 after it): a ring each time the pill comes back
+    # read as the agent outlining its own pill (owner, 2026-11-19).
+    if ($env:CLAWD_BANNER_RING -eq '0') { return }
     $script:base = $script:edge; $script:amber = [System.Drawing.Color]::FromArgb(245, 158, 11)
     $script:pulseAt = [Diagnostics.Stopwatch]::StartNew()
     $script:pulse = New-Object System.Windows.Forms.Timer
@@ -661,6 +667,14 @@ $brand    = New-PillLabel 'ClawdCursor' 'Segoe UI Semibold' 9 $muted
 $activity = New-PillLabel 'Working' 'Segoe UI Semibold' 9.5 ([System.Drawing.Color]::White)
 if ($env:CLAWD_BANNER_ACTIVITY) { $activity.Text = [string]$env:CLAWD_BANNER_ACTIVITY }
 $elapsed  = New-PillLabel '0:00' 'Segoe UI' 9 $muted
+# Fixed widths (owner, 2026-11-19: the pill must not grow and shrink as its text changes). The activity is cut with "…";
+# the clock has room for 99:59.
+$activity.AutoSize = $false
+$activity.AutoEllipsis = $true
+$activity.Size = New-Object System.Drawing.Size(([System.Windows.Forms.TextRenderer]::MeasureText('requires foreground · Pressing keys in Designcenter', $activity.Font).Width), $activity.PreferredHeight)
+$elapsed.AutoSize = $false
+$elapsed.TextAlign = 'MiddleLeft'
+$elapsed.Size = New-Object System.Drawing.Size(([System.Windows.Forms.TextRenderer]::MeasureText('99:59', $elapsed.Font).Width), $elapsed.PreferredHeight)
 
 # Stop: a click stops (as a double-click anywhere does). A label, not a Button: a Button takes focus on click.
 $stop = New-PillLabel 'Stop' 'Segoe UI Semibold' 9 ([System.Drawing.Color]::FromArgb(252, 165, 165))
@@ -697,8 +711,8 @@ function Update-Layout {
     $x = 12
     $dot.Location = New-Object System.Drawing.Point(($x - 2), 9);     $x += $dot.Width + 2
     $brand.Location = New-Object System.Drawing.Point($x, 11);        $x += $brand.PreferredWidth + 4
-    $activity.Location = New-Object System.Drawing.Point($x, 10);     $x += $activity.PreferredWidth + 6
-    $elapsed.Location = New-Object System.Drawing.Point($x, 11);      $x += $elapsed.PreferredWidth + 10
+    $activity.Location = New-Object System.Drawing.Point($x, 10);     $x += $activity.Width + 6
+    $elapsed.Location = New-Object System.Drawing.Point($x, 11);      $x += $elapsed.Width + 10
     $hold.Location = New-Object System.Drawing.Point($x, 7);          $x += $hold.Width + 6
     $stop.Location = New-Object System.Drawing.Point($x, 7);          $x += $stop.Width + 7
     $form.Width = $x

@@ -464,9 +464,10 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         guard let panel = pillPanel, let dot = runDot, let brand = runBrand, let act = runActivity,
               let clock = runClock, let hold = runHold, let stop = runStop else { return }
         let rowH: CGFloat = 38
-        func place(_ l: NSTextField, _ x: CGFloat, _ maxWidth: CGFloat) -> CGFloat {
+        // `fixed`: always that width (owner, 2026-11-19: the pill must not grow and shrink as its text changes).
+        func place(_ l: NSTextField, _ x: CGFloat, _ maxWidth: CGFloat, fixed: Bool = false) -> CGFloat {
             l.sizeToFit()
-            let w = min(ceil(l.frame.width), maxWidth)
+            let w = fixed ? maxWidth : min(ceil(l.frame.width), maxWidth)
             let h = ceil(l.frame.height)
             l.frame = NSRect(x: x, y: floor((rowH - h) / 2), width: w, height: h)
             return w
@@ -475,8 +476,8 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         dot.frame = NSRect(x: x - 2, y: (rowH - dot.frame.height) / 2, width: dot.frame.width, height: dot.frame.height)
         x += dot.frame.width + 2
         x += place(brand, x, 200) + 6
-        x += place(act, x, 360) + 8
-        x += place(clock, x, 100) + 12
+        x += place(act, x, 330, fixed: true) + 8
+        x += place(clock, x, 40, fixed: true) + 12
         hold.frame = NSRect(x: x, y: 7, width: 60, height: 24)
         x += 60 + 6
         stop.frame = NSRect(x: x, y: 7, width: 52, height: 24)
@@ -828,17 +829,24 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 NSApp.terminate(nil)
             }
             content.onDragged = { [weak self] in self?.userMoved = true }
-            // The amber outline when the pill appears: solid for 3 s, then fading out over 1 s into the usual one.
+            // The amber outline when the pill appears: solid for 3 s, then fading out over 1 s into the usual one. Only the
+            // first pill of a session (banner.ts sets CLAWD_BANNER_RING=0 after it): a ring each time the pill came back read
+            // as the agent outlining its own pill (owner, 2026-11-19).
             let amber = (245.0, 158.0, 11.0), rest = (58.0, 62.0, 72.0)
-            content.layer?.borderColor = hexColor("#f59e0b").cgColor
-            content.layer?.borderWidth = 2
-            let appeared = Date()
-            Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { t in
-                let e = Date().timeIntervalSince(appeared)
-                let k = e < 3 ? 1.0 : max(0.0, 1 - (e - 3))
-                content.layer?.borderColor = rgb(CGFloat(rest.0 + (amber.0 - rest.0) * k), CGFloat(rest.1 + (amber.1 - rest.1) * k),
-                                                 CGFloat(rest.2 + (amber.2 - rest.2) * k)).cgColor
-                if k == 0 { content.layer?.borderWidth = 1; t.invalidate() }
+            if ProcessInfo.processInfo.environment["CLAWD_BANNER_RING"] == "0" {
+                content.layer?.borderColor = rgb(CGFloat(rest.0), CGFloat(rest.1), CGFloat(rest.2)).cgColor
+                content.layer?.borderWidth = 1
+            } else {
+                content.layer?.borderColor = hexColor("#f59e0b").cgColor
+                content.layer?.borderWidth = 2
+                let appeared = Date()
+                Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { t in
+                    let e = Date().timeIntervalSince(appeared)
+                    let k = e < 3 ? 1.0 : max(0.0, 1 - (e - 3))
+                    content.layer?.borderColor = rgb(CGFloat(rest.0 + (amber.0 - rest.0) * k), CGFloat(rest.1 + (amber.1 - rest.1) * k),
+                                                     CGFloat(rest.2 + (amber.2 - rest.2) * k)).cgColor
+                    if k == 0 { content.layer?.borderWidth = 1; t.invalidate() }
+                }
             }
         }
 

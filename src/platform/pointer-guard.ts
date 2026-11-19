@@ -82,6 +82,15 @@ const pointAt = (x: unknown, y: unknown) => {
   if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return;
   try { onAgentPoint?.(Math.round(x), Math.round(y)); } catch { /* cosmetic */ }
 };
+/**
+ * Told when the agent starts waiting, and when it stops (null): a wait it asked for, or an app it started that is still
+ * coming up. The pill says "waiting" then (owner, 2026-11-19), not "running in background".
+ */
+let onAgentWait: ((what: string | null) => void) | null = null;
+export function setOnAgentWait(f: ((what: string | null) => void) | null): void { onAgentWait = f; }
+export function agentWaiting(what: string | null): void {
+  try { onAgentWait?.(what); } catch { /* cosmetic */ }
+}
 /** Told before every agent act, as the pill is: what was read from the screen before it is stale (ocr-engine.ts). */
 const actListeners: Array<() => void> = [];
 export function onAgentAct(f: () => void): void {
@@ -316,7 +325,11 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
   // A launch types into the Start menu / Spotlight itself: its own keys run inside this one guarded call.
   wrap('launchApp', async (g, f, args, nested) => {
     if (!nested) { g.stopCheck(); await g.turn?.(true); announce('launchApp'); }
-    const r = await f(...args) as { pid?: number; title?: string } | undefined;
+    // The launch waits for the app's window: the pill says so ("waiting for Designcenter to load") until it is up.
+    const app = typeof args[0] === 'string' && args[0].trim() ? args[0].trim().slice(0, 40) : 'the app';
+    if (!nested) agentWaiting(`waiting for ${app} to load`);
+    let r: { pid?: number; title?: string } | undefined;
+    try { r = await f(...args) as { pid?: number; title?: string } | undefined; } finally { if (!nested) agentWaiting(null); }
     await g.launched(r, typeof args[0] === 'string' ? args[0] : undefined);
     announce('launchApp');  // again, now that the launched window is known: the outline goes to it
     return r;
