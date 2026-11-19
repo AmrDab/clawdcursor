@@ -537,6 +537,18 @@ export interface MacAx {
    */
   typeUnicode(text: string): Promise<boolean>;
   /**
+   * Post `text` as key events through the helper's CGEvent path (0.3–0.6 s per call through System Events, tens of ms here).
+   * True only when the helper is built AND the helper itself reported that this process may post key events
+   * (CGPreflightPostEventAccess): false means nothing was sent and the caller uses System Events. A timeout throws.
+   */
+  postText(text: string): Promise<boolean>;
+  /**
+   * Post one key (a virtual key code, with modifier flags) through the helper: `phase` tap = down then up. Same contract as
+   * `postText`. `usLayout`: the code names a letter / digit / punctuation key of a US keyboard, so the helper refuses (false)
+   * when another layout is active, where that code is a different character.
+   */
+  postKey(key: { code: number; mods: string[]; phase: 'tap' | 'down' | 'up'; usLayout?: boolean }): Promise<boolean>;
+  /**
    * Bring a window of the process `pid` to the front — `title` (a substring, case-insensitive) picks one among THAT process's
    * windows. Null when the helper is not available (the caller falls back). A refusal — no such window, or the focus went to
    * another app, which the error names — throws `MacAxError`. System Events cannot do this when two processes share a name.
@@ -632,6 +644,8 @@ export function createMacAx(deps: MacAxDeps): MacAx {
   let helperRetryAt = 0;
   const helperUsable = (): boolean => process.env.CLAWD_NO_MAC_AX !== '1' && Date.now() >= helperRetryAt;
   const helperFailed = (): void => { helperRetryAt = Date.now() + HELPER_RETRY_MS; };
+  /** After the helper refused key events (no permission, wrong layout, locked), System Events carries the keys for this long. */
+  let keysBlockedUntil = 0;
   /** "…run `xcode-select --install`" when that is why the fast path is missing. */
   const hint = (): string => { const h = deps.helperUnavailableHint?.(); return h ? ` ${h}` : ''; };
   const withHint = (err: MacAxError): MacAxError => { err.message += hint(); return err; };
@@ -690,6 +704,22 @@ export function createMacAx(deps: MacAxDeps): MacAx {
     }
     if (!reply.ok) throw helperError(reply, what, opts.act);
     return reply;
+  }
+
+  /**
+   * Key events through the helper, for the callers that have System Events as the fallback: false (nothing was sent) when the
+   * helper is not built — it is never waited for here, the build starts for next time — or refused the keys. A refusal is
+   * remembered for HELPER_RETRY_MS, so a Mac whose process may not post events pays for one failed spawn, not one per key.
+   * A timeout still throws: the keys may already be partly typed.
+   */
+  async function viaKeys(args: string[], budgetMs: number, input?: string): Promise<boolean> {
+    if (Date.now() < keysBlockedUntil) return false;
+    try {
+      return (await viaHelper(args, budgetMs + HELPER_GRACE_MS, 'key input', { waitForBuild: false, input, act: true })) !== null;
+    } catch (err) {
+      if (err instanceof MacAxError && err.kind !== 'timeout') { keysBlockedUntil = Date.now() + HELPER_RETRY_MS; return false; }
+      throw err;
+    }
   }
 
   /**
@@ -1021,6 +1051,17 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       return toInvokeResult(out);
     },
 
+    async postText(text: string): Promise<boolean> {
+      const s = viaStdin({ text });
+      const budget = HELPER_TYPE_BASE_MS + [...text].length * HELPER_TYPE_PER_CHAR_MS;
+      return viaKeys(['type', '--timeout-ms', String(budget), ...s.args], budget, s.input);
+    },
+
+    async postKey(key: { code: number; mods: string[]; phase: 'tap' | 'down' | 'up'; usLayout?: boolean }): Promise<boolean> {
+      return viaKeys(['key', '--code', String(key.code), '--mods', key.mods.join(','), '--phase', key.phase,
+        ...(key.usLayout ? ['--us-layout', '1'] : []), '--timeout-ms', String(HELPER_TYPE_BASE_MS)], HELPER_TYPE_BASE_MS);
+    },
+
     async typeUnicode(text: string): Promise<boolean> {
       const s = viaStdin({ text });
       // ~4 ms per character in the helper, plus the time to start it.
@@ -1087,6 +1128,21 @@ let devTools: Promise<boolean> | null = null;
 let devToolsKnown: boolean | null = null;
 const devToolsInstalled = (): Promise<boolean> =>
   (devTools ??= execFileAsync('xcode-select', ['-p'], { timeout: 5_000 }).then(() => true, () => false).then(ok => { devToolsKnown = ok; return ok; }));
+
+/**
+ * Build the helper now instead of at the first call: `grant`, `doctor` and the install run this. Never throws and never
+ * fails its caller: 'unavailable' (no Command Line Tools, a failed compile, CLAWD_NO_MAC_AX=1) leaves the build to the first use.
+ */
+export async function prebuildMacAxHelper(): Promise<'ready' | 'built' | 'unavailable'> {
+  try {
+    if (process.env.CLAWD_NO_MAC_AX === '1') return 'unavailable';
+    if (macAxBinary.cached(AX_HELPER_SCRIPT)) return 'ready';
+    const bin = await makeHelperBuilder({ devToolsInstalled, compile: () => macAxBinary.compile(AX_HELPER_SCRIPT) })();
+    return bin ? 'built' : 'unavailable';
+  } catch {
+    return 'unavailable';
+  }
+}
 
 /** For `clawdcursor doctor`. */
 export function macAxStatus(): Promise<{ state: HelperState; detail: string }> {

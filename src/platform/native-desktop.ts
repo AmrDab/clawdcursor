@@ -600,6 +600,9 @@ export class NativeDesktop {
         await typeTextMac(defaultMacAx(), text, 10000);
         return;
       }
+      // The helper's key events when it is built and may post them; otherwise System Events, as before.
+      const { defaultMacAx: macAx } = await import('./mac-ax');
+      if (await macAx().postText?.(text)) return;
       const escaped = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
       try {
         // The program (which contains the text) goes to osascript on stdin: argv is readable by every process on the Mac.
@@ -676,9 +679,11 @@ export class NativeDesktop {
   private async macKeyPress(keyCombo: string): Promise<void> {
     // A system dialog or the lock screen owning the keyboard refuses here (a bare Escape is never checked).
     await this.guardMacKeys(keyCombo);
-    const { MAC_MODIFIER, runAppleScript, hasNonAscii, refuseNonAsciiChord, typeTextMac } = await import('./mac-keyboard');
+    const { MAC_MODIFIER, runAppleScript, hasNonAscii, pressKeyMac, refuseNonAsciiChord, typeTextMac } = await import('./mac-keyboard');
 
     if (keyCombo === '+') {
+      const { defaultMacAx } = await import('./mac-ax');
+      if (await pressKeyMac(defaultMacAx(), { char: '+', mods: [] })) return;
       await runAppleScript('tell application "System Events" to keystroke "+"', 5000);
       return;
     }
@@ -690,11 +695,12 @@ export class NativeDesktop {
     }
     // Modifier names → System Events syntax, by the aliases keys.ts knows (mod / cmd / meta = Cmd, opt = Option). An
     // unknown one is refused before anything is pressed: dropped, `opt+x` typed a plain x.
-    const modUsing = parts.slice(0, -1).map(m => {
+    const modNames = parts.slice(0, -1).map(m => {
       const mod = modifierOf(m, 'darwin');
       if (!mod) throw new Error(`Unknown modifier: "${m}"`);
-      return `${MAC_MODIFIER[mod].name} down`;
+      return MAC_MODIFIER[mod].name;
     });
+    const modUsing = modNames.map(n => `${n} down`);
 
     const specialKeys: Record<string, string> = {
       'return': 'key code 36', 'enter': 'key code 36',
@@ -722,6 +728,14 @@ export class NativeDesktop {
       const { defaultMacAx } = await import('./mac-ax');
       await typeTextMac(defaultMacAx(), key, 5000);
       return;
+    }
+    // The helper's CGEvent keys first (never for a modifier key on its own); System Events when it cannot take this key.
+    if (!bareModifier) {
+      const fast = special ? { code: Number(special.slice('key code '.length)) } : key.length === 1 ? { char: key } : null;
+      if (fast) {
+        const { defaultMacAx } = await import('./mac-ax');
+        if (await pressKeyMac(defaultMacAx(), { ...fast, mods: modNames })) return;
+      }
     }
     if (special) {
       if (modUsing.length > 0) {

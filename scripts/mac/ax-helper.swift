@@ -25,6 +25,7 @@
 //   ax-helper find      [--pid N] [--name S] [--role R] [--id S] [--max-results N] [--timeout-ms N]
 //   ax-helper invoke    [--pid N] --action A [--name S] [--role R] [--id S] [--value V] [--timeout-ms N]
 //   ax-helper type      --text S [--timeout-ms N]   (types into whatever has the keyboard; send --text via --args-stdin)
+//   ax-helper key       --code N [--mods command,shift,option,control] [--phase tap|down|up] [--us-layout 1] [--timeout-ms N]
 //   (every command also takes --ax-timeout-ms N: how long ONE call to ONE app may block, and
 //    --args-stdin 1: read name / id / value / … as one JSON object of strings from stdin instead of argv — argv is
 //    readable by every process on the Mac while this one runs)
@@ -32,6 +33,7 @@
 // Secure text fields: their value is never read out of the process.
 import AppKit
 import ApplicationServices
+import Carbon.HIToolbox
 import CoreGraphics
 import Foundation
 
@@ -1659,6 +1661,52 @@ func cmdType() -> Never {
     emit(["ok": true, "typed": typed])
 }
 
+// MARK: - key
+
+/// Is the active keyboard layout a US one? A letter key's virtual key code is a position on a US keyboard: on another layout
+/// the same code is another character, so a shortcut aimed by letter would press the wrong key.
+func layoutIsUS() -> Bool {
+    guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+          let raw = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) else { return false }
+    let id = Unmanaged<CFString>.fromOpaque(raw).takeUnretainedValue() as String
+    return id == "com.apple.keylayout.US" || id == "com.apple.keylayout.ABC"
+}
+
+/// One key by virtual key code, with modifier flags: --phase tap (down then up, the default), down or up. The modifiers are
+/// flags on the key's own events, added to the flags the system already holds, so a modifier the agent holds with key-down stays.
+/// Refuses (kind "permission") when this process may not post key events, so the caller sends the key another way: a key that
+/// is posted and silently dropped is the failure to avoid. --us-layout 1: the code was picked from a US keyboard's letters, so
+/// any other active layout is refused (kind "failed").
+func cmdKey() -> Never {
+    requireUsableSession()
+    guard let code = UInt16(opts["code"] ?? "") else { fail("failed", "key: needs --code N") }
+    let phase = opts["phase"] ?? "tap"
+    guard ["tap", "down", "up"].contains(phase) else { fail("failed", "key: --phase is tap, down or up") }
+    var flags: CGEventFlags = []
+    for m in (opts["mods"] ?? "").split(separator: ",") {
+        switch m {
+        case "command": flags.insert(.maskCommand)
+        case "shift": flags.insert(.maskShift)
+        case "option": flags.insert(.maskAlternate)
+        case "control": flags.insert(.maskControl)
+        default: fail("failed", "key: unknown modifier \"\(m)\"")
+        }
+    }
+    if #available(macOS 10.15, *), !CGPreflightPostEventAccess() {
+        fail("permission", "the app running clawdcursor may not post keyboard events (System Settings → Privacy & Security → Accessibility)")
+    }
+    if opts["us-layout"] == "1" && !layoutIsUS() { fail("failed", "key: the active keyboard layout is not a US one") }
+    let source = CGEventSource(stateID: .hidSystemState)
+    var events: [CGEvent] = []
+    for down in (phase == "tap" ? [true, false] : [phase == "down"]) {
+        guard let ev = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(code), keyDown: down) else { fail("failed", "key: could not build the key event") }
+        if !flags.isEmpty { ev.flags.formUnion(flags) }
+        events.append(ev)
+    }
+    for ev in events { ev.post(tap: .cghidEventTap) }
+    emit(["ok": true])
+}
+
 // MARK: - pagetext
 
 /// The whole text of the frontmost app's document — what VoiceOver reads — with no keystrokes: nothing is selected and
@@ -1742,5 +1790,6 @@ case "type": cmdType()
 case "focus": cmdFocus()
 case "pagetext": cmdPageText()
 case "window-of": cmdWindowOf()
-default: fail("failed", "usage: ax-helper windows|window-at|window-of|active|frontmost|idle|apps|focused|tree|find|invoke|type|focus|pagetext [options] (got \"\(command)\")")
+default: fail("failed", "usage: ax-helper windows|window-at|window-of|active|frontmost|idle|apps|focused|tree|find|invoke|type|key|focus|pagetext [options] (got \"\(command)\")")
 }
+case "key": cmdKey()

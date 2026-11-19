@@ -277,6 +277,10 @@ program
       console.error(`❌ Failed to request permissions: ${err}`);
       console.error(`   ${nativeBuildHint()}`);
     }
+    // Build the accessibility helper now rather than at the first call. Never fails grant: it is built on first use otherwise.
+    const { prebuildMacAxHelper } = await import('../platform/mac-ax');
+    const helper = await prebuildMacAxHelper();
+    if (helper !== 'unavailable') console.log(`   Accessibility helper: ${helper === 'built' ? 'built' : 'ready'}`);
   });
 
 program

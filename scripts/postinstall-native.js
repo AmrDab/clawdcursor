@@ -44,4 +44,14 @@ try {
 } catch (_e) {
   console.log('[clawdcursor] Native macOS helper build failed (non-fatal). Build manually with: cd "' + nativeDir + '" && ./build.sh');
 }
-process.exit(0);
+
+// The accessibility helper (scripts/mac/ax-helper.swift) is built on first use otherwise; building it here saves the first
+// call that wait. Best effort like everything above: any failure leaves the build to first use.
+(async () => {
+  try {
+    const { prebuildMacAxHelper } = require('../dist/platform/mac-ax');
+    const state = await prebuildMacAxHelper();
+    if (state === 'built') console.log('[clawdcursor] Accessibility helper built.');
+  } catch (_e) { /* built on first use */ }
+  process.exit(0);
+})();

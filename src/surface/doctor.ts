@@ -9,7 +9,7 @@
 import pc from 'picocolors';
 import { NativeDesktop } from '../platform/native-desktop';
 import { AccessibilityBridge } from '../platform/accessibility';
-import { macAxStatus } from '../platform/mac-ax';
+import { macAxStatus, prebuildMacAxHelper } from '../platform/mac-ax';
 import { DEFAULT_CONFIG } from '../types';
 import { getPackageRoot } from '../paths';
 import { hasConsent } from './onboarding';
@@ -140,6 +140,7 @@ export async function runDoctor(): Promise<void> {
 
       // The fast accessibility helper (window list / trees in tens of ms). Missing Command Line Tools is not a
       // failure — the osascript path still works — but it is slower, and the fix is one command.
+      await prebuildMacAxHelper();   // build it now rather than at the first call; a failure only leaves the status below as it was
       const helper = await macAxStatus();
       results.push({ name: 'macOS accessibility helper', ok: true, detail: helper.detail });
       console.log(`   ${helper.state === 'no-devtools' ? '⚠️ ' : '✅'} Accessibility helper: ${helper.detail}`);
