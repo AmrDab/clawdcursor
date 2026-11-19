@@ -1218,14 +1218,14 @@ export class CDPDriver {
         if (hit && 'hit' in hit) return { success: true, frame: this.frameUrl(hit.frame) };
         if (Date.now() >= deadline) {
           if (hit) return this.foreign(hit.foreign);
-          return { success: false, error: `Timeout waiting for "${selector}": not visible in ${await this.searched(inFrame)} after ${timeoutMs}ms` };
+          return { success: false, error: `timed out waiting for "${selector}": not visible in ${await this.searched(inFrame)} after ${timeoutMs}ms` };
         }
         await new Promise(r => setTimeout(r, 250));
       }
     } catch (err) {
       return {
         success: false,
-        error: `Timeout waiting for "${selector}": ${err instanceof Error ? err.message : String(err)}`,
+        error: `timed out waiting for "${selector}": ${err instanceof Error ? err.message : String(err)}`,
       };
     }
   }

@@ -196,7 +196,7 @@ export function getSmartTools(): ToolDefinition[] {
             const page = ctx.cdp.getPage();
             if (page) {
               const title = await page.title().catch(() => '');
-              const text = await page.evaluate(() => document.body?.innerText?.substring(0, 5000) || '').catch(() => '');
+              const text = await ctx.cdp.readText('body', 5000).catch(() => '');   // page + same-origin iframes, like browser read_text
               if (text) {
                 return { text: `[via CDP — ${quoteScreenText(title)}]\n${wrapUntrustedScreenContent(text)}` };
               }

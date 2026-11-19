@@ -754,6 +754,23 @@ describe('Smart Tools', () => {
       expect(mockGetScreenContext.mock.calls[0][1]).toBe(false);
     });
 
+    // #411: the CDP fallback reads through the driver, so an iframe's text comes back too (not document.body.innerText).
+    it('CDP fallback reads the page through cdp.readText (iframes included)', async () => {
+      mockGetScreenContext.mockResolvedValue('');
+      const readText = vi.fn().mockResolvedValue('Outer page\n\n--- iframe https://app.example ---\neditor text');
+      const evaluate = vi.fn();
+      const ctx = createCtx({ cdp: {
+        isConnected: vi.fn().mockResolvedValue(true),
+        getPage: vi.fn().mockReturnValue({ title: async () => 'Doc', evaluate }),
+        readText,
+      } });
+      const result = await withOcr([], () => smartRead.handler({ scope: 'window' }, ctx));
+      expect(readText).toHaveBeenCalledWith('body', 5000);
+      expect(evaluate).not.toHaveBeenCalled();
+      expect(result.text).toContain('[via CDP');
+      expect(result.text).toContain('editor text');
+    });
+
     it('reads focused element for focused scope', async () => {
       mockGetFocusedElement.mockResolvedValue({
         name: 'Search',
