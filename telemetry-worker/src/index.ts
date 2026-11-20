@@ -5,12 +5,14 @@
  * never read or stored; the only time kept is the server's own receive time. Events older than 90 days are deleted daily.
  */
 
-import { HOSTS, FAILED, ERROR_CLASSES, HELPERS, PS_BRIDGE_STEP, EXIT_REASONS, ARCHS, APP_KINDS, NAME as NAME_RE } from '../../src/core/observability/telemetry-lists';
+import { HOSTS, FAILED, ERROR_CLASSES, HELPERS, PS_BRIDGE_STEP, EXIT_REASONS, ARCHS, APP_KINDS, NAMES } from '../../src/core/observability/telemetry-lists';
 import { RESULT_CODES } from '../../src/core/result-code-list';
 
 interface D1Statement { bind(...values: unknown[]): D1Statement; run(): Promise<unknown> }
 interface D1Database { prepare(sql: string): D1Statement; batch(statements: D1Statement[]): Promise<unknown> }
-export interface Env { DB: D1Database }
+/** The Workers Rate Limiting binding (wrangler.toml). Optional: without it nothing is limited. */
+interface RateLimiter { limit(o: { key: string }): Promise<{ success: boolean }> }
+export interface Env { DB: D1Database; LIMITER?: RateLimiter }
 
 export const MAX_EVENTS = 50;
 export const MAX_BODY = 32 * 1024;
@@ -28,7 +30,8 @@ const record = (fields: Record<string, Rule>): Rule => v =>
 
 
 const NUM = int(2 ** 31 - 1);   // the client clamps to this
-const NAME = match(NAME_RE);
+const NAME = oneOf(...NAMES, 'other');   // a closed list: the registered tool and action names, else "other"
+const NAME_SHAPE = /^[a-z][a-z0-9_-]{0,39}$/;
 const own = <T>(o: Record<string, T>, k: string): T | null => (Object.prototype.hasOwnProperty.call(o, k) ? o[k] : null);
 const COMMON: Record<string, Rule> = {
   id: match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/),
@@ -80,19 +83,32 @@ export function validEvent(e: unknown): e is Event {
   return Object.keys(COMMON).every(k => k in o) && Object.entries(fields).every(([k, [, required]]) => !required || k in o);
 }
 
+/** A name that has the shape of one but is not on the list (a tool added since this Worker was deployed) is stored as "other". */
+function knownNames(e: unknown): unknown {
+  if (!e || typeof e !== 'object' || Array.isArray(e)) return e;
+  const o = { ...(e as Record<string, unknown>) };
+  for (const k of ['tool', 'action']) {
+    const v = o[k];
+    if (typeof v === 'string' && NAME_SHAPE.test(v) && !(NAMES as readonly string[]).includes(v)) o[k] = 'other';
+  }
+  return o;
+}
+
 /** A request body: the valid events in it, or null when the body itself is wrong (not a JSON array, too big, too many). */
 export function validate(body: string): Event[] | null {
   if (new TextEncoder().encode(body).length > MAX_BODY) return null;
   let parsed: unknown;
   try { parsed = JSON.parse(body); } catch { return null; }
   if (!Array.isArray(parsed) || parsed.length > MAX_EVENTS) return null;
-  return parsed.filter(validEvent);
+  return parsed.map(knownNames).filter(validEvent);
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (new URL(request.url).pathname !== '/v1/events') return new Response(null, { status: 404 });
     if (request.method !== 'POST') return new Response(null, { status: 405 });
+    // One shared budget for the whole endpoint, so a flood cannot use up the D1 write quota. The client's address is never read.
+    if (env.LIMITER && !(await env.LIMITER.limit({ key: 'ingest' })).success) return new Response(null, { status: 429 });
     // Before reading: a body declared too big is never buffered. The check after the read catches one that is not declared.
     if (Number(request.headers.get('content-length')) > MAX_BODY) return new Response(null, { status: 413 });
     const raw = await request.arrayBuffer();
@@ -112,6 +128,7 @@ export default {
   },
 
   async scheduled(_event: unknown, env: Env): Promise<void> {
-    await env.DB.prepare('DELETE FROM events WHERE received_at < ?').bind(Date.now() - RETENTION_MS).run();
+    // By day, which has an index: a delete on received_at would read every row.
+    await env.DB.prepare('DELETE FROM events WHERE day < ?').bind(new Date(Date.now() - RETENTION_MS).toISOString().slice(0, 10)).run();
   },
 };

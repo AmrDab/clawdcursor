@@ -19,8 +19,9 @@ vi.mock('../paths', async (importOriginal) => {
 import { logger } from '../core/observability/logger';
 import {
   offReason, reduceStack, flush, allowNames, setHost, setTelemetryEnabled, readState, toEvent, spoolBeforeExit,
-  __setSenderForTests, COMMON_FIELDS, SENT_FIELDS, STATE_FILE, SPOOL_FILE, TELEMETRY_URL,
+  __setSenderForTests, __resetNoticeForTests, COMMON_FIELDS, SENT_FIELDS, STATE_FILE, SPOOL_FILE, TELEMETRY_URL,
 } from '../core/observability/telemetry';
+import { NAMES } from '../core/observability/telemetry-lists';
 import { getPackageRoot } from '../paths';
 import { VERSION } from '../version';
 import { getAllTools, getCompactSurface } from '../tools/registry';
@@ -40,6 +41,7 @@ function enableForTest(): string[] {
 afterEach(() => {
   vi.unstubAllEnvs();
   __setSenderForTests(null);
+  __resetNoticeForTests();
   fs.rmSync(STATE_FILE, { force: true });
   fs.rmSync(SPOOL_FILE, { force: true });
   vi.restoreAllMocks();
@@ -137,7 +139,7 @@ describe('what is sent', () => {
   it('the 200-event cap is per UTC day: a long-running daemon reports again the next day', async () => {
     const bodies = enableForTest();
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date('2030-01-01T12:00:00Z'));
       for (let i = 0; i < 201; i++) logger.info('tool.done', { tool: 'x', ms: 1, outcome: 'error' });
@@ -167,6 +169,31 @@ describe('what is sent', () => {
     expect(readState().noticeShown).toBe(true);
   });
 
+  it('the notice goes once per process even when the state file cannot be written', () => {
+    enableForTest();
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    fs.mkdirSync(STATE_FILE);   // a folder where the file should be: every write fails, as on a read-only home
+    try {
+      for (let i = 0; i < 3; i++) logger.info('tool.done', { tool: 'x', ms: 1, outcome: 'error' });
+    } finally { fs.rmSync(STATE_FILE, { recursive: true, force: true }); }
+    expect(err.mock.calls.filter(c => String(c[0]).includes('clawdcursor optout'))).toHaveLength(1);
+  });
+
+  it('the notice names what the docs name: the install id, the version, the OS and host app', () => {
+    enableForTest();
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    logger.info('tool.done', { tool: 'x', ms: 1, outcome: 'error' });
+    const notice = String(err.mock.calls.find(c => String(c[0]).includes('optout'))?.[0]);
+    for (const word of ['install id', 'version', 'OS', 'host app', 'error codes', 'file:line']) expect(notice).toContain(word);
+  });
+
+  it('a client called clawdcursor-bench-* is not the host "cursor"; Cursor itself is', () => {
+    for (const [client, want] of [['clawdcursor-bench-ollama', 'other'], ['clawdcursor-bench-probe', 'other'], ['cursor-vscode', 'cursor'], ['Cursor', 'cursor']]) {
+      setHost(client);
+      expect(toEvent('mcp.start', {})?.host, client).toBe(want);
+    }
+  });
+
   it('opting out drops what is queued', async () => {
     const bodies = enableForTest();
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
@@ -175,6 +202,35 @@ describe('what is sent', () => {
     await flush();
     expect(bodies).toEqual([]);
   });
+});
+
+describe('the published field list', () => {
+  // Every field the client may send, with the words the three public texts use for it. A field added to SENT_FIELDS or
+  // COMMON_FIELDS without a line here (and so without a look at the docs) fails this test.
+  const WORDS: Record<string, RegExp> = {
+    'id': /install id/, 'v': /version/, 'os': /OS family/,
+    'start.osVer': /OS major version/, 'start.arch': /CPU architecture/, 'start.node': /Node(\.js)? major version/,
+    'start.host': /host app|which AI app/, 'start.surface': /compact or granular/,
+    'crash.kind': /uncaught/, 'crash.cls': /error class/, 'crash.code': /error code|class and code/, 'crash.frames': /file:line|file and line/,
+    'exit.reason': /reason/, 'exit.tool': /tool and action/, 'exit.action': /tool and action|action cut off/, 'exit.ms': /how long/,
+    'call_failed.tool': /tool and action/, 'call_failed.action': /tool and action/, 'call_failed.code': /result code/,
+    'call_failed.outcome': /outcome/, 'call_failed.ms': /how long it took|duration/, 'call_failed.app': /Electron/,
+    'slow_call.tool': /tool and action/, 'slow_call.action': /tool and action/, 'slow_call.ms': /how long it took|duration/, 'slow_call.steps': /steps/,
+  };
+  const sent = [...COMMON_FIELDS.filter(f => f !== 'event'), ...Object.entries(SENT_FIELDS).flatMap(([e, fs_]) => fs_.map(f => `${e}.${f}`))];
+  const root = path.join(__dirname, '..', '..');
+
+  it('pins the fields sent', () => {
+    expect(sent.sort()).toEqual(Object.keys(WORDS).sort());
+  });
+
+  for (const file of ['README.md', 'docs/index.html', 'docs/llms.txt']) {
+    it(`${file} covers every field`, () => {
+      const text = fs.readFileSync(path.join(root, file), 'utf8').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ');
+      const missing = Object.entries(WORDS).filter(([, re]) => !re.test(text)).map(([f]) => f);
+      expect(missing).toEqual([]);
+    });
+  }
 });
 
 describe('when it is off', () => {
@@ -276,6 +332,46 @@ describe('the Worker', () => {
         expect(validEvent(JSON.parse(JSON.stringify({ ...good, tool: t.name, action }))), `${t.name} ${action ?? ''}`).toBe(true);
       }
     }
+  });
+
+  it('an unknown name is stored as "other"; a registered name and "other" are kept', () => {
+    const named = (tool: string, action?: string) => ({ ...good, tool, ...(action ? { action } : {}) });
+    expect(validate(JSON.stringify([named('computer', 'alice_smith'), named('alice_smith'), named('other', 'other'), named('computer', 'click')])))
+      .toEqual([named('computer', 'other'), named('other'), named('other', 'other'), named('computer', 'click')]);
+  });
+
+  it('a name that is not a string or has the wrong shape still fails the event', () => {
+    const named = (tool: unknown, action?: unknown) => ({ ...good, tool, ...(action === undefined ? {} : { action }) });
+    expect(validate(JSON.stringify([named(5), named('computer', 7), named('Alice Smith'), named('computer', 'C:\Users\alice'), named('a'.repeat(41)), named('computer', 'click')])))
+      .toEqual([named('computer', 'click')]);
+  });
+
+  it('the list of names in the Worker is the registry list, no more and no less', () => {
+    const registered = new Set<string>();
+    for (const t of [...getAllTools(), ...getCompactSurface()]) { registered.add(t.name); for (const a of t.parameters.action?.enum ?? []) registered.add(a); }
+    expect([...NAMES].sort()).toEqual([...registered].sort());
+  });
+
+  it('answers 429 when the rate limit is spent, before reading the body, and takes a request while it is not', async () => {
+    const arrayBuffer = vi.fn(async () => new TextEncoder().encode('[]').buffer);
+    const req = { url: 'https://telemetry.clawdcursor.com/v1/events', method: 'POST', headers: new Headers(), arrayBuffer } as unknown as Request;
+    const limit = vi.fn(async () => ({ success: false }));
+    expect((await worker.fetch(req, { LIMITER: { limit } } as unknown as Env)).status).toBe(429);
+    expect(arrayBuffer).not.toHaveBeenCalled();
+    expect(limit).toHaveBeenCalledWith({ key: 'ingest' });
+    expect((await worker.fetch(req, { LIMITER: { limit: async () => ({ success: true }) } } as unknown as Env)).status).toBe(204);
+  });
+
+  it('retention deletes by the indexed day column, 90 days back', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2030-06-30T03:17:00Z'));
+    try {
+      const bind = vi.fn(() => ({ run: async () => undefined }));
+      const prepare = vi.fn(() => ({ bind }));
+      await worker.scheduled(null, { DB: { prepare, batch: async () => undefined } } as unknown as Env);
+      expect(prepare).toHaveBeenCalledWith('DELETE FROM events WHERE day < ?');
+      expect(bind).toHaveBeenCalledWith('2030-04-01');
+    } finally { vi.useRealTimers(); }
   });
 
   it('rejects a body that is not a JSON array, too long, or too big', () => {

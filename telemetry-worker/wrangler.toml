@@ -16,6 +16,14 @@ binding = "DB"
 database_name = "clawdcursor-telemetry"
 database_id = "12d7ee45-a1b5-4b65-93b8-148e6bd86be1"
 
+# One shared budget for the endpoint (the Worker never reads the sender's address): 600 requests a minute.
+# Real use is a few requests per install per day. The Worker runs without it when the binding is absent.
+[[unsafe.bindings]]
+name = "LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 600, period = 60 }
+
 # Daily: delete events older than 90 days.
 [triggers]
 crons = ["17 3 * * *"]

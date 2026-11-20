@@ -172,7 +172,7 @@ fails, times out or reads nothing (tool and action name, result code, outcome,
 duration, and whether the app was a browser, Electron or native); `slow_call`
 over 10 s (tool and action name, duration, slow helper steps by name); `exit`
 when the server exits during a call or was killed (reason class, the tool and
-action cut off, how long they ran); `crash` (error class and code, file:line in
+action cut off, how long they ran); `crash` (uncaught or rejected, error class and code, file:line in
 clawdcursor's own code). Never sent: error messages, screen or OCR text, typed
 text, clipboard, screenshots, window titles, URLs, element names, the names of the
 apps being driven, file paths outside clawdcursor, user names, emails or IP
