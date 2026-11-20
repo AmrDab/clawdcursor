@@ -7,6 +7,7 @@ import type { UnifiedTool, UnifiedToolResult, AgentToolContext } from './types';
 import type { ToolDefinition, ToolContext, ToolResult, ParameterDef } from '../types';
 import { TOOL_META } from './tool-meta';
 import { expectRefusal, checkExpect } from '../../core/sense/reactive-check';
+import { startRegionWatch } from '../pixel-watch';
 import { getSmartTools } from '../smart';
 import { quoteScreenText } from '../../core/untrusted-screen-content';
 
@@ -206,13 +207,14 @@ export function projectToToolDefinition(t: UnifiedTool): ToolDefinition {
     const refusal = expectRefusal(params.expect);
     if (refusal) return { text: refusal, isError: true };
     const agentCtx = await toolContextToAgent(ctx);
+    const regions = await startRegionWatch(params.expect, ctx);   // frames of the `expect` regions, before the act
     agentCtx.platform.takeRouteNote?.();   // a note left by an earlier call is not this call's
     let result = await t.execute(params, agentCtx);
     if (t.name === 'invoke_element') result = await pressVisibleLabel(params, result, ctx);
     const route = agentCtx.platform.takeRouteNote?.();
     if (route) result = { ...result, text: `${result.text} (${route})` };
     const executed = result.success;
-    const checked = await checkExpect(params.expect, result, agentCtx.platform);
+    const checked = await checkExpect(params.expect, result, agentCtx.platform, regions);
     if (checked) result = { ...result, ...checked };
     // Invalidate the shared UIMap holder only when the screen-changing action
     // actually TOOK (pre-expect outcome — a DEVIATION still means the input
