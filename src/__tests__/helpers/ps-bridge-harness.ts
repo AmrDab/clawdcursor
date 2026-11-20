@@ -197,11 +197,12 @@ function New-TogglePattern([string]$State = 'On') {
 
 /** The bridge functions a by-name invoke-element runs through; INVOKE_SETUP fakes the rest (one window, no dialog). */
 export const INVOKE_FUNCTIONS = ['Cmd-InvokeElement', 'Test-NameMatch', 'Select-InvokeTarget', 'Test-RectOnMonitor', 'Get-MonitorRects',
-  'Resolve-EditableTarget', 'Test-Activatable', 'Select-Item'];
+  'Resolve-EditableTarget', 'Test-Activatable', 'Select-Item', 'Get-WithinWindow', 'ConvertTo-TitleKey'];
 /** Invoke-Fake <elements> <cmd hashtable>: Cmd-InvokeElement on a window holding those elements -> its reply as one JSON line. */
 export const INVOKE_SETUP = `${FAKE_UIA}
 $script:window = $null
 function Get-ProcessScopeWindows { param($wpid) return $script:window }
+function Get-PidWindowCandidates { param($wpid) return ,@() }
 function Get-ScopeOtherWindows { param($a, $b) return 0 }
 function Test-WindowMinimized { param($w) return $false }
 function Get-FocusedDialog { return $null }

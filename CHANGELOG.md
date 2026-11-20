@@ -31,6 +31,10 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **The granular `minimize_window` really minimizes**, as `minimize_window_to_taskbar` does; it used to press Win+Down, which
   restored a maximized window.
 
+- **Hints name a tool and its action in words** ("the browser tool, action page_context"), not as call-shaped text such as `browser {"action":"page_context"}`: a host prefixes the tool names, so the bare name was not a tool it had. On the granular surface they name the granular tool.
+- **`within` reaches another top-level window of the same app**, such as a browser's "Restore pages?" bubble, when it matches that window's title (Windows).
+- **When a typed submit is held and the focus is not on a text field, the result says where the focus is** ("the focus is on Pane 'Profiles', not a text field") instead of blaming an autocomplete suggestion.
+- **The setup and doctor hints tell users to register `clawdcursor mcp --compact`.**
 
 ## [2.2.0] - 2026-11-18
 

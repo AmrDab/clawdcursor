@@ -34,7 +34,7 @@ import { findActionButton, findInputField, type FindResult } from '../../core/se
 import { inferCapabilities } from '../../core/sense/ui-map-normalize';
 import type { UIMap, UIElement } from '../../core/sense/ui-map-types';
 import { pasteChoice, CLIPBOARD_HELD_REFUSAL, waitForPaste, writeClipboardVerified, readBackTyped, setResult, setVerdict, fieldRead, typesAsKeys, EMPTY_AFTER_TYPING, selectAllScope, type Retyped } from '../paste-guard';
-import { sleepUnlessStopped, STOPPED_TEXT } from '../../core/control';
+import { sleepUnlessStopped, STOPPED_TEXT, isAgentWindow } from '../../core/control';
 import { timeWait } from '../../core/observability/steps';
 import { unguarded } from '../../platform/pointer-guard';
 import { preferControl, notSelectableReason, failReason, sameElement, inside } from '../../platform/prefer-control';
@@ -42,6 +42,7 @@ import { viaLadder } from '../../platform/ladder';
 import { effectLine, windowChange, type WindowRead } from '../../core/effect';
 import { missText, structuredMissFields, untrusted, targetOf, targetText } from '../../core/miss-text';
 import { sleep } from '../../sleep';
+import { withGuideHint } from '../../core/guides/hint';
 
 /** a11y_get_value returns a value whole up to this size (a long document, not a whole book). */
 const GET_VALUE_MAX = 20_000;
@@ -178,19 +179,56 @@ export function buildUnifiedTools(): UnifiedTool[] {
 
     {
       name: 'list_windows',
-      description: 'List visible top-level windows with title, process, and bounds. Useful when the active window is wrong or missing.',
-      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      description: 'List the open apps (process name, pid, and how many windows each has), and the title, process and bounds of the windows clawdcursor itself opened or worked in. The titles of other windows are not listed: a document title can hold private text. To see one app\'s window titles (to focus or close the right one), pass processName or processId: that app\'s windows are then listed in full.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          processName: { type: 'string', description: 'List only this app\'s windows, with titles (name contains this, any case)' },
+          processId: { type: 'number', description: 'List only this process\'s windows, with titles' },
+        },
+        additionalProperties: false,
+      },
       changesScreen: false,
-      async execute(_args, ctx) {
-        const windows = await ctx.platform.listWindows();
+      async execute(args, ctx) {
+        const all = await ctx.platform.listWindows();
         const active = await ctx.platform.getActiveWindow();
-        const lines = windows.slice(0, 20).map(w => {
+        const wantName = typeof args.processName === 'string' ? args.processName.trim().toLowerCase() : '';
+        const wantPid = typeof args.processId === 'number' ? args.processId : undefined;
+        const filtered = !!wantName || wantPid !== undefined;
+        const windows = filtered
+          ? all.filter(w => (wantPid === undefined || w.processId === wantPid)
+            && (!wantName || String(w.processName ?? '').toLowerCase().includes(wantName)))
+          : all;
+        const line = (w: (typeof all)[number]) => {
           const isActive = active && w.processId === active.processId && w.title === active.title;
           return `${isActive ? '→' : ' '} [${quoteScreenText(String(w.processName ?? ''))}] ${quoteScreenText(String(w.title ?? ''))} pid=${w.processId} ${w.bounds.width}×${w.bounds.height}`;
-        });
-        const more = windows.length > 20 ? `\n… +${windows.length - 20} more windows` : '';
+        };
         const partial = ctx.platform.lastWindowListPartial ? `\n${ctx.platform.lastWindowListPartial}` : '';
-        return { success: true, text: `Windows (${windows.length}):\n${lines.join('\n')}${more}${partial}` };
+        if (filtered) {
+          const shown = windows.slice(0, 20).map(line);
+          const more = windows.length > 20 ? `\n… +${windows.length - 20} more windows` : '';
+          return { success: true, text: `Windows of that app (${windows.length}):\n${shown.join('\n')}${more}${partial}` };
+        }
+        // Titles of windows the user has open are theirs: one list put an unrelated document's name, with a
+        // credential-like string in it, into the model's context. Only the agent's own windows show a title,
+        // and an app's titles come on request (processName or processId).
+        const mine = windows.filter(w => isAgentWindow({ handle: w.handle, processId: w.processId }));
+        const apps = new Map<number, { name: string; count: number; active: boolean }>();
+        for (const w of windows) {
+          if (mine.includes(w)) continue;
+          const isActive = !!active && w.processId === active.processId && w.title === active.title;
+          const a = apps.get(w.processId) ?? { name: String(w.processName ?? ''), count: 0, active: false };
+          a.count++;
+          a.active ||= isActive;
+          apps.set(w.processId, a);
+        }
+        const lines = [
+          ...mine.map(line),
+          ...[...apps].map(([pid, a]) => `${a.active ? '→' : ' '} [${quoteScreenText(a.name)}] pid=${pid}${a.count > 1 ? ` (${a.count} windows)` : ''}`),
+        ];
+        const shown = lines.slice(0, 20);
+        const more = lines.length > 20 ? `\n… +${lines.length - 20} more` : '';
+        return { success: true, text: `Windows (${windows.length}; titles: pass processName or processId):\n${shown.join('\n')}${more}${partial}` };
       },
     },
 
@@ -914,16 +952,21 @@ export function buildUnifiedTools(): UnifiedTool[] {
         if (!empty && (rb.result === 'suffix' || rb.result === 'mismatch') && submit) {
           // Return would submit what the field shows, not what was typed (live: an address bar's suggestion swapped the
           // whole URL). Not pressed; the caller sees what the field shows and decides.
+          // The focus is not on a text field at all (a profile picker, a button): the page's text is not a suggestion.
+          const elsewhere = rb.elsewhere;
           const what = rb.result === 'suffix'
             ? 'the typed text with more after it (an autocomplete suggestion: Delete drops it)'
             : 'different text (a suggestion took over, or the field reformatted it)';
           return {
             success: false,
-            text: `${shown}, but the field shows ${what} — Return not pressed. Check the field: if it is right, press Return; otherwise fix it first.${fieldShows}${inputWarningNote(ctx)}`,
+            text: `${shown}, but ${elsewhere ? `the focus is on ${elsewhere}, not a text field` : `the field shows ${what}`} — Return not pressed. ${elsewhere ? 'Click the field you meant, then type again.' : 'Check the field: if it is right, press Return; otherwise fix it first.'}${fieldShows}${inputWarningNote(ctx)}`,
           };
         }
         if (submit) await ctx.platform.keyPress('Return');
-        const note = empty ? ` ⚠ ${EMPTY_AFTER_TYPING}` : rb.result === 'suffix' && rb.value !== undefined
+        const note = empty ? ` ⚠ ${EMPTY_AFTER_TYPING}`
+          : (rb.result === 'suffix' || rb.result === 'mismatch') && rb.elsewhere
+          ? ` ⚠ read back: the focus is on ${rb.elsewhere}, not a text field; check it before going on.${fieldShows}`
+          : rb.result === 'suffix' && rb.value !== undefined
           ? ` ⚠ read back: the field now holds ${wrapUntrustedScreenContent(truncate(rb.value, 80))} (not only what was typed). If it should hold only this, select the whole field and type again.`
           : rb.result === 'suffix' || rb.result === 'mismatch'
           ? ` ⚠ read back: the field shows different text (an autocomplete suggestion, or the field reformatted it); check it before going on.${fieldShows}`
@@ -1006,7 +1049,9 @@ export function buildUnifiedTools(): UnifiedTool[] {
         await sleep(250);
         // The reply names the window it focused, or says why none (no match, or the several that matched).
         const note = ctx.platform.takeWindowNote?.() ?? null;
-        return { success: ok, text: ok ? note ?? 'Focused matching window.' : ctx.platform.takeFocusFailure?.() ?? 'No matching window found.' };
+        if (!ok) return { success: ok, text: ctx.platform.takeFocusFailure?.() ?? 'No matching window found.' };
+        const w = await Promise.resolve(ctx.platform.getActiveWindow?.()).catch(() => null);
+        return { success: ok, text: withGuideHint(note ?? 'Focused matching window.', { names: [w?.processName ?? '', String(args.processName ?? '')], title: w?.title }) };
       },
     },
 

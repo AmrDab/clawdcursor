@@ -543,7 +543,7 @@ function printPostConsentNextSteps(): void {
   console.log('');
   console.log(`  ${pc.bold('Use clawdcursor from your own agent (Claude Code, Codex, Cursor, ...):')}`);
   console.log('');
-  console.log(`       Register ${pc.cyan('clawdcursor mcp')} with Claude Code, Cursor, Windsurf, Zed, etc.`);
+  console.log(`       Register ${pc.cyan('clawdcursor mcp --compact')} with Claude Code, Cursor, Windsurf, Zed, etc.`);
   console.log(`       No daemon, no API key: your editor spawns clawdcursor on demand.`);
   console.log(`       Or start the HTTP MCP server yourself: ${pc.cyan('clawdcursor agent')} (on :3847).`);
   console.log('');

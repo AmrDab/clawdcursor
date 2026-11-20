@@ -426,6 +426,27 @@ describe('7. type tool — keys for short text, verified paste for long text, re
     expect(result.text).toMatch(/\(555\) 123-4567/);
   });
 
+  // Chrome on its profile picker: the typed URL went to a page, and the reply blamed an autocomplete suggestion.
+  it('a submit held while the focus is not on a text field says where the focus is, not that a suggestion took over', async () => {
+    const ctx = makeCtx();
+    (ctx.platform as any).getFocusedElement = vi.fn(async () => ({ name: 'Who is using Chrome?', controlType: 'Pane', value: 'Who is using Chrome?', bounds: { x: 0, y: 0, width: 1, height: 1 } }));
+    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 'example.com\n' }, ctx);
+    expect(result.success).toBe(false);
+    expect(result.text).toContain("the focus is on Pane 'Who is using Chrome?', not a text field — Return not pressed");
+    expect(result.text).not.toMatch(/suggestion|autocomplete/);
+    expect(ctx.platform.keyPress).not.toHaveBeenCalledWith('Return');
+  });
+
+  it('an edit, document or combo box keeps the suggestion wording', async () => {
+    for (const controlType of ['Edit', 'Document', 'ComboBox']) {
+      const ctx = makeCtx();
+      (ctx.platform as any).getFocusedElement = vi.fn(async () => ({ name: 'Address', controlType, value: 'example.com/more', bounds: { x: 0, y: 0, width: 1, height: 1 } }));
+      const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 'example.com\n' }, ctx);
+      expect(result.text, controlType).toContain('an autocomplete suggestion');
+      expect(result.text, controlType).not.toContain('not a text field');
+    }
+  });
+
   it('a refused keystroke (a system dialog owns the keyboard) throws: nothing typed, and the clipboard untouched', async () => {
     const ctx = makeCtx();
     (ctx.platform.typeText as any).mockRejectedValue(new Error('A system dialog owns the keyboard: "X"'));
