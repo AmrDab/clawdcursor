@@ -287,7 +287,7 @@ export function getBatchTools(): ToolDefinition[] {
         });
         const effect = effectLine(w0, await window());
         return {
-          text: renderResult(result) + (effect ? `\n${effect}` : ''),
+          text: renderResult(result) + (effect ? `\n${effect.replace(/^effect:/, 'effect (whole batch):')}` : ''),
           isError: !result.allDone,
           ...(result.image ? { image: result.image } : {}),
           steps: result.steps.map(s => {

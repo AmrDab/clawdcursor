@@ -23,9 +23,10 @@ export function isImagePointerCall(tool: string, action: string | undefined, arg
   const c = compactCall(tool, action);
   const pointer = c.tool === 'computer' && POINTER_ACTIONS.has(c.action ?? '');
   if (!pointer || args.space === 'screen') return false;
-  // drag_path's `path` is a JSON string on the wire; mouse_drag also takes x1/y1/x2/y2.
+  // drag_path's `path` is a JSON string on the wire; mouse_drag also takes x1/y1/x2/y2; compact.ts turns computer-use's
+  // `coordinate:[x,y]` into x/y after the guards, so it is checked here as x/y would be.
   return typeof args.x === 'number' || typeof args.startX === 'number' || typeof args.x1 === 'number'
-    || typeof args.path === 'string' || Array.isArray(args.path);
+    || typeof args.path === 'string' || Array.isArray(args.path) || Array.isArray(args.coordinate);
 }
 
 /** High-security mode (ctx.disableVision): why a call that returned an image is refused — a direct call or a batch step. */

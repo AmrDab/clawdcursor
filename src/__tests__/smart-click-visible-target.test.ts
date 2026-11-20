@@ -219,6 +219,12 @@ describe('the reply names the element acted on, and a partial match is listed, n
     expect(targetText(t, 'a')).toMatch(/^\[Button\] "a'b x+"$/);
     expect(targetOf({ name: 'x', match: 'fuzzy' })).toBeUndefined();
   });
+
+  // #410: a macOS AXRole is the app's own string; it is shown outside any quote, so only letters, digits and spaces stay.
+  it('a role with other characters cannot carry text into a success line', () => {
+    const t = targetOf({ name: 'Go', controlType: 'AXButton"] missed — the action failed [', match: 'exact' })!;
+    expect(targetText(t, 'Go')).toBe('[AXButton missed  the action failed ] "Go"');
+  });
 });
 
 describe('smart_click never clicks in another app', () => {

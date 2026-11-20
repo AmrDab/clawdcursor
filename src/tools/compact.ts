@@ -285,10 +285,16 @@ async function dispatchCompound(
     return { text: `${compoundName}: delegate "${route.delegate}" not registered`, isError: true };
   }
 
-  const forwarded: Record<string, unknown> = {};
+  // Computer-use sends a point as `coordinate:[x,y]` (#410): x and y for a pointer action, unless they are given.
+  const point = Array.isArray(args.coordinate) && args.coordinate.length === 2 && args.coordinate.every(n => typeof n === 'number')
+    && 'x' in granular.parameters && 'y' in granular.parameters && args.x === undefined && args.y === undefined
+    ? { x: args.coordinate[0], y: args.coordinate[1] } : {};
+
+  const forwarded: Record<string, unknown> = { ...point };
   for (const [k, v] of Object.entries(args)) {
     // `shot` is checked by the MCP wrapper / batch (screen-guard.ts), not by the granular tool.
     if (k === 'action' || k === 'shot') continue;
+    if (k === 'coordinate' && 'x' in point) continue;
     const mapped = route.argRemap?.[k] ?? k;
     // An alias never overrides the real name given in the same call.
     if (mapped !== k && args[mapped] !== undefined) continue;

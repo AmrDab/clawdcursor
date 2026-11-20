@@ -42,7 +42,7 @@ function fakeDesktop() {
   return {
     sent,
     d: guardInputMethods({
-      async mouseClick(x: number, y: number) { sent.push(`click ${x},${y}`); },
+      async mouseClick(x: number, y: number, _button?: unknown) { sent.push(`click ${x},${y}`); },
       async keyPress(combo: string) { sent.push(`key ${combo}`); },
       async keyDown(k: string) { sent.push(`down ${k}`); },
       async typeText(t: string) { sent.push(`type ${JSON.stringify(t)}`); },
@@ -108,6 +108,24 @@ describe('confirm mode (#373)', () => {
     expect(pauseGate.answer('resume', 'pill')).toMatchObject({ ok: true });
     await click;
     expect(sent).toEqual(['click 17,17']);
+  });
+
+  // #413: a right or middle click only opens a menu (or a tab); only a left click presses the button.
+  it('a right or middle click on Send is not held; a left click, as an option or as NativeDesktop\'s 1, is', async () => {
+    process.env.CLAWD_CONFIRM = 'true';
+    const { d, sent } = fakeDesktop();
+    await d.mouseClick(20, 20, { button: 'right' });
+    await d.mouseClick(20, 20, { button: 'middle' });
+    await d.mouseClick(20, 20, 2);
+    expect(sent).toEqual(['click 20,20', 'click 20,20', 'click 20,20']);
+    expect(pauseGate.current()).toBeNull();
+    for (const arg of [undefined, { button: 'left' }, 1]) {
+      const act = d.mouseClick(20, 20, arg as never);
+      await flush();
+      expect(pauseGate.current()?.message).toMatch(/click "Send"/);
+      pauseGate.answer('end');
+      await expect(act).rejects.toThrow(/^not confirmed/);
+    }
   });
 
   it('only a pressed control counts: Cancel, the window "Delete files?", text and a field named with the words are not held', async () => {
@@ -294,6 +312,9 @@ describe('confirm mode (#373)', () => {
     expect(consequentialCombo('cmd+enter', [], 'darwin')).toBe(true);
     expect(consequentialCombo('cmd+q', [], 'darwin')).toBe(true);
     expect(consequentialCombo('ctrl+w', [], 'darwin')).toBe(false);   // ctrl is not mod on macOS
+    expect(consequentialCombo('cmd+backspace', [], 'darwin')).toBe(true);   // Move to Trash (#413)
+    expect(consequentialCombo('ctrl+backspace', [], 'win32')).toBe(false);  // deletes a word there
+    expect(consequentialCombo('ctrl+backspace', [], 'linux')).toBe(false);
     expect(consequentialCombo('enter', ['ctrl'], 'linux')).toBe(true);
     expect(consequentialCombo('tab ctrl+shift+w', [], 'win32')).toBe(true);
     // On Windows the executors press meta as Ctrl.

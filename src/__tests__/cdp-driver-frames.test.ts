@@ -162,6 +162,13 @@ describe('browser tool reaches into iframes (#398)', () => {
     expect(widget.filled).toEqual(['#email=a@b.c', 'Email', '#plan=pro']);
   }, 15_000);
 
+  it('a wait_for that runs out of time classifies as TIMEOUT, not UNKNOWN (#411)', async () => {
+    const r = await driverOn(fakeFrame(`${APP}/`)).waitForSelector('#a', 300);
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/^timed out waiting for "#a": not visible in /);
+    expect(classifyResult(`browser_wait_for failed: ${r.error}`, true, true)?.code).toBe('TIMEOUT');
+  });
+
   it('frame names only iframes: the page itself is not searched, and a frame no iframe matches is a miss', async () => {
     const main = fakeFrame(`${APP}/`, { texts: ['Save'] });
     const d = driverOn(main, fakeFrame(`${ADS}/slot`));
