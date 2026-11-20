@@ -42,24 +42,40 @@ import { quoteScreenText } from '../core/untrusted-screen-content';
 import { guardInputMethods } from './pointer-guard';
 
 /**
- * The user's Downloads folder: ~/Downloads on every OS, or on Linux the folder user-dirs.dirs names (often localized).
- * What the agent's browser downloads is kept there under its own name (owner, 2026-11-20: Playwright puts downloads in a
- * temp folder with random names and no extension, so a downloaded picture could not be found or used).
+ * The user's Downloads folder: ~/Downloads on every OS, or on Linux the folder user-dirs.dirs names (often localized), never
+ * the home folder itself. What the agent's own browser downloads is kept there under its own name (owner, 2026-11-20:
+ * Playwright puts downloads in a temp folder with random names and no extension, so a downloaded picture could not be used).
  */
 export function downloadsDir(home: string = os.homedir(), platform: NodeJS.Platform = process.platform): string {
   if (platform === 'linux') {
     try {
       const m = /^XDG_DOWNLOAD_DIR="([^"]+)"/m.exec(fs.readFileSync(path.join(home, '.config', 'user-dirs.dirs'), 'utf8'));
-      if (m) return m[1].replace(/^\$HOME/, home);
+      const dir = m ? m[1].replace(/^\$HOME/, home) : '';
+      if (dir && path.resolve(dir) !== path.resolve(home)) return dir;
     } catch { /* not set: ~/Downloads */ }
   }
   return path.join(home, 'Downloads');
 }
 
+/**
+ * Kept in Downloads: pictures, PDFs, text, audio and video, files that do not run when opened. Anything else (a program, a
+ * script, an archive, a shortcut) stays where Playwright put it, with no name and no extension: a page cannot drop a
+ * program into Downloads under a name of its choosing, which Chrome itself would have warned about.
+ */
+const KEPT_DOWNLOADS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.tiff', '.heic', '.pdf', '.txt',
+  '.csv', '.json', '.md', '.mp3', '.wav', '.m4a', '.mp4', '.webm', '.mov']);
+export const keptDownload = (file: string): boolean => KEPT_DOWNLOADS.has(path.extname(file).toLowerCase());
+
 /** Where a download goes in `dir`: the site's own file name, made safe, with " (1)", " (2)"… when that name is taken. */
 export function freeDownloadPath(dir: string, suggested: string): string {
-  let name = path.posix.basename(String(suggested ?? '').replace(/\\/g, '/')).replace(/[<>:"|?*\x00-\x1f]/g, '_').trim();
-  if (!name || /^\.+$/.test(name)) name = 'download';
+  let name = path.posix.basename(String(suggested ?? '').replace(/\\/g, '/'))
+    .replace(/[\p{Cc}\p{Cf}]/gu, '')   // control, bidi and other format characters: no name shown back to front
+    .replace(/[<>:"|?*]/g, '_')
+    .replace(/[. ]+$/, '')             // Windows drops trailing dots and spaces: "x.exe." would become "x.exe"
+    .trim();
+  if (name.startsWith('.')) name = `_${name}`;   // never a hidden dotfile
+  if (/^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i.test(name)) name = `_${name}`;   // Windows device names
+  if (!name) name = 'download';
   const ext = path.extname(name);
   const stem = name.slice(0, name.length - ext.length);
   for (let n = 0; ; n++) {
@@ -376,8 +392,9 @@ export class CDPDriver {
         !BLOCKED_URL_PATTERNS.some(blocked => url.includes(blocked));
 
       const contexts = this.browser.contexts();
-      // Every page's downloads, those opened later included, are kept in the user's Downloads folder (keepDownloads).
-      for (const c of contexts) {
+      // The agent's own browser only (not one of the user's): every page's downloads, those opened later included, are
+      // kept in the user's Downloads folder (keepDownloads).
+      if (this.connectionMode === 'dedicated') for (const c of contexts) {
         try {
           c.pages().forEach(p => this.keepDownloads(p));
           c.on('page', p => this.keepDownloads(p));
@@ -415,7 +432,7 @@ export class CDPDriver {
     }
   }
 
-  /** A finished download of this page is copied to the user's Downloads folder under its own name (downloadsDir). */
+  /** A finished download of this page, of a kept type, is copied to the user's Downloads folder under its own name. */
   private keepDownloads(page: Page): void {
     if (this.downloadPages.has(page)) return;
     this.downloadPages.add(page);
@@ -424,6 +441,7 @@ export class CDPDriver {
         const dir = this.downloadsTo();
         fs.mkdirSync(dir, { recursive: true });
         const file = freeDownloadPath(dir, download.suggestedFilename());
+        if (!keptDownload(file)) return;
         await download.saveAs(file);   // waits for it to finish
         this.savedDownloads.push(file);
       })().catch(() => { /* cancelled or failed: nothing kept */ });
