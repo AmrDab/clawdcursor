@@ -1,41 +1,159 @@
 {
   "app": "slack",
   "name": "Slack",
-  "domainHints": ["app.slack.com", "slack.com"],
+  "kind": "desktop",
+  "processNames": [
+    "Slack"
+  ],
+  "domainHints": [
+    "app.slack.com"
+  ],
   "shortcuts": {
-    "quick_switcher":    "mod+k",
-    "jump_to":           "mod+k",
-    "search":            "mod+g",
-    "thread_reply":      "r",
-    "next_unread":       "alt+shift+Down",
-    "prev_unread":       "alt+shift+Up",
-    "mark_read":         "Escape",
-    "preferences":       "mod+,",
-    "edit_last":         "ArrowUp"
+    "quick_switcher": "mod+k",
+    "compose_new_message": "mod+n",
+    "browse_direct_messages": {
+      "default": "ctrl+shift+2",
+      "darwin": "cmd+shift+k"
+    },
+    "search": "mod+g",
+    "search_in_current_conversation": "mod+f",
+    "jump_to_latest_unread_message": "mod+j",
+    "previous_unread_conversation": "alt+shift+Up",
+    "next_unread_conversation": "alt+shift+Down",
+    "previous_conversation_in_sidebar": "alt+Up",
+    "next_conversation_in_sidebar": "alt+Down",
+    "history_back": {
+      "default": "alt+Left",
+      "darwin": "cmd+["
+    },
+    "history_forward": {
+      "default": "alt+Right",
+      "darwin": "cmd+]"
+    },
+    "open_home_view": {
+      "default": "ctrl+shift+1",
+      "darwin": "ctrl+1"
+    },
+    "open_activity_view": "mod+shift+m",
+    "open_more_view": {
+      "default": "ctrl+shift+0",
+      "darwin": "ctrl+0"
+    },
+    "open_threads_view": "mod+shift+t",
+    "open_all_unreads_view": "mod+shift+a",
+    "browse_channels": "mod+shift+l",
+    "open_people_view": "mod+shift+e",
+    "open_conversation_details": "mod+shift+i",
+    "hide_right_sidebar": "mod+.",
+    "focus_next_section": "F6",
+    "focus_previous_section": "shift+F6",
+    "toggle_workspace_switcher": "mod+shift+s",
+    "previous_workspace": "ctrl+shift+Tab",
+    "next_workspace": "ctrl+Tab",
+    "mark_conversation_read": "Escape",
+    "mark_all_messages_read": "shift+Escape",
+    "set_status": "mod+shift+y",
+    "open_preferences": "mod+,",
+    "upload_file": "mod+o",
+    "view_downloaded_files": "mod+shift+j",
+    "create_canvas": "mod+shift+n",
+    "create_snippet": "mod+shift+Return",
+    "toggle_huddle": "mod+shift+h",
+    "toggle_huddle_mute": "mod+shift+Space",
+    "unsend_message": "mod+z",
+    "edit_last_message": "Up",
+    "message_edit": "e",
+    "message_delete": "Delete",
+    "message_open_thread": "t",
+    "message_forward": "f",
+    "message_pin_or_unpin": "p",
+    "message_save_or_unsave": "a",
+    "message_mark_unread_from_here": "u",
+    "message_remind_me": "m",
+    "message_add_reaction": "r",
+    "new_line_in_message": "shift+Return",
+    "bold": "mod+b",
+    "italic": "mod+i",
+    "strikethrough": "mod+shift+x",
+    "hyperlink_selected_text": "mod+shift+u",
+    "quote_selected_text": "mod+shift+9",
+    "inline_code": "mod+shift+c",
+    "code_block": "mod+alt+shift+c",
+    "bulleted_list": "mod+shift+8",
+    "numbered_list": "mod+shift+7",
+    "apply_markdown_formatting": "mod+shift+f",
+    "canvas_find_and_replace": "mod+shift+h",
+    "canvas_big_heading": "mod+alt+1",
+    "canvas_medium_heading": "mod+alt+2",
+    "canvas_small_heading": "mod+alt+3",
+    "canvas_checklist": "mod+shift+0"
   },
+  "consequential": [
+    "unsend_message",
+    "message_delete",
+    "mark_all_messages_read",
+    "toggle_huddle"
+  ],
+  "essentials": ["quick_switcher", "compose_new_message", "search", "open_all_unreads_view", "open_threads_view", "next_unread_conversation", "browse_channels", "upload_file"],
   "workflows": {
-    "go_to_inbox": {
+    "jump_to_conversation": {
       "name": "jump to a channel or DM",
       "steps": [
-        { "type": "pressKey",    "key": "mod+k" },
-        { "type": "wait",        "ms": 300 },
-        { "type": "typeAtFocus", "field": "channel name" },
-        { "type": "pressKey",    "key": "Return" }
+        {
+          "type": "pressKey",
+          "key": "mod+k",
+          "note": "quick switcher"
+        },
+        {
+          "type": "wait",
+          "ms": 300
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "channel or person name"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
       ]
     },
     "search": {
       "name": "search messages",
       "steps": [
-        { "type": "pressKey",    "key": "mod+g" },
-        { "type": "wait",        "ms": 200 },
-        { "type": "typeAtFocus", "field": "query" },
-        { "type": "pressKey",    "key": "Return" }
+        {
+          "type": "pressKey",
+          "key": "mod+g"
+        },
+        {
+          "type": "wait",
+          "ms": 200
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "query"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
       ]
     }
   },
   "tips": [
-    "Slack is Electron — wait ~4s after launch before UIA queries",
-    "Composing a message is just type + Enter; no mod+n needed",
-    "Mod+K is the universal quick switcher — faster than clicking the sidebar"
-  ]
+    "The same shortcuts apply in the desktop app and in the browser, except these desktop-only ones: preferences, upload file, jump to latest unread, Activity view, Threads view and browse channels.",
+    "The single-key message actions (e, t, f, p, a, u, m, r, Delete) work only while a message has keyboard focus, not while typing in the message field.",
+    "In a focused message, t opens its thread and r opens the reaction picker.",
+    "By default Up in an empty message field edits the last message sent; a preference can change it to move focus to the last message instead.",
+    "Escape marks the open conversation as read; shift+Escape marks every conversation as read.",
+    "mod+shift+h starts, joins or leaves a huddle in a conversation; inside a canvas the same keys open find and replace.",
+    "F6 moves focus between the sections of the window; use it to reach the sidebar or the message list.",
+    "Formatting shortcuts need the cursor in the message field; with a link on the clipboard, pasting over selected text makes it a link.",
+    "Some shortcuts differ on keyboards set to a language other than English. Shortcuts cannot be customized."
+  ],
+  "sources": [
+    "https://slack.com/help/articles/201374536-Slack-keyboard-shortcuts",
+    "https://slack.com/help/articles/115003340723-Navigate-Slack-with-your-keyboard"
+  ],
+  "lastVerified": "2026-11-18"
 }

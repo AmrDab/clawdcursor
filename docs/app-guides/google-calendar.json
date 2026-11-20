@@ -1,0 +1,56 @@
+{
+  "app": "google-calendar",
+  "name": "Google Calendar",
+  "kind": "web",
+  "domainHints": ["calendar.google.com"],
+  "shortcuts": {
+    "next_date_range": "j",
+    "go_to_today": "t",
+    "go_to_date": "g",
+    "refresh_calendar": "r",
+    "focus_search": "/",
+    "open_settings": "s",
+    "go_to_add_calendar_section": "Plus",
+    "day_view": "d",
+    "week_view": "w",
+    "month_view": "m",
+    "custom_view": "x",
+    "agenda_view": "a",
+    "create_event": "c",
+    "open_event_details": "e",
+    "delete_event": "Delete",
+    "undo": "z",
+    "save_event": "mod+s",
+    "back_to_calendar_grid": "Escape",
+    "focus_side_panel_next": "mod+alt+.",
+    "focus_side_panel_previous": "mod+alt+,",
+    "open_shortcut_help": "?"
+  },
+  "consequential": ["delete_event", "save_event"],
+  "essentials": ["create_event", "save_event", "go_to_date", "go_to_today", "focus_search", "next_date_range", "open_event_details", "week_view"],
+  "workflows": {
+    "create_event": {
+      "name": "create an event",
+      "steps": [
+        { "type": "pressKey", "key": "c", "note": "starts a new event" },
+        { "type": "wait", "ms": 800 },
+        { "type": "verify", "name": "event_title_field_focused" },
+        { "type": "typeAtFocus", "field": "title" },
+        { "type": "pressKey", "key": "mod+s", "note": "saves from the event details page" },
+        { "type": "verify", "name": "event_saved" }
+      ]
+    }
+  },
+  "tips": [
+    "Shortcuts work only after they are turned on: Settings > tick \"Enable keyboard shortcuts\" > Save.",
+    "Press ? to see every shortcut. The help page lists j or n for the next date range but no key for the previous one; read it from the ? list.",
+    "Views have two keys each: 1 or d (day), 2 or w (week), 3 or m (month), 4 or x (custom), 5 or a (agenda).",
+    "delete_event acts on the selected event; Backspace does the same. z undoes the last change.",
+    "mod+s saves only from the event details page, and Escape returns from that page to the calendar grid.",
+    "The Keep and Tasks side panel is reached with Ctrl+Alt+. or , on Windows, Cmd+Option+. or , on Mac, and Alt+Shift+. or , on a Chromebook."
+  ],
+  "sources": [
+    "https://support.google.com/calendar/answer/37034"
+  ],
+  "lastVerified": "2026-11-18"
+}

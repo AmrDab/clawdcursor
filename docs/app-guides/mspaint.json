@@ -1,43 +1,51 @@
 {
-  "app": "Microsoft Paint",
-  "processNames": ["mspaint"],
-  "workflows": {
-    "draw_freehand": "Select the Pencil tool from the Tools group (or press P). Click and drag on the canvas to draw lines.",
-    "draw_shape": "Click on a shape in the Shapes group (rectangle, ellipse, line, triangle, etc.). Click and drag on the canvas to place it. Drag handles to resize.",
-    "add_text": "Click the Text tool (A icon) in the Tools group. Click on the canvas where you want text. A text box appears — type your text. Use the formatting toolbar above to change font and size.",
-    "fill_color": "Click the Fill tool (paint bucket icon). Select a color from the Colors palette. Click on an enclosed area to fill it.",
-    "select_color": "Click a color in the Colors palette on the right side of the ribbon. Left-click sets foreground color, right-click sets background color.",
-    "erase": "Click the Eraser tool. Click and drag on the canvas to erase.",
-    "save_as": "Press Ctrl+Shift+S. Choose format (PNG, JPEG, BMP). Type filename. Click Save."
-  },
+  "app": "mspaint",
+  "name": "Paint",
+  "kind": "desktop",
+  "os": [
+    "win32"
+  ],
+  "processNames": [
+    "mspaint"
+  ],
   "shortcuts": {
-    "pencil": "P (or click Pencil in Tools)",
-    "eraser": "E (or click Eraser in Tools)",
-    "fill": "K (or click Fill in Tools)",
-    "text": "T (or click A icon in Tools)",
-    "select_all": "Ctrl+A",
-    "undo": "Ctrl+Z",
-    "save": "Ctrl+S",
-    "save_as": "Ctrl+Shift+S",
-    "new": "Ctrl+N",
-    "zoom_in": "Ctrl+Plus",
-    "zoom_out": "Ctrl+Minus"
+    "undo": "ctrl+z",
+    "redo": "ctrl+y",
+    "select_all": "ctrl+a",
+    "copy": "ctrl+c",
+    "cut": "ctrl+x",
+    "paste": "ctrl+v",
+    "context_menu": "shift+F10",
+    "cancel": "Escape",
+    "close_window": "alt+F4"
+  },
+  "consequential": [
+    "close_window"
+  ],
+  "essentials": ["undo", "select_all", "cancel"],
+  "workflows": {
+    "draw_freehand": "Pick the Pencil in the Tools group, then drag on the canvas to draw.",
+    "draw_shape": "Pick a shape in the Shapes group (line, rectangle, ellipse, triangle and so on), then drag on the canvas to place it; drag its handles to resize.",
+    "add_text": "Pick the Text tool (the A icon) in the Tools group, click the canvas where the text goes, then type in the text box that appears.",
+    "fill_color": "Pick the Fill tool (the bucket icon), pick a color in the Colors palette, then click inside an enclosed area."
   },
   "layout": {
-    "title_bar": "Top of window — shows filename",
-    "ribbon": "Below title bar — contains tool groups: Selection, Image, Tools, Brushes, Shapes, Size, Colors",
-    "tools_group": "Contains: Select, Pencil, Fill, Text (A), Eraser, Color Picker, Magnifier",
-    "shapes_group": "Contains: Line, Rectangle, Ellipse, Triangle, Arrow, Star, etc.",
-    "colors_palette": "Right side of ribbon — clickable color swatches",
-    "canvas": "The large WHITE area below the ribbon — this is where you draw",
-    "status_bar": "Bottom — shows cursor position and canvas size"
+    "toolbar": "top, under the title bar: tool groups such as Selection, Image, Tools, Brushes, Shapes, Size and Colors",
+    "tools_group": "Pencil, Fill, Text (A), Eraser, Color picker, Magnifier",
+    "shapes_group": "Line, Rectangle, Ellipse, Triangle, Arrow, Star and more",
+    "colors_palette": "color swatches at the right of the toolbar",
+    "canvas": "the large area under the toolbar where drawing happens",
+    "status_bar": "bottom: pointer position and canvas size"
   },
   "tips": [
-    "The canvas is the large white rectangle below the toolbar. ALWAYS draw on the canvas, not the toolbar.",
-    "Before drawing, select the right tool FIRST (Pencil for freehand, a Shape for geometric drawing).",
-    "For drawing a house: use Rectangle shape for the body, Triangle for the roof, small Rectangle for door/windows.",
-    "For freehand drawing: press P for Pencil, then drag on the canvas.",
-    "The Text tool (A) requires two clicks: one on the tool, one on the canvas to place the text box.",
-    "Select a larger brush size from the Size dropdown for thicker lines."
-  ]
+    "Microsoft publishes no keyboard-shortcut page for the current Paint app, so only general Windows keys are listed; pick tools by their names in the toolbar.",
+    "The canvas is a drawing surface: read it with a screenshot and draw with drags planned from that image.",
+    "Choose the tool first (Pencil for freehand, a shape for geometry), then act on the canvas.",
+    "The Text tool needs two steps: pick the tool, then click the canvas to place the text box.",
+    "ctrl+z undoes the last stroke, so a wrong drag is cheap to take back."
+  ],
+  "sources": [
+    "https://support.microsoft.com/en-us/windows/keyboard-shortcuts-in-windows-dcc61a57-8ff0-cffe-9796-cb9706c75eec"
+  ],
+  "lastVerified": "2026-11-18"
 }

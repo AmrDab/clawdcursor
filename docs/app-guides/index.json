@@ -1,13 +1,29 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-19T14:59:13.817Z",
+  "generatedAt": "2026-11-20T13:40:27.744Z",
   "guides": {
+    "chrome": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "38d41f474c2f1461",
+      "submitter": "@AmrDab"
+    },
     "discord": {
       "version": "1.0.0",
       "trust": "verified",
       "upvotes": 0,
       "downvotes": 0,
-      "etag": "3fc7c38f10c2a95c",
+      "etag": "8d23979f93ee4561",
+      "submitter": "@AmrDab"
+    },
+    "edge": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "d558f8038e1630d5",
       "submitter": "@AmrDab"
     },
     "excel": {
@@ -15,7 +31,7 @@
       "trust": "verified",
       "upvotes": 0,
       "downvotes": 0,
-      "etag": "a582f71fbd935f03",
+      "etag": "b1164dfcd40df1e5",
       "submitter": "@AmrDab"
     },
     "figma": {
@@ -23,7 +39,31 @@
       "trust": "verified",
       "upvotes": 0,
       "downvotes": 0,
-      "etag": "47a4d3c712924655",
+      "etag": "2198499badb72608",
+      "submitter": "@AmrDab"
+    },
+    "file-explorer": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "16b11a8382d47b6e",
+      "submitter": "@AmrDab"
+    },
+    "finder": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "62f139bbe04d7ea1",
+      "submitter": "@AmrDab"
+    },
+    "github": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "4b71a5fde817f2e3",
       "submitter": "@AmrDab"
     },
     "gmail": {
@@ -31,7 +71,71 @@
       "trust": "verified",
       "upvotes": 0,
       "downvotes": 0,
-      "etag": "76a0c80ab13ac1b0",
+      "etag": "7561b1072265c218",
+      "submitter": "@AmrDab"
+    },
+    "google-calendar": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "ecc9bd92265b9c99",
+      "submitter": "@AmrDab"
+    },
+    "google-docs": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "e2dee460f4c16236",
+      "submitter": "@AmrDab"
+    },
+    "google-drive": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "a36b0447c6320bc3",
+      "submitter": "@AmrDab"
+    },
+    "google-maps": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "05904c6b6bbc34ad",
+      "submitter": "@AmrDab"
+    },
+    "google-sheets": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "f33017ec3c174e4f",
+      "submitter": "@AmrDab"
+    },
+    "jira": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "493f4d80838223b0",
+      "submitter": "@AmrDab"
+    },
+    "linear": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "f604ab9587167345",
+      "submitter": "@AmrDab"
+    },
+    "linkedin": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "c5fb79503278d039",
       "submitter": "@AmrDab"
     },
     "mspaint": {
@@ -39,7 +143,15 @@
       "trust": "verified",
       "upvotes": 0,
       "downvotes": 0,
-      "etag": "1dbc189dd000372a",
+      "etag": "2a9a6baf05494b75",
+      "submitter": "@AmrDab"
+    },
+    "notion": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "65ee65538f12abe3",
       "submitter": "@AmrDab"
     },
     "olk": {
@@ -47,7 +159,7 @@
       "trust": "verified",
       "upvotes": 0,
       "downvotes": 0,
-      "etag": "d3ae51dbe2f89964",
+      "etag": "2681baf518dfd96d",
       "submitter": "@AmrDab"
     },
     "outlook": {
@@ -55,7 +167,23 @@
       "trust": "verified",
       "upvotes": 0,
       "downvotes": 0,
-      "etag": "f51276b975bd3630",
+      "etag": "a26c6811a52dcb77",
+      "submitter": "@AmrDab"
+    },
+    "powerpoint": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "d16b4333dc729adc",
+      "submitter": "@AmrDab"
+    },
+    "reddit": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "a13f5bbec7e4e743",
       "submitter": "@AmrDab"
     },
     "slack": {
@@ -63,7 +191,7 @@
       "trust": "verified",
       "upvotes": 0,
       "downvotes": 0,
-      "etag": "d9ca09db2c37780a",
+      "etag": "b4973e141aac73c2",
       "submitter": "@AmrDab"
     },
     "spotify": {
@@ -71,7 +199,55 @@
       "trust": "verified",
       "upvotes": 0,
       "downvotes": 0,
-      "etag": "eeed3a237d8b704d",
+      "etag": "1c6aa4bb5d9cbc90",
+      "submitter": "@AmrDab"
+    },
+    "teams": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "eed6fee38c0cee62",
+      "submitter": "@AmrDab"
+    },
+    "trello": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "08f6af7b9cab99c2",
+      "submitter": "@AmrDab"
+    },
+    "vscode": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "78bab8f2af87307d",
+      "submitter": "@AmrDab"
+    },
+    "whatsapp-web": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "22e1540fc1b90be0",
+      "submitter": "@AmrDab"
+    },
+    "word": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "89e169f64f2dee61",
+      "submitter": "@AmrDab"
+    },
+    "x-com": {
+      "version": "1.0.0",
+      "trust": "verified",
+      "upvotes": 0,
+      "downvotes": 0,
+      "etag": "6e777966a21b9aec",
       "submitter": "@AmrDab"
     },
     "youtube": {
@@ -79,7 +255,7 @@
       "trust": "verified",
       "upvotes": 0,
       "downvotes": 0,
-      "etag": "e03ae6130c09be9e",
+      "etag": "c46f807cc26d60d2",
       "submitter": "@AmrDab"
     }
   }

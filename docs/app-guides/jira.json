@@ -1,0 +1,69 @@
+{
+  "app": "jira",
+  "name": "Jira",
+  "kind": "web",
+  "domainHints": ["*.atlassian.net/jira", "*.atlassian.net/browse"],
+  "shortcuts": {
+    "show_keyboard_shortcuts": "?",
+    "create_work_item": "c",
+    "open_selected_work_item": "o",
+    "assign_work_item": "a",
+    "assign_work_item_to_me": "i",
+    "add_comment": "m",
+    "next_work_item": "j",
+    "previous_work_item": "k",
+    "next_column": "n",
+    "previous_column": "p",
+    "editor_bold": "mod+b",
+    "editor_italic": "mod+i",
+    "editor_underline": "mod+u",
+    "editor_strikethrough": "mod+shift+s",
+    "editor_numbered_list": "mod+shift+7",
+    "editor_bulleted_list": "mod+shift+8",
+    "editor_quote": "mod+shift+9",
+    "editor_divider": "mod+shift+-",
+    "editor_link": "mod+shift+k",
+    "editor_code": "mod+shift+m",
+    "editor_clear_formatting": "mod+\\",
+    "editor_view_changes": "mod+alt+z",
+    "editor_undo": "mod+z",
+    "editor_redo": "mod+shift+z",
+    "editor_paste_plain_text": "mod+shift+v",
+    "editor_indent_list_item": "Tab",
+    "editor_outdent_list_item": "shift+Tab"
+  },
+  "essentials": ["create_work_item", "next_work_item", "previous_work_item", "open_selected_work_item", "add_comment", "assign_work_item_to_me", "assign_work_item", "next_column"],
+  "workflows": {
+    "comment_on_selected_work_item": {
+      "name": "start a comment on the selected or open work item",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "m",
+          "note": "focuses the comment field"
+        },
+        {
+          "type": "wait",
+          "ms": 500
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "comment",
+          "note": "the vendor pages give no key for saving the comment"
+        }
+      ]
+    }
+  },
+  "tips": [
+    "Press ? on any Jira page to open the shortcuts dialog; it shows the keys for the current operating system and browser, grouped as global, navigation, work item actions and app-specific.",
+    "Shortcuts can be switched off in that dialog; if single keys do nothing, check that the toggle there is on.",
+    "Some shortcuts need specific permissions or installed apps, so not every key works for every account.",
+    "In the text editor: / opens quick insert (tables, images and more), @ mentions a person, : inserts an emoji.",
+    "The editor accepts Markdown: **bold**, *italic*, `code`, \"# \" to \"###### \" headings, \"* \" or \"- \" bullets, \"1. \" numbered, \"[]\" action item, \"> \" quote, --- rule, ``` code block."
+  ],
+  "sources": [
+    "https://support.atlassian.com/jira-software-cloud/docs/use-keyboard-shortcuts/",
+    "https://support.atlassian.com/jira-software-cloud/docs/markdown-and-keyboard-shortcuts/"
+  ],
+  "lastVerified": "2026-11-18"
+}

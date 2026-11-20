@@ -1,0 +1,307 @@
+{
+  "app": "vscode",
+  "name": "Visual Studio Code",
+  "kind": "desktop",
+  "os": [
+    "win32",
+    "darwin",
+    "linux"
+  ],
+  "processNames": [
+    "Code"
+  ],
+  "shortcuts": {
+    "command_palette": "mod+shift+p",
+    "quick_open_file": "mod+p",
+    "go_to_line": "ctrl+g",
+    "go_to_symbol_in_file": "mod+shift+o",
+    "go_to_symbol_in_workspace": "mod+t",
+    "show_problems": "mod+shift+m",
+    "next_problem": "F8",
+    "previous_problem": "shift+F8",
+    "go_back": {
+      "default": "alt+Left",
+      "darwin": "ctrl+-",
+      "linux": "ctrl+alt+-"
+    },
+    "go_forward": {
+      "default": "alt+Right",
+      "darwin": "ctrl+shift+-",
+      "linux": "ctrl+shift+-"
+    },
+    "switch_recent_editor": "ctrl+Tab",
+    "new_file": "mod+n",
+    "open_file": "mod+o",
+    "save": "mod+s",
+    "save_as": "mod+shift+s",
+    "save_all": {
+      "default": "ctrl+k s",
+      "darwin": "cmd+alt+s",
+      "linux": ""
+    },
+    "close_editor": {
+      "default": "ctrl+F4",
+      "darwin": "cmd+w",
+      "linux": "ctrl+w"
+    },
+    "close_editor_group": "mod+k w",
+    "close_all_editors": "mod+k mod+w",
+    "close_folder": "mod+k f",
+    "reopen_closed_editor": "mod+shift+t",
+    "new_window": "mod+shift+n",
+    "close_window": {
+      "default": "alt+F4",
+      "darwin": "cmd+shift+w"
+    },
+    "copy_path_of_active_file": "mod+k p",
+    "cut_line_or_selection": "mod+x",
+    "copy_line_or_selection": "mod+c",
+    "paste": "mod+v",
+    "undo": "mod+z",
+    "redo": {
+      "default": "ctrl+y",
+      "darwin": "cmd+shift+z"
+    },
+    "delete_line": "mod+shift+k",
+    "insert_line_below": "mod+Return",
+    "insert_line_above": "mod+shift+Return",
+    "move_line_up": "alt+Up",
+    "move_line_down": "alt+Down",
+    "copy_line_up": {
+      "default": "shift+alt+Up",
+      "linux": "ctrl+shift+alt+Up"
+    },
+    "copy_line_down": {
+      "default": "shift+alt+Down",
+      "linux": "ctrl+shift+alt+Down"
+    },
+    "indent_line": "mod+]",
+    "outdent_line": "mod+[",
+    "toggle_line_comment": "mod+/",
+    "toggle_block_comment": {
+      "default": "shift+alt+a",
+      "linux": "ctrl+shift+a"
+    },
+    "select_current_line": "mod+l",
+    "add_next_match_to_selection": "mod+d",
+    "select_all_matches_of_selection": "mod+shift+l",
+    "select_all_occurrences_of_word": "mod+F2",
+    "add_cursor_above": {
+      "default": "ctrl+alt+Up",
+      "darwin": "cmd+alt+Up",
+      "linux": "shift+alt+Up"
+    },
+    "add_cursor_below": {
+      "default": "ctrl+alt+Down",
+      "darwin": "cmd+alt+Down",
+      "linux": "shift+alt+Down"
+    },
+    "add_cursors_to_line_ends": "shift+alt+i",
+    "undo_last_cursor_operation": "mod+u",
+    "expand_selection": {
+      "default": "shift+alt+Right",
+      "darwin": "ctrl+shift+cmd+Right"
+    },
+    "shrink_selection": {
+      "default": "shift+alt+Left",
+      "darwin": "ctrl+shift+cmd+Left"
+    },
+    "jump_to_matching_bracket": "mod+shift+\\",
+    "line_start": "Home",
+    "line_end": "End",
+    "file_start": {
+      "default": "ctrl+Home",
+      "darwin": "cmd+Up"
+    },
+    "file_end": {
+      "default": "ctrl+End",
+      "darwin": "cmd+Down"
+    },
+    "fold_region": {
+      "default": "ctrl+shift+[",
+      "darwin": "cmd+alt+["
+    },
+    "unfold_region": {
+      "default": "ctrl+shift+]",
+      "darwin": "cmd+alt+]"
+    },
+    "fold_all": "mod+k mod+0",
+    "unfold_all": "mod+k mod+j",
+    "toggle_word_wrap": "alt+z",
+    "trim_trailing_whitespace": "mod+k mod+x",
+    "find": "mod+f",
+    "replace": {
+      "default": "ctrl+h",
+      "darwin": "cmd+alt+f"
+    },
+    "find_next": "Return",
+    "find_previous": "shift+Return",
+    "select_all_find_matches": "alt+Return",
+    "toggle_find_case_sensitive": {
+      "default": "alt+c",
+      "darwin": "cmd+alt+c"
+    },
+    "toggle_find_regex": {
+      "default": "alt+r",
+      "darwin": "cmd+alt+r"
+    },
+    "toggle_find_whole_word": {
+      "default": "alt+w",
+      "darwin": "cmd+alt+w"
+    },
+    "search_in_files": "mod+shift+f",
+    "replace_in_files": "mod+shift+h",
+    "next_search_result": "F4",
+    "previous_search_result": "shift+F4",
+    "trigger_suggest": "ctrl+Space",
+    "trigger_parameter_hints": "mod+shift+Space",
+    "format_document": {
+      "default": "shift+alt+f",
+      "linux": "ctrl+shift+i"
+    },
+    "format_selection": "mod+k mod+f",
+    "go_to_definition": "F12",
+    "peek_definition": {
+      "default": "alt+F12",
+      "linux": "ctrl+shift+F10"
+    },
+    "open_definition_to_side": "mod+k F12",
+    "go_to_references": "shift+F12",
+    "rename_symbol": "F2",
+    "quick_fix": "mod+.",
+    "show_hover": "mod+k mod+i",
+    "change_language_mode": "mod+k m",
+    "split_editor": "mod+\\",
+    "focus_editor_group_1": "mod+1",
+    "focus_editor_group_2": "mod+2",
+    "focus_editor_group_3": "mod+3",
+    "focus_editor_group_left": "mod+k mod+Left",
+    "focus_editor_group_right": "mod+k mod+Right",
+    "toggle_sidebar": "mod+b",
+    "show_explorer": "mod+shift+e",
+    "show_source_control": "ctrl+shift+g",
+    "show_run_and_debug": "mod+shift+d",
+    "show_extensions": "mod+shift+x",
+    "show_output": {
+      "default": "ctrl+shift+u",
+      "darwin": "cmd+shift+u",
+      "linux": "ctrl+k ctrl+h"
+    },
+    "toggle_terminal": "ctrl+`",
+    "toggle_full_screen": {
+      "default": "F11",
+      "darwin": "ctrl+cmd+f"
+    },
+    "toggle_zen_mode": "mod+k z",
+    "leave_zen_mode": "Escape Escape",
+    "zoom_in": "mod+=",
+    "zoom_out": "mod+-",
+    "toggle_markdown_preview": "mod+shift+v",
+    "open_markdown_preview_to_side": "mod+k v",
+    "open_settings": "mod+,",
+    "open_keyboard_shortcuts": "mod+k mod+s",
+    "select_color_theme": "mod+k mod+t",
+    "toggle_breakpoint": "F9",
+    "start_or_continue_debugging": "F5",
+    "run_without_debugging": "ctrl+F5",
+    "pause_debugging": "F6",
+    "step_into": "F11",
+    "run_build_task": "mod+shift+b"
+  },
+  "consequential": [
+    "close_window",
+    "close_all_editors",
+    "close_folder"
+  ],
+  "essentials": ["command_palette", "quick_open_file", "go_to_line", "search_in_files", "toggle_terminal", "save", "show_explorer", "go_to_symbol_in_file"],
+  "workflows": {
+    "open_file_by_name": {
+      "name": "open a file in the workspace by name",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "mod+p",
+          "note": "Quick Open"
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "file name"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
+    },
+    "run_command": {
+      "name": "run any command by name",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "mod+shift+p",
+          "note": "Command Palette; F1 also opens it"
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "command name"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
+    },
+    "go_to_line": {
+      "name": "jump to a line number",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "ctrl+g",
+          "note": "ctrl on every OS, Mac included"
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "line number"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
+    },
+    "search_in_files": {
+      "name": "search across the workspace",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "mod+shift+f",
+          "note": "Search view"
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "search text"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return",
+          "note": "F4 moves to the next result"
+        }
+      ]
+    }
+  },
+  "tips": [
+    "Any command can be run from the Command Palette (mod+shift+p), so it works as a fallback for an action whose key is unknown.",
+    "Two-step chords such as mod+k mod+s are pressed one after the other; in mod+k z the second key is pressed without the modifier.",
+    "These are the defaults for a US keyboard layout; users can rebind keys, and mod+k mod+s opens the editor that shows the current bindings.",
+    "Several keys use ctrl on Mac too: go_to_line, trigger_suggest, toggle_terminal, show_source_control and switch_recent_editor.",
+    "Close editor is ctrl+F4 on Windows, ctrl+w on Linux and cmd+w on Mac.",
+    "With nothing selected, cut and copy act on the whole current line.",
+    "find_next, find_previous and select_all_find_matches apply while the Find box has focus.",
+    "F11 is listed both for full screen (Windows and Linux) and for Step Into while debugging.",
+    "An empty chord for one OS means the vendor page lists no default key there."
+  ],
+  "sources": [
+    "https://code.visualstudio.com/docs/reference/default-keybindings"
+  ],
+  "lastVerified": "2026-11-18"
+}

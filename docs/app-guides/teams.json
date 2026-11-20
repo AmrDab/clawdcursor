@@ -1,0 +1,239 @@
+{
+  "app": "teams",
+  "name": "Microsoft Teams",
+  "kind": "desktop",
+  "os": [
+    "win32",
+    "darwin"
+  ],
+  "processNames": [
+    "ms-teams",
+    "MSTeams",
+    "Microsoft Teams"
+  ],
+  "shortcuts": {
+    "show_keyboard_shortcuts": "mod+.",
+    "go_to_search": "mod+e",
+    "open_filter": "mod+shift+f",
+    "go_to_chat_or_channel": "mod+g",
+    "start_new_chat": "mod+n",
+    "start_chat_in_new_window": "mod+shift+n",
+    "open_conversation_in_new_window": "mod+o",
+    "open_settings": "mod+,",
+    "open_help": "F1",
+    "close": "Escape",
+    "zoom_in": "mod+=",
+    "zoom_out": "mod+-",
+    "reset_zoom": "ctrl+0",
+    "open_app_bar_item_1": "mod+1",
+    "open_app_bar_item_2": "mod+2",
+    "open_app_bar_item_3": "mod+3",
+    "open_app_bar_item_4": "mod+4",
+    "open_app_bar_item_5": "mod+5",
+    "focus_chat_and_channel_list": "mod+l",
+    "focus_message_pane": {
+      "default": "ctrl+m",
+      "darwin": "cmd+p"
+    },
+    "go_to_compose_box": "mod+r",
+    "open_history_menu": {
+      "default": "ctrl+h",
+      "darwin": "cmd+y"
+    },
+    "go_to_next_section": "mod+F6",
+    "go_to_previous_section": "mod+shift+F6",
+    "go_back": {
+      "default": "alt+Left",
+      "darwin": "cmd+["
+    },
+    "go_forward": {
+      "default": "alt+Right",
+      "darwin": "cmd+]"
+    },
+    "mark_all_as_read": "shift+Escape",
+    "jump_to_last_read_or_newest_message": "mod+j",
+    "find_in_current_chat_or_channel": "mod+f",
+    "toggle_details_pane": {
+      "default": "alt+p",
+      "darwin": "cmd+d"
+    },
+    "reply_to_last_message": {
+      "default": "alt+shift+r",
+      "darwin": "cmd+shift+r"
+    },
+    "react_to_last_message": "mod+alt+r",
+    "edit_last_sent_message": {
+      "default": "",
+      "darwin": "alt+shift+e"
+    },
+    "show_unread_chats": "mod+alt+u",
+    "show_all_chats": "mod+alt+c",
+    "show_all_channels": "mod+alt+a",
+    "show_meeting_chats": "mod+alt+b",
+    "clear_all_filters": "mod+alt+z",
+    "expand_compose_box": "mod+shift+x",
+    "send_from_expanded_compose_box": "mod+Return",
+    "new_line_in_message": "shift+Return",
+    "attach_file": {
+      "default": "alt+shift+o",
+      "darwin": "cmd+alt+o"
+    },
+    "paragraph_style": "mod+alt+p",
+    "heading_1": "mod+alt+1",
+    "heading_2": "mod+alt+2",
+    "heading_3": "mod+alt+3",
+    "bold": "mod+b",
+    "italic": "mod+i",
+    "underline": "mod+u",
+    "strikethrough": {
+      "default": "ctrl+alt+x",
+      "darwin": "cmd+ctrl+x"
+    },
+    "mark_message_as_important": "mod+shift+i",
+    "insert_link": "mod+k",
+    "insert_inline_code": "mod+shift+c",
+    "insert_code_block": "mod+shift+b",
+    "accept_video_call": {
+      "default": "ctrl+shift+a",
+      "darwin": "cmd+shift+v"
+    },
+    "accept_audio_call": {
+      "default": "ctrl+shift+s",
+      "darwin": "cmd+shift+a"
+    },
+    "decline_call": "mod+shift+d",
+    "start_audio_call": {
+      "default": "alt+shift+a",
+      "darwin": "cmd+alt+s"
+    },
+    "start_video_call": {
+      "default": "alt+shift+v",
+      "darwin": "cmd+shift+s"
+    },
+    "end_call": "mod+shift+h",
+    "toggle_mute": "mod+shift+m",
+    "toggle_video": "mod+shift+o",
+    "temporarily_unmute": {
+      "default": "ctrl+Space",
+      "darwin": "alt+Space"
+    },
+    "raise_or_lower_hand": "mod+shift+k",
+    "toggle_share_content_tray": "mod+shift+e",
+    "go_to_sharing_toolbar": "mod+shift+Space",
+    "admit_people_from_lobby_notification": "mod+shift+y",
+    "schedule_meeting": {
+      "default": "alt+n",
+      "darwin": "cmd+ctrl+n"
+    },
+    "save_or_send_meeting_request": "mod+s",
+    "join_from_meeting_details": {
+      "default": "alt+shift+j",
+      "darwin": "cmd+ctrl+k"
+    },
+    "activity_mark_all_as_read": {
+      "default": "ctrl+alt+k",
+      "darwin": "cmd+alt+j"
+    }
+  },
+  "consequential": [
+    "send_from_expanded_compose_box",
+    "save_or_send_meeting_request",
+    "mark_all_as_read",
+    "activity_mark_all_as_read",
+    "accept_video_call",
+    "accept_audio_call",
+    "decline_call",
+    "start_audio_call",
+    "start_video_call",
+    "end_call",
+    "admit_people_from_lobby_notification"
+  ],
+  "essentials": ["go_to_search", "go_to_chat_or_channel", "start_new_chat", "go_to_compose_box", "focus_chat_and_channel_list", "attach_file", "schedule_meeting", "toggle_mute"],
+  "workflows": {
+    "go_to_chat_or_channel": {
+      "name": "open a chat or channel by name",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "mod+g"
+        },
+        {
+          "type": "wait",
+          "ms": 400
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "chat, person or channel name"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
+    },
+    "search_teams": {
+      "name": "search messages, people and files",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "mod+e",
+          "note": "focus the search box"
+        },
+        {
+          "type": "wait",
+          "ms": 300
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "query"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
+    },
+    "send_long_message": {
+      "name": "write a formatted message in the expanded compose box and send it",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "mod+r",
+          "note": "go to the compose box"
+        },
+        {
+          "type": "pressKey",
+          "key": "mod+shift+x",
+          "note": "expand it"
+        },
+        {
+          "type": "wait",
+          "ms": 300
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "message"
+        },
+        {
+          "type": "pressKey",
+          "key": "mod+Return",
+          "note": "sends the message"
+        }
+      ]
+    }
+  },
+  "tips": [
+    "These are the desktop app keys. Teams in a browser uses different keys for many actions (for example search is ctrl+alt+e and the app bar is ctrl+shift+digit on Windows), so check mod+. there.",
+    "mod+. lists the current shortcuts. Shortcuts can be customized in the desktop app, so an account may differ from these defaults.",
+    "mod+digit follows the order of the app bar; the default order applies only if the user has not moved or added apps.",
+    "On Mac, cmd+shift+a answers an audio call and also toggles live captions in a meeting; cmd+shift+v accepts a video call or a screen share.",
+    "temporarily_unmute works only when Keyboard shortcut to unmute is on under Settings, Privacy.",
+    "mod+F6 and mod+shift+F6 move focus between the sections of the Teams window; use them to reach a pane before reading or typing.",
+    "The vendor lists shortcuts for the US keyboard layout.",
+    "In the Calendar, ? opens a dialog with more calendar shortcuts."
+  ],
+  "sources": [
+    "https://support.microsoft.com/en-us/accessibility/teams/keyboard-shortcuts-for-microsoft-teams"
+  ],
+  "lastVerified": "2026-11-18"
+}

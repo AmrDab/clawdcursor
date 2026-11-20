@@ -1,0 +1,130 @@
+{
+  "app": "x-com",
+  "name": "X",
+  "kind": "web",
+  "domainHints": [
+    "x.com",
+    "twitter.com"
+  ],
+  "shortcuts": {
+    "new_post": "n",
+    "send_post": "mod+Return",
+    "like": "l",
+    "reply": "r",
+    "repost": "t",
+    "direct_message": "m",
+    "mute_account": "u",
+    "block_account": "b",
+    "open_post_details": "Return",
+    "expand_photo": "o",
+    "search": "/",
+    "show_keyboard_shortcuts": "?",
+    "next_post": "j",
+    "previous_post": "k",
+    "page_down": "Space",
+    "load_new_posts": ".",
+    "go_home": "g h",
+    "go_notifications": "g n",
+    "go_mentions": "g r",
+    "go_profile": "g p",
+    "go_likes": "g l",
+    "go_lists": "g i",
+    "go_messages": "g m",
+    "go_settings": "g s",
+    "go_to_user_profile": "g u"
+  },
+  "consequential": [
+    "send_post",
+    "like",
+    "repost",
+    "mute_account",
+    "block_account"
+  ],
+  "essentials": ["new_post", "send_post", "search", "go_home", "go_notifications", "next_post", "reply", "go_messages"],
+  "workflows": {
+    "write_post": {
+      "name": "write and send a post",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "n",
+          "note": "opens the post composer"
+        },
+        {
+          "type": "wait",
+          "ms": 600
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "post text"
+        },
+        {
+          "type": "verify",
+          "name": "composer_shows_intended_text",
+          "note": "posting is public; confirm the text first"
+        },
+        {
+          "type": "pressKey",
+          "key": "mod+Return",
+          "note": "sends the post"
+        }
+      ]
+    },
+    "search": {
+      "name": "search X",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "/",
+          "note": "focuses the search box"
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "query"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
+    },
+    "reply_to_selected_post": {
+      "name": "reply to the post selected with j or k",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "r",
+          "note": "opens the reply composer for the selected post"
+        },
+        {
+          "type": "wait",
+          "ms": 600
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "reply text"
+        },
+        {
+          "type": "verify",
+          "name": "reply_shows_intended_text"
+        },
+        {
+          "type": "pressKey",
+          "key": "mod+Return",
+          "note": "sends the reply"
+        }
+      ]
+    }
+  },
+  "tips": [
+    "These keys work on x.com in a desktop browser; press ? there for the site's own full list.",
+    "j and k move between posts; use them to put focus on a post before an action key such as l, r or t.",
+    "Go-to keys are two presses in a row: g, then the letter (g h for Home, g n for Notifications).",
+    "u mutes and b blocks an account, so treat both as consequential.",
+    "A standard post holds up to 280 characters."
+  ],
+  "sources": [
+    "https://help.x.com/en/using-x/how-to-post"
+  ],
+  "lastVerified": "2026-11-18"
+}

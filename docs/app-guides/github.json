@@ -1,0 +1,164 @@
+{
+  "app": "github",
+  "name": "GitHub",
+  "kind": "web",
+  "domainHints": [
+    "github.com"
+  ],
+  "shortcuts": {
+    "show_shortcuts_for_page": "?",
+    "focus_search_bar": "/",
+    "go_to_notifications": "g n",
+    "go_to_code_tab": "g c",
+    "go_to_issues_tab": "g i",
+    "go_to_pull_requests_tab": "g p",
+    "go_to_actions_tab": "g a",
+    "go_to_wiki_tab": "g w",
+    "go_to_discussions_tab": "g g",
+    "go_to_security_tab": "g s",
+    "open_in_github_dev_editor": ".",
+    "open_in_github_dev_editor_new_tab": ">",
+    "file_finder": "t",
+    "jump_to_line": "l",
+    "switch_branch_or_tag": "w",
+    "expand_url_to_permalink": "y",
+    "toggle_diff_comments": "i",
+    "toggle_diff_annotations": "a",
+    "open_blame_view": "b",
+    "edit_file": "e",
+    "file_editor_find": "mod+f",
+    "file_editor_find_next": "mod+g",
+    "file_editor_find_previous": "mod+shift+g",
+    "file_editor_replace": {
+      "default": "ctrl+shift+f",
+      "darwin": "cmd+alt+f"
+    },
+    "file_editor_jump_to_line": "alt+g",
+    "file_editor_undo": "mod+z",
+    "file_editor_redo": "mod+y",
+    "file_editor_open_commit_dialog": "mod+s",
+    "markdown_bold": "mod+b",
+    "markdown_italic": "mod+i",
+    "markdown_inline_code": "mod+e",
+    "markdown_link": "mod+k",
+    "markdown_ordered_list": "mod+shift+7",
+    "markdown_unordered_list": "mod+shift+8",
+    "markdown_quote": "mod+shift+.",
+    "toggle_write_and_preview_tabs": "mod+shift+p",
+    "paste_link_as_plain_text": "mod+shift+v",
+    "open_saved_replies": "ctrl+.",
+    "insert_suggestion": "mod+g",
+    "quote_selected_text_in_reply": "r",
+    "submit_comment": "mod+Return",
+    "create_issue": "c",
+    "focus_issue_or_pr_filter_bar": "mod+/",
+    "filter_by_author": "u",
+    "labels_filter_or_apply": "l",
+    "milestone_filter_or_set": "m",
+    "assignee_filter_or_set": "a",
+    "open_selected_issue": "o",
+    "request_reviewer": "q",
+    "link_issue_or_pull_request": "x",
+    "create_sub_issue": "alt+shift+c",
+    "add_existing_issue_as_sub_issue": "alt+shift+a",
+    "edit_parent_issue": "alt+shift+p",
+    "pr_files_open_commits_dropdown": "c",
+    "pr_files_focus_file_filter": "t",
+    "submit_review_comment": "mod+shift+Return",
+    "project_focus_filter": "mod+f",
+    "project_toggle_cell_edit": "Return",
+    "project_cancel_cell_edit": "Escape",
+    "project_open_row_actions_menu": "mod+shift+\\",
+    "project_select_item": "shift+Space",
+    "project_open_selected_item": "Space",
+    "project_archive_selected_items": "e",
+    "actions_go_to_workflow_file": "g f",
+    "actions_toggle_log_timestamps": "shift+t",
+    "actions_toggle_full_screen_logs": "shift+f",
+    "notification_mark_done": "e",
+    "notification_mark_unread": "shift+u",
+    "notification_mark_read": "shift+i",
+    "notification_unsubscribe": "shift+m"
+  },
+  "consequential": [
+    "submit_comment",
+    "submit_review_comment",
+    "project_archive_selected_items",
+    "notification_mark_done",
+    "notification_unsubscribe"
+  ],
+  "essentials": ["focus_search_bar", "go_to_issues_tab", "go_to_pull_requests_tab", "go_to_code_tab", "file_finder", "create_issue", "submit_comment", "go_to_notifications"],
+  "workflows": {
+    "find_file_in_repository": {
+      "name": "open a file in the current repository by name",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "t",
+          "note": "file finder; works on a repository code page"
+        },
+        {
+          "type": "wait",
+          "ms": 500
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "file name"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
+    },
+    "search_github": {
+      "name": "search GitHub",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "/",
+          "note": "focus the search bar"
+        },
+        {
+          "type": "wait",
+          "ms": 300
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "query"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
+    },
+    "comment_on_issue_or_pull_request": {
+      "name": "post a comment from the focused comment box",
+      "steps": [
+        {
+          "type": "typeAtFocus",
+          "field": "comment"
+        },
+        {
+          "type": "pressKey",
+          "key": "mod+Return",
+          "note": "posts the comment"
+        }
+      ]
+    }
+  },
+  "tips": [
+    "Press ? on any GitHub page to see the shortcuts that apply to that page.",
+    "Single-letter shortcuts depend on the page: c creates an issue on an issue list but opens the commits menu on a pull request Files changed tab.",
+    "Character-key shortcuts can be switched off in the account accessibility settings; shortcuts with a modifier key keep working.",
+    "The g-then-letter tab shortcuts work inside a repository.",
+    "The Markdown formatting shortcuts work in comment boxes and in the file editor.",
+    "Saved replies: ctrl+. opens the menu, then ctrl plus the reply number fills it in.",
+    "On an open issue or pull request, l, m and a apply a label, milestone or assignee; on an issue or pull request list they filter."
+  ],
+  "sources": [
+    "https://docs.github.com/en/get-started/accessibility/keyboard-shortcuts"
+  ],
+  "lastVerified": "2026-11-18"
+}

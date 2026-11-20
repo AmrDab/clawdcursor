@@ -1,0 +1,236 @@
+{
+  "app": "chrome",
+  "name": "Google Chrome",
+  "kind": "desktop",
+  "os": [
+    "win32",
+    "darwin",
+    "linux"
+  ],
+  "processNames": [
+    "chrome",
+    "Google Chrome"
+  ],
+  "shortcuts": {
+    "new_tab": "mod+t",
+    "new_window": "mod+n",
+    "new_incognito_window": "mod+shift+n",
+    "reopen_closed_tab": "mod+shift+t",
+    "close_tab": "mod+w",
+    "close_window": "mod+shift+w",
+    "quit_chrome": {
+      "default": "alt+f x",
+      "darwin": "cmd+q"
+    },
+    "next_tab": {
+      "default": "ctrl+Tab",
+      "darwin": "cmd+alt+Right"
+    },
+    "previous_tab": {
+      "default": "ctrl+shift+Tab",
+      "darwin": "cmd+alt+Left"
+    },
+    "go_to_tab_1": "mod+1",
+    "go_to_tab_2": "mod+2",
+    "go_to_tab_3": "mod+3",
+    "go_to_last_tab": "mod+9",
+    "move_tab_left": "ctrl+shift+PageUp",
+    "move_tab_right": "ctrl+shift+PageDown",
+    "back": {
+      "default": "alt+Left",
+      "darwin": "cmd+["
+    },
+    "forward": {
+      "default": "alt+Right",
+      "darwin": "cmd+]"
+    },
+    "reload": {
+      "default": "ctrl+r",
+      "darwin": ""
+    },
+    "reload_ignoring_cache": "mod+shift+r",
+    "stop_loading": "Escape",
+    "open_home_page": {
+      "default": "alt+Home",
+      "darwin": "cmd+shift+h"
+    },
+    "focus_address_bar": "mod+l",
+    "search_from_address_bar": {
+      "default": "ctrl+k",
+      "darwin": "cmd+alt+f"
+    },
+    "address_bar_add_www_and_com": "ctrl+Return",
+    "address_bar_open_in_new_tab": {
+      "default": "alt+Return",
+      "darwin": "cmd+Return"
+    },
+    "find_on_page": "mod+f",
+    "find_next": "mod+g",
+    "find_previous": "mod+shift+g",
+    "open_history": {
+      "default": "ctrl+h",
+      "darwin": "cmd+y"
+    },
+    "open_downloads": {
+      "default": "ctrl+j",
+      "darwin": "cmd+shift+j"
+    },
+    "toggle_bookmarks_bar": "mod+shift+b",
+    "open_bookmark_manager": {
+      "default": "ctrl+shift+o",
+      "darwin": "cmd+alt+b"
+    },
+    "bookmark_page": "mod+d",
+    "bookmark_all_tabs": "mod+shift+d",
+    "open_settings": {
+      "default": "",
+      "darwin": "cmd+,"
+    },
+    "open_chrome_menu": {
+      "default": "alt+f",
+      "darwin": ""
+    },
+    "open_developer_tools": {
+      "default": "F12",
+      "darwin": "cmd+alt+i"
+    },
+    "open_javascript_console": {
+      "default": "",
+      "darwin": "cmd+alt+j"
+    },
+    "view_page_source": {
+      "default": "ctrl+u",
+      "darwin": "cmd+alt+u"
+    },
+    "open_delete_browsing_data": {
+      "default": "ctrl+shift+Delete",
+      "darwin": "cmd+shift+Backspace"
+    },
+    "open_task_manager": {
+      "default": "shift+Escape",
+      "darwin": ""
+    },
+    "print": "mod+p",
+    "save_page": "mod+s",
+    "open_file": "mod+o",
+    "zoom_in": "mod+Plus",
+    "zoom_out": "mod+-",
+    "reset_zoom": "mod+0",
+    "toggle_full_screen": {
+      "default": "F11",
+      "darwin": ""
+    },
+    "scroll_down_one_screen": "Space",
+    "scroll_up_one_screen": "shift+Space",
+    "go_to_page_top": {
+      "default": "Home",
+      "darwin": ""
+    },
+    "go_to_page_bottom": {
+      "default": "End",
+      "darwin": ""
+    },
+    "next_clickable_item": "Tab",
+    "previous_clickable_item": "shift+Tab",
+    "focus_toolbar": {
+      "default": "shift+alt+t",
+      "darwin": ""
+    },
+    "focus_web_content": {
+      "default": "ctrl+F6",
+      "darwin": ""
+    },
+    "switch_profile_or_guest": "mod+shift+m",
+    "open_split_view": {
+      "default": "shift+alt+n",
+      "darwin": "cmd+alt+n"
+    },
+    "minimize_window": {
+      "default": "alt+Space n",
+      "darwin": "cmd+m"
+    },
+    "toggle_caret_browsing": "F7"
+  },
+  "consequential": [
+    "close_tab",
+    "close_window",
+    "quit_chrome"
+  ],
+  "essentials": ["focus_address_bar", "new_tab", "next_tab", "previous_tab", "back", "find_on_page", "reopen_closed_tab", "open_downloads"],
+  "workflows": {
+    "open_url_in_new_tab": {
+      "name": "open a web address in a new tab",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "mod+t",
+          "note": "opens a new tab and jumps to it"
+        },
+        {
+          "type": "pressKey",
+          "key": "mod+l",
+          "note": "jumps to the address bar"
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "web address or search"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
+    },
+    "open_url_in_current_tab": {
+      "name": "go to a web address in the current tab",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "mod+l",
+          "note": "jumps to the address bar"
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "web address or search"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
+    },
+    "find_on_page": {
+      "name": "find text on the current page",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "mod+f",
+          "note": "Find Bar"
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "search text"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return",
+          "note": "mod+g moves to the next match"
+        }
+      ]
+    }
+  },
+  "tips": [
+    "These are the browser's own keys; web pages can define their own shortcuts on top of them.",
+    "An empty chord for one OS means Google's page lists no key that can be sent there; use the menu instead.",
+    "mod+1 to mod+8 jump to a tab by position; mod+9 always goes to the rightmost tab.",
+    "Tab switching differs by OS: ctrl+Tab on Windows and Linux, cmd+alt+Right on Mac.",
+    "mod+shift+t reopens closed tabs in the order they were closed.",
+    "Mac full screen is Fn+F, which uses the Fn key and is not listed as a chord here; hold Escape to leave full screen.",
+    "History and Downloads open as pages in a new tab.",
+    "On Windows and Linux alt+d and F6 also jump to the address bar."
+  ],
+  "sources": [
+    "https://support.google.com/chrome/answer/157179"
+  ],
+  "lastVerified": "2026-11-18"
+}

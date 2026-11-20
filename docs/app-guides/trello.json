@@ -1,0 +1,139 @@
+{
+  "app": "trello",
+  "name": "Trello",
+  "kind": "web",
+  "domainHints": [
+    "trello.com"
+  ],
+  "shortcuts": {
+    "open_shortcuts_page": "?",
+    "open_boards_menu": "b",
+    "focus_search_box": "/",
+    "toggle_board_menu": "]",
+    "select_card_below": "j",
+    "select_card_above": "k",
+    "select_card_left": "Left",
+    "select_card_right": "Right",
+    "open_selected_card": "Return",
+    "close_menu_or_cancel_edit": "Escape",
+    "save_text": "mod+Return",
+    "insert_card_after_selected": "n",
+    "quick_edit_card": "e",
+    "edit_card_title": "t",
+    "archive_card": "c",
+    "set_due_date": "d",
+    "add_checklist": "-",
+    "open_labels_menu": "l",
+    "toggle_green_label": "1",
+    "toggle_yellow_label": "2",
+    "toggle_orange_label": "3",
+    "toggle_red_label": "4",
+    "toggle_purple_label": "5",
+    "toggle_blue_label": "6",
+    "toggle_sky_label": "7",
+    "toggle_lime_label": "8",
+    "toggle_pink_label": "9",
+    "toggle_black_label": "0",
+    "toggle_label_names": ";",
+    "open_members_menu": "m",
+    "assign_or_unassign_self": "Space",
+    "watch_or_unwatch_card": "s",
+    "vote_on_card": "v",
+    "move_card_to_bottom_of_left_list": ",",
+    "move_card_to_bottom_of_right_list": ".",
+    "move_card_to_top_of_left_list": "<",
+    "move_card_to_top_of_right_list": ">",
+    "copy_card": "mod+c",
+    "cut_card": "mod+x",
+    "paste_card_or_link": "mod+v",
+    "open_card_filter": "f",
+    "toggle_my_cards_filter": "q",
+    "clear_all_filters": "x",
+    "undo_last_action": "z",
+    "redo_last_action": "shift+z",
+    "repeat_last_action": "r"
+  },
+  "consequential": [
+    "archive_card"
+  ],
+  "essentials": ["focus_search_box", "open_boards_menu", "select_card_below", "select_card_right", "open_selected_card", "insert_card_after_selected", "save_text", "set_due_date"],
+  "workflows": {
+    "open_board_by_name": {
+      "name": "switch to another board",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "b",
+          "note": "board search"
+        },
+        {
+          "type": "wait",
+          "ms": 400
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "first letters of the board name"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
+    },
+    "filter_cards_by_title": {
+      "name": "filter the cards on the board",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "f",
+          "note": "filter menu; the title search field is focused"
+        },
+        {
+          "type": "wait",
+          "ms": 300
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "text to match"
+        }
+      ]
+    },
+    "add_card_below_selected": {
+      "name": "add a card below the selected card",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "n"
+        },
+        {
+          "type": "wait",
+          "ms": 300
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "card title"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return",
+          "note": "shift+Return instead opens the card right after creating it"
+        }
+      ]
+    }
+  },
+  "tips": [
+    "Card shortcuts (c, d, e, l, m, n, s, Space, label digits, move keys) act on the card under the mouse pointer or the open card, so select or hover the right card first.",
+    "c archives the hovered card at once. Undo (z) covers recent card actions, but deleting cards, lists or labels is permanent.",
+    "With a card open, Left or k opens the card above in the list and Right or j the card below.",
+    "paste_card_or_link: over a list it pastes a copied or cut card; on a board with text or a link copied it makes a new card; in an open card it attaches a copied link.",
+    "e opens quick edit for one card; with several cards selected (shift+click) it opens the bulk actions menu.",
+    "Shortcuts can be turned off under Account, Settings, Accessibility; if single keys do nothing, check that setting.",
+    "vote_on_card only works when the Voting Power-Up is enabled on the board.",
+    "In a comment, @ plus a name lists members; Return or Tab picks one and that member is notified when the comment is saved."
+  ],
+  "sources": [
+    "https://trello.com/shortcuts",
+    "https://support.atlassian.com/trello/docs/keyboard-shortcuts-in-trello/"
+  ],
+  "lastVerified": "2026-11-18"
+}

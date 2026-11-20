@@ -1,0 +1,83 @@
+{
+  "app": "reddit",
+  "name": "Reddit",
+  "kind": "web",
+  "domainHints": [
+    "reddit.com",
+    "www.reddit.com"
+  ],
+  "shortcuts": {
+    "show_keyboard_shortcuts": "?",
+    "next_post_or_comment": "j",
+    "previous_post_or_comment": "k",
+    "expand_or_collapse_content": "x",
+    "copy_link": "l",
+    "upvote": "a",
+    "downvote": "z",
+    "reply_to_comment": "r",
+    "save_or_unsave": "s",
+    "hide_post": "h",
+    "toggle_navigation": "q",
+    "collapse_or_expand_comment": "f",
+    "create_post": "c",
+    "submit_comment_or_post": {
+      "default": "alt+Return",
+      "darwin": "cmd+Return"
+    },
+    "media_play_or_pause": "Space",
+    "media_toggle_full_screen": "f",
+    "media_rewind_5_seconds": "Left",
+    "media_forward_5_seconds": "Right",
+    "media_rewind_10_seconds": "j",
+    "media_forward_10_seconds": "l",
+    "media_volume_up": "Up",
+    "media_volume_down": "Down",
+    "media_restart": "0",
+    "media_mute_or_unmute": "m",
+    "media_captions": "c"
+  },
+  "consequential": [
+    "submit_comment_or_post",
+    "upvote",
+    "downvote",
+    "hide_post"
+  ],
+  "essentials": ["next_post_or_comment", "previous_post_or_comment", "expand_or_collapse_content", "create_post", "reply_to_comment", "submit_comment_or_post", "toggle_navigation", "save_or_unsave"],
+  "workflows": {
+    "reply_to_selected_comment": {
+      "name": "reply to the comment selected with j or k",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "r",
+          "note": "opens the reply box for the selected comment"
+        },
+        {
+          "type": "wait",
+          "ms": 500
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "reply text"
+        },
+        {
+          "type": "verify",
+          "name": "reply_box_shows_intended_text",
+          "note": "the reply is public; confirm the text, then submit with alt+Return on Windows or cmd+Return on Mac"
+        }
+      ]
+    }
+  },
+  "tips": [
+    "Hotkeys work only on the current desktop reddit.com interface, not on old Reddit.",
+    "Submit is cmd+Return on Mac and alt+Return on Windows: wherever Reddit's list says CMD, Windows uses alt.",
+    "Press ? anywhere on Reddit to open the hotkeys panel, which lists every key and can turn hotkeys off or on.",
+    "Hotkeys are on by default; if a key does nothing, check the panel in case they were turned off.",
+    "Media keys reuse letters: j, k, l, f and c mean something else when they apply to the video player.",
+    "x expands or collapses content only in compact view."
+  ],
+  "sources": [
+    "https://support.reddithelp.com/hc/en-us/articles/38744650091412-How-to-use-keyboard-shortcuts-hotkeys"
+  ],
+  "lastVerified": "2026-11-18"
+}

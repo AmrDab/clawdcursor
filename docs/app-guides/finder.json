@@ -1,0 +1,120 @@
+{
+  "app": "finder",
+  "name": "Finder",
+  "kind": "desktop",
+  "os": [
+    "darwin"
+  ],
+  "processNames": [
+    "Finder"
+  ],
+  "shortcuts": {
+    "new_window": "mod+n",
+    "close_window": "mod+w",
+    "new_folder": "mod+shift+n",
+    "new_folder_with_selection": "ctrl+mod+n",
+    "new_smart_folder": "mod+alt+n",
+    "open_selected_item": "mod+Down",
+    "open_enclosing_folder": "mod+Up",
+    "back": "mod+[",
+    "forward": "mod+]",
+    "go_to_folder": "mod+shift+g",
+    "go_home": "mod+shift+h",
+    "go_desktop": "mod+shift+d",
+    "go_documents": "mod+shift+o",
+    "go_downloads": "mod+alt+l",
+    "go_utilities": "mod+shift+u",
+    "go_computer": "mod+shift+c",
+    "go_recents": "mod+shift+f",
+    "go_icloud_drive": "mod+shift+i",
+    "go_network": "mod+shift+k",
+    "go_airdrop": "mod+shift+r",
+    "connect_to_server": "mod+k",
+    "find": "mod+f",
+    "spotlight_search": "mod+Space",
+    "get_info": "mod+i",
+    "quick_look": "Space",
+    "quick_look_slideshow": "mod+alt+y",
+    "duplicate": "mod+d",
+    "make_alias": "ctrl+mod+a",
+    "show_original_of_alias": "mod+r",
+    "copy": "mod+c",
+    "paste": "mod+v",
+    "move_copied_items_here": "mod+alt+v",
+    "select_all": "mod+a",
+    "undo": "mod+z",
+    "redo": "mod+shift+z",
+    "move_to_trash": "mod+Backspace",
+    "empty_trash": "mod+shift+Backspace",
+    "eject": "mod+e",
+    "icon_view": "mod+1",
+    "list_view": "mod+2",
+    "column_view": "mod+3",
+    "gallery_view": "mod+4",
+    "view_options": "mod+j",
+    "toggle_preview_pane": "mod+shift+p",
+    "toggle_sidebar": "mod+alt+s",
+    "toggle_path_bar": "mod+alt+p",
+    "toggle_status_bar": "mod+/",
+    "toggle_tab_bar": "mod+shift+t",
+    "add_to_sidebar": "ctrl+mod+t",
+    "expand_folder_in_list_view": "Right",
+    "collapse_folder_in_list_view": "Left",
+    "minimize_window": "mod+m",
+    "hide_finder": "mod+h",
+    "settings": "mod+,"
+  },
+  "consequential": [
+    "move_to_trash",
+    "empty_trash",
+    "move_copied_items_here",
+    "eject"
+  ],
+  "essentials": ["go_to_folder", "new_folder", "open_selected_item", "open_enclosing_folder", "find", "go_downloads", "get_info", "back"],
+  "workflows": {
+    "go_to_folder": {
+      "name": "open a folder by its path",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "mod+shift+g",
+          "note": "Go to Folder window"
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "folder path"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
+    },
+    "search": {
+      "name": "search from the Finder window",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "mod+f",
+          "note": "starts a search in the window"
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "query"
+        }
+      ]
+    }
+  },
+  "tips": [
+    "The key Apple calls Delete is the one above Return (Backspace here): mod+Backspace moves the selection to the Trash.",
+    "mod+shift+Backspace empties the Trash after a confirmation dialog; adding alt skips that dialog, so leave alt out.",
+    "To move files: copy with mod+c, then mod+alt+v in the destination moves them instead of pasting a copy.",
+    "Open the selected item with mod+Down or mod+o.",
+    "Right and Left open and close a folder only in list view.",
+    "The Go menu in the menu bar shows the shortcuts for more common folders."
+  ],
+  "sources": [
+    "https://support.apple.com/en-us/102650"
+  ],
+  "lastVerified": "2026-11-18"
+}

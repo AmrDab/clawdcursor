@@ -1,0 +1,81 @@
+{
+  "app": "whatsapp-web",
+  "name": "WhatsApp Web",
+  "kind": "web",
+  "domainHints": [
+    "web.whatsapp.com"
+  ],
+  "shortcuts": {
+    "new_chat": {
+      "default": "ctrl+alt+n",
+      "darwin": "cmd+ctrl+n"
+    },
+    "new_group": {
+      "default": "ctrl+alt+shift+n",
+      "darwin": "cmd+ctrl+shift+n"
+    },
+    "search_chat": {
+      "default": "ctrl+alt+shift+f",
+      "darwin": "cmd+ctrl+/"
+    },
+    "extended_search": {
+      "default": "alt+k",
+      "darwin": "cmd+k"
+    },
+    "close_chat": "Escape",
+    "mark_chat_as_unread": {
+      "default": "ctrl+alt+shift+u",
+      "darwin": "cmd+ctrl+shift+u"
+    },
+    "mute_chat": {
+      "default": "ctrl+alt+shift+m",
+      "darwin": "cmd+ctrl+shift+m"
+    },
+    "archive_chat": {
+      "default": "ctrl+alt+shift+e",
+      "darwin": "cmd+ctrl+shift+e"
+    },
+    "pin_chat": {
+      "default": "ctrl+alt+shift+p",
+      "darwin": "cmd+ctrl+shift+p"
+    },
+    "open_profile_and_about": {
+      "default": "ctrl+alt+p",
+      "darwin": "cmd+ctrl+p"
+    },
+    "open_settings": {
+      "default": "",
+      "darwin": "cmd+ctrl+,"
+    },
+    "open_emoji_panel": {
+      "default": "ctrl+alt+e",
+      "darwin": "cmd+ctrl+e"
+    },
+    "open_gif_panel": {
+      "default": "ctrl+alt+g",
+      "darwin": "cmd+ctrl+g"
+    },
+    "open_sticker_panel": {
+      "default": "ctrl+alt+s",
+      "darwin": "cmd+ctrl+s"
+    },
+    "lock_screen": {
+      "default": "ctrl+alt+l",
+      "darwin": "cmd+ctrl+l"
+    }
+  },
+  "consequential": [
+    "archive_chat",
+    "lock_screen"
+  ],
+  "essentials": ["new_chat", "search_chat", "extended_search", "new_group", "close_chat", "mark_chat_as_unread", "pin_chat", "open_profile_and_about"],
+  "tips": [
+    "All keys of a shortcut are pressed together.",
+    "The vendor lists keys for Windows and Mac only; the Windows keys are given here as the default for other systems.",
+    "The vendor page gives an incomplete Windows shortcut for Settings, so it is listed for Mac only."
+  ],
+  "sources": [
+    "https://faq.whatsapp.com/6204576529560565/?cms_platform=web"
+  ],
+  "lastVerified": "2026-11-18"
+}

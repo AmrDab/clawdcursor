@@ -1,31 +1,93 @@
 {
-  "app": "Microsoft Outlook (New)",
-  "processNames": ["olk", "OUTLOOK"],
-  "workflows": {
-    "compose_email": "Click 'New mail' button (top-left) or press Ctrl+N. Click the 'To' field and type the email address. Press Tab to move to Subject. Type the subject. Press Tab to move to the body. Type your message. Click the Send button (blue button, top-left of compose).",
-    "reply": "Open the email. Click Reply (or press Ctrl+R). Type your response in the body. Click Send.",
-    "search": "Click the search bar at the top (or press Ctrl+E). Type your search query. Press Enter.",
-    "attach_file": "In compose view, click the Attach button (paperclip icon) or press Ctrl+Shift+A. Browse and select the file."
-  },
+  "app": "olk",
+  "name": "Outlook (new)",
+  "kind": "desktop",
+  "os": ["win32"],
+  "processNames": ["olk"],
   "shortcuts": {
-    "new_email": "Ctrl+N",
-    "reply": "Ctrl+R",
-    "reply_all": "Ctrl+Shift+R",
-    "forward": "Ctrl+F",
-    "send": "Ctrl+Enter",
-    "search": "Ctrl+E",
-    "attach": "Ctrl+Shift+A"
+    "new_message_or_event": "ctrl+n",
+    "send": "ctrl+Return",
+    "reply": "ctrl+r",
+    "reply_all": "ctrl+shift+r",
+    "forward": "ctrl+f",
+    "open_in_new_window": "shift+Return",
+    "delete_item": "Delete",
+    "delete_permanently": "shift+Delete",
+    "mark_read": "ctrl+q",
+    "mark_unread": "ctrl+u",
+    "next_message": "ctrl+>",
+    "previous_message": "ctrl+<",
+    "first_message_in_folder": "Home",
+    "select_next_message_too": "shift+Down",
+    "select_previous_message_too": "shift+Up",
+    "go_to_folder_pane": "ctrl+y",
+    "go_to_calendar": "ctrl+2",
+    "close_message_or_cancel_search": "Escape",
+    "message_top": "Home",
+    "message_bottom": "End",
+    "show_keyboard_shortcuts": "?",
+    "show_key_tips": "alt",
+    "open_split_button": "alt+Down",
+    "insert_hyperlink": "ctrl+k",
+    "bold": "ctrl+b",
+    "italic": "ctrl+i",
+    "underline": "ctrl+u",
+    "undo": "ctrl+z",
+    "copy": "ctrl+c",
+    "cut": "ctrl+x",
+    "paste": "ctrl+v",
+    "delete_word_left": "ctrl+Backspace",
+    "calendar_day_view": "ctrl+alt+1",
+    "calendar_month_view": "ctrl+alt+4",
+    "calendar_next_period": "ctrl+alt+Right",
+    "calendar_previous_period": "ctrl+alt+Left",
+    "calendar_switch_region": "F6"
+  },
+  "consequential": ["send", "delete_item", "delete_permanently"],
+  "essentials": ["new_message_or_event", "send", "reply", "forward", "next_message", "previous_message", "go_to_calendar", "go_to_folder_pane"],
+  "workflows": {
+    "compose_and_send": {
+      "name": "compose and send an email",
+      "steps": [
+        { "type": "pressKey", "key": "ctrl+n", "note": "new message, from the Mail view" },
+        { "type": "wait", "ms": 1200, "note": "wait for the compose form" },
+        { "type": "typeAtFocus", "field": "recipient" },
+        { "type": "pressKey", "key": "Tab", "note": "moves to the next field; read which field has focus before typing" },
+        { "type": "typeAtFocus", "field": "subject" },
+        { "type": "pressKey", "key": "Tab" },
+        { "type": "typeAtFocus", "field": "body" },
+        { "type": "verify", "name": "recipient_subject_body_filled", "note": "confirm the fields before sending" },
+        { "type": "pressKey", "key": "ctrl+Return", "note": "send" }
+      ]
+    },
+    "reply": {
+      "name": "reply to the selected email",
+      "steps": [
+        { "type": "pressKey", "key": "ctrl+r" },
+        { "type": "wait", "ms": 600 },
+        { "type": "typeAtFocus", "field": "body" },
+        { "type": "pressKey", "key": "ctrl+Return", "note": "send" }
+      ]
+    }
   },
   "layout": {
-    "sidebar": "Left — folder list (Inbox, Sent, Drafts, etc.)",
-    "message_list": "Center — list of emails in the selected folder",
-    "reading_pane": "Right — preview of selected email",
-    "compose": "When composing: To field, Cc/Bcc, Subject, Body area, Send button at top-left"
+    "sidebar": "left: folder list (Inbox, Sent Items, Drafts and so on)",
+    "message_list": "center: messages in the selected folder",
+    "reading_pane": "right: the selected message",
+    "compose": "To, Cc and Bcc, Subject, then the body; Send button at the top-left of the compose area"
   },
   "tips": [
-    "New Outlook (olk.exe) is a WebView2 app — it can be slow to load. Wait for it to fully render before interacting.",
-    "The Send button is BLUE and at the top-left of the compose area. Do NOT press Enter to send — Enter just adds a new line.",
-    "After typing the To address, press Tab (NOT Enter) to move to Subject.",
-    "If Outlook shows a loading screen, wait 3-5 seconds for it to fully load."
-  ]
+    "This guide is for the new Outlook for Windows (olk); classic Outlook uses different keys, for example ctrl+shift+m for a new message and alt+s to send.",
+    "Press ? outside a text field to open the app's own list of keyboard shortcuts.",
+    "Send is ctrl+Return; Return alone in the body only adds a line.",
+    "ctrl+n creates a message in Mail and an event in Calendar.",
+    "ctrl+f forwards the selected message; it does not open a find box.",
+    "ctrl+u marks a message unread in the message list, but underlines text while composing.",
+    "shift+Delete removes a message permanently instead of moving it to Deleted Items.",
+    "The app is web-based and can take a few seconds to render after launch; wait for the message list before sending keys."
+  ],
+  "sources": [
+    "https://support.microsoft.com/en-us/office/keyboard-shortcuts-for-outlook-3cdeb221-7ae5-4c1d-8c1d-9e63216c1efd"
+  ],
+  "lastVerified": "2026-11-18"
 }

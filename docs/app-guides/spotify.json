@@ -1,64 +1,83 @@
 {
-  "app": "Spotify",
+  "app": "spotify",
+  "name": "Spotify",
+  "kind": "desktop",
   "processNames": [
-    "Spotify",
-    "spotify"
+    "Spotify"
   ],
-  "source": "https://support.spotify.com/is/using_spotify/system_settings/keyboard-shortcuts/",
+  "domainHints": [
+    "open.spotify.com"
+  ],
   "shortcuts": {
-    "create_new_playlist": "Ctrl+N",
-    "cut": "Ctrl+X",
-    "copy": "Ctrl+C",
-    "copy_alternative_link": "Ctrl+Alt+C",
-    "paste": "Ctrl+V",
-    "delete": "Del",
-    "select_all": "Ctrl+A",
-    "playpause": "Space",
-    "next_track": "Ctrl+Right",
-    "previous_track": "Ctrl+Left",
-    "volume_up": "Ctrl+Up",
-    "volume_down": "Ctrl+Down",
-    "mute": "Ctrl+Shift+Down",
-    "max_volume": "Ctrl+Shift+Up",
-    "show_help": "F1",
-    "filter_in_songs_and_playlists": "Ctrl+F",
-    "give_focus_to_search_field": "Ctrl+L",
-    "go_back": "Alt+Left",
-    "go_forward": "Alt+Right",
-    "play_selected_row": "Enter",
-    "preferences": "Ctrl+P",
-    "logout_active_user": "Ctrl+Shift+W",
-    "quit": "Alt+F4"
+    "open_search": "mod+k",
+    "go_to_search": {
+      "default": "ctrl+l",
+      "darwin": "cmd+shift+l"
+    },
+    "show_keyboard_shortcuts": "mod+/",
+    "play_or_pause": "Space",
+    "toggle_shuffle": {
+      "default": "ctrl+s",
+      "darwin": "alt+s"
+    },
+    "toggle_repeat": {
+      "default": "ctrl+r",
+      "darwin": "alt+r"
+    },
+    "mute_or_unmute": "m",
+    "like_current_song": "alt+shift+b",
+    "filter_current_list": "mod+f",
+    "select_all": "mod+a",
+    "open_context_menu": "alt+j",
+    "go_to_home": "alt+shift+h",
+    "go_to_library": "alt+shift+0",
+    "go_to_playlists": "alt+shift+1",
+    "go_to_podcasts": "alt+shift+2",
+    "go_to_artists": "alt+shift+3",
+    "go_to_albums": "alt+shift+4",
+    "go_to_audiobooks": "alt+shift+5",
+    "go_to_now_playing": "alt+shift+j",
+    "go_to_liked_songs": "alt+shift+s",
+    "go_to_made_for_you": "alt+shift+m",
+    "go_to_new_releases": "alt+shift+n",
+    "go_to_charts": "alt+shift+c",
+    "go_to_queue": "alt+shift+q",
+    "go_to_preferences": "mod+,",
+    "toggle_now_playing_sidebar": "alt+shift+r",
+    "toggle_library_sidebar": "alt+shift+l",
+    "log_out": "alt+shift+F6"
   },
-  "sections": {
-    "General": {
-      "Create new playlist": "Ctrl+N",
-      "Cut": "Ctrl+X",
-      "Copy": "Ctrl+C",
-      "Copy (alternative link)": "Ctrl+Alt+C",
-      "Paste": "Ctrl+V",
-      "Delete": "Del",
-      "Select all": "Ctrl+A",
-      "Play/pause": "Space",
-      "Next track": "Ctrl+Right",
-      "Previous track": "Ctrl+Left",
-      "Volume up": "Ctrl+Up",
-      "Volume down": "Ctrl+Down",
-      "Mute": "Ctrl+Shift+Down",
-      "Max volume": "Ctrl+Shift+Up",
-      "Show help": "F1",
-      "Filter (in Songs and Playlists)": "Ctrl+F",
-      "Give focus to search field": "Ctrl+L",
-      "Go back": "Alt+Left",
-      "Go forward": "Alt+Right",
-      "Play selected row": "Enter",
-      "Preferences": "Ctrl+P",
-      "Logout active user": "Ctrl+Shift+W",
-      "Quit": "Alt+F4"
+  "consequential": [
+    "log_out"
+  ],
+  "essentials": ["open_search", "play_or_pause", "go_to_home", "go_to_library", "go_to_liked_songs", "go_to_queue", "like_current_song", "toggle_shuffle"],
+  "workflows": {
+    "search_spotify": {
+      "name": "search for a song, artist, album or playlist",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "mod+k",
+          "note": "open search"
+        },
+        {
+          "type": "wait",
+          "ms": 300
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "query"
+        }
+      ]
     }
   },
   "tips": [
-    "Keyboard shortcuts reference for Spotify.",
-    "Source: https://support.spotify.com/is/using_spotify/system_settings/keyboard-shortcuts/"
-  ]
+    "The same shortcuts apply in the desktop app and in the web player.",
+    "mod+/ shows the full shortcut list inside Spotify; the vendor page lists only part of it.",
+    "The vendor page does not list keys for next track, previous track or volume; use the on-screen player controls or check the in-app list."
+  ],
+  "sources": [
+    "https://support.spotify.com/us/article/keyboard-shortcuts/"
+  ],
+  "lastVerified": "2026-11-18"
 }

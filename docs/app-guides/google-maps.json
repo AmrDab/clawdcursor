@@ -1,0 +1,34 @@
+{
+  "app": "google-maps",
+  "name": "Google Maps",
+  "kind": "web",
+  "domainHints": ["www.google.com/maps", "maps.google.com"],
+  "shortcuts": {
+    "pan_up": "Up",
+    "pan_down": "Down",
+    "pan_left": "Left",
+    "pan_right": "Right",
+    "pan_up_one_square": "shift+Up",
+    "pan_down_one_square": "shift+Down",
+    "pan_left_one_square": "shift+Left",
+    "pan_right_one_square": "shift+Right",
+    "zoom_in": "Plus",
+    "zoom_out": "-",
+    "show_more_places": "9",
+    "show_previous_places": "8",
+    "show_shortcut_list": "ctrl+/"
+  },
+  "essentials": ["zoom_in", "zoom_out", "pan_up", "pan_down", "pan_left", "pan_right"],
+  "tips": [
+    "Map keys work only when the map itself has focus: press Tab until the map is focused. A square then highlights part of the map and a numbered list of places in it appears below.",
+    "With the map focused, pressing the number shown next to a place opens details about it.",
+    "When the highlighted area holds more than 7 places, 9 shows more of them and 8 goes back.",
+    "Arrow keys move the map; with shift held they move it by one whole square.",
+    "ctrl+/ opens the list of shortcuts inside Maps. The help page gives this key as Ctrl only, with no separate Mac key.",
+    "mod+Plus, mod+- and mod+0 are the browser page zoom (bigger, smaller, reset), which enlarges what is on the page; the map zoom keys are Plus and - alone."
+  ],
+  "sources": [
+    "https://support.google.com/maps/answer/6396990"
+  ],
+  "lastVerified": "2026-11-18"
+}

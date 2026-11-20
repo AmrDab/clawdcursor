@@ -1,0 +1,79 @@
+{
+  "app": "linkedin",
+  "name": "LinkedIn",
+  "kind": "web",
+  "domainHints": [
+    "linkedin.com",
+    "www.linkedin.com"
+  ],
+  "shortcuts": {
+    "new_post": "n",
+    "next_feed_post": "j",
+    "previous_feed_post": "k",
+    "like_post": "l",
+    "comment_on_post": "c",
+    "repost": "r",
+    "send_post_to_someone": "s",
+    "next_notification": "j",
+    "previous_notification": "k",
+    "search": "/",
+    "go_home": "g h",
+    "go_my_network": "g w",
+    "go_jobs": "g j",
+    "go_messaging": "g m",
+    "go_notifications": "g n",
+    "go_me": "g p",
+    "show_keyboard_shortcuts": "?"
+  },
+  "consequential": [
+    "like_post",
+    "repost"
+  ],
+  "essentials": ["search", "new_post", "go_home", "go_messaging", "go_notifications", "go_jobs", "next_feed_post", "comment_on_post"],
+  "workflows": {
+    "search": {
+      "name": "search LinkedIn",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "/",
+          "note": "focuses the search box in the top navigation"
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "query"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
+    },
+    "open_messaging": {
+      "name": "go to Messaging",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "g m",
+          "note": "g, then m"
+        },
+        {
+          "type": "verify",
+          "name": "messaging_page_open"
+        }
+      ]
+    }
+  },
+  "tips": [
+    "Hotkeys work on the desktop website only, and can be switched on or off in the menu that the Tab key brings up.",
+    "Press ? to open the site's own cheat sheet for the current page.",
+    "n (new post) works on the main feed; l, c, r and s act on a feed post only after moving to it with j or k.",
+    "j and k move through posts on the feed and through items on the Notifications page.",
+    "Go-to keys are two presses in a row: g, then the letter.",
+    "A highlight shows which element has keyboard focus."
+  ],
+  "sources": [
+    "https://www.linkedin.com/help/linkedin/answer/a6246187"
+  ],
+  "lastVerified": "2026-11-18"
+}

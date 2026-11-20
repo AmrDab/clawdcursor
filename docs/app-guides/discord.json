@@ -1,72 +1,83 @@
 {
-  "app": "Discord",
-  "processNames": [
-    "Discord",
-    "discord"
+  "app": "discord",
+  "name": "Discord",
+  "kind": "desktop",
+  "os": [
+    "win32"
   ],
-  "source": "https://support.discordapp.com/hc/en-us/articles/225977308--Windows-Discord-Hotkeys",
+  "processNames": [
+    "Discord"
+  ],
   "shortcuts": {
-    "navigate_between_servers": "Ctrl+Alt+Up/Down",
-    "navigate_between_channels": "Alt+Up/Down",
-    "navigate_between_unread_channels": "Alt+Shift+Up/Down",
-    "navigate_between_unread_channels_with_me": "Ctrl+Shift+Alt+Up/Down",
-    "mark_channel_as_read": "Esc",
-    "mark_server_read": "Shift+Esc",
-    "toggle_hotkeys": "Ctrl+/",
-    "return_to_previous_text_channel": "Alt+Right",
-    "return_to_active_audio_channel": "Ctrl+Alt+A",
-    "toggle_pins_popout": "Ctrl+P",
-    "toggle_mentions_popout": "Ctrl+Shift+2",
-    "toggle_channel_member_list": "Ctrl+U",
-    "toggle_emoji_picker": "Ctrl+E",
-    "scroll_chat_up_or_down": "PgUp/PgDn",
-    "jump_to_oldest_unread_message": "Shift+PgUp",
-    "create_or_join_a_server": "Ctrl+Shift+N",
-    "answer_incoming_call": "Ctrl+Enter",
-    "find_or_start_a_direct_message": "Ctrl+K",
-    "decline_incoming_call": "Esc",
-    "create_a_private_group": "Ctrl+Shift+T",
-    "start_call_in_private_message_or_group": "Ctrl+[",
+    "show_hotkeys_list": "ctrl+/",
+    "find_or_start_direct_message": "ctrl+k",
+    "previous_server": "ctrl+alt+Up",
+    "next_server": "ctrl+alt+Down",
+    "previous_channel": "alt+Up",
+    "next_channel": "alt+Down",
+    "previous_unread_channel": "alt+shift+Up",
+    "next_unread_channel": "alt+shift+Down",
+    "previous_unread_channel_with_mentions": "ctrl+shift+alt+Up",
+    "next_unread_channel_with_mentions": "ctrl+shift+alt+Down",
+    "mark_channel_as_read": "Escape",
+    "mark_server_as_read": "shift+Escape",
+    "return_to_active_audio_channel": "ctrl+alt+a",
+    "return_to_connected_audio_channel": "alt+Left",
+    "toggle_pins_popout": "ctrl+p",
+    "toggle_mentions_popout": "ctrl+i",
+    "toggle_channel_member_list": "ctrl+u",
+    "toggle_emoji_picker": "ctrl+e",
+    "scroll_chat_up": "PageUp",
+    "scroll_chat_down": "PageDown",
+    "jump_to_oldest_unread_message": "shift+PageUp",
     "focus_text_area": "Tab",
-    "return_to_connected_audio_channel": "Alt+Left",
-    "toggle_mute": "Ctrl+Shift+M",
-    "toggle_deafen": "Ctrl+Shift+D",
-    "get_help": "Ctrl+Shift+H",
-    "upload_a_file": "Ctrl+Shift+U"
+    "upload_file": "ctrl+shift+u",
+    "create_or_join_server": "ctrl+shift+n",
+    "create_private_group": "ctrl+shift+t",
+    "start_call_in_dm_or_group": "ctrl+[",
+    "answer_incoming_call": "ctrl+Return",
+    "decline_incoming_call": "Escape",
+    "toggle_mute": "ctrl+shift+m",
+    "toggle_deafen": "ctrl+shift+d",
+    "get_help": "ctrl+shift+h"
   },
-  "sections": {
-    "General": {
-      "Navigate between servers": "Ctrl+Alt+Up/Down",
-      "Navigate between channels": "Alt+Up/Down",
-      "Navigate between unread channels": "Alt+Shift+Up/Down",
-      "Navigate between unread channels with mentions": "Ctrl+Shift+Alt+Up/Down",
-      "Mark channel as read": "Esc",
-      "Mark server read": "Shift+Esc",
-      "Toggle hotkeys": "Ctrl+/",
-      "Return to previous text channel": "Alt+Right",
-      "Return to active audio channel": "Ctrl+Alt+A",
-      "Toggle pins popout": "Ctrl+P",
-      "Toggle mentions popout": "Ctrl+Shift+2",
-      "Toggle channel member list": "Ctrl+U",
-      "Toggle emoji picker": "Ctrl+E",
-      "Scroll chat up or down": "PgUp/PgDn",
-      "Jump to oldest unread message": "Shift+PgUp",
-      "Create or join a server": "Ctrl+Shift+N",
-      "Answer incoming call": "Ctrl+Enter",
-      "Find or start a direct message": "Ctrl+K",
-      "Decline incoming call": "Esc",
-      "Create a private group": "Ctrl+Shift+T",
-      "Start call in private message or group": "Ctrl+[",
-      "Focus text area": "Tab",
-      "Return to connected audio channel": "Alt+Left",
-      "Toggle mute": "Ctrl+Shift+M",
-      "Toggle deafen": "Ctrl+Shift+D",
-      "Get help": "Ctrl+Shift+H",
-      "Upload a file": "Ctrl+Shift+U"
+  "consequential": [
+    "start_call_in_dm_or_group",
+    "answer_incoming_call",
+    "mark_server_as_read"
+  ],
+  "essentials": ["find_or_start_direct_message", "next_channel", "previous_channel", "next_unread_channel", "next_server", "focus_text_area", "upload_file", "toggle_mentions_popout"],
+  "workflows": {
+    "jump_to_dm_or_channel": {
+      "name": "open a direct message, channel or server by name",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "ctrl+k"
+        },
+        {
+          "type": "wait",
+          "ms": 300
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "name"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
     }
   },
   "tips": [
-    "Keyboard shortcuts reference for Discord.",
-    "Source: https://support.discordapp.com/hc/en-us/articles/225977308--Windows-Discord-Hotkeys"
-  ]
+    "ctrl+/ shows the full hotkey list inside Discord.",
+    "Escape marks the current channel as read; while a call is ringing it declines the call instead.",
+    "The vendor publishes these keys for Windows. Its macOS hotkey page is an image only, so the Mac keys are not listed here.",
+    "The vendor page lists two different keys for returning to the previous text channel, so that action is left out."
+  ],
+  "sources": [
+    "https://support.discord.com/hc/en-us/articles/225977308--Windows-Discord-Hotkeys"
+  ],
+  "lastVerified": "2026-11-18"
 }

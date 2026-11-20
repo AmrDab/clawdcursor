@@ -1,49 +1,113 @@
 {
   "app": "outlook",
-  "name": "Outlook",
-  "domainHints": ["outlook.live.com", "outlook.office.com"],
+  "name": "Outlook (classic)",
+  "kind": "desktop",
+  "os": ["win32"],
+  "processNames": ["OUTLOOK"],
   "shortcuts": {
-    "compose":     "mod+n",
-    "send":        "mod+Return",
-    "send_alt":    "alt+s",
-    "reply":       "mod+r",
-    "reply_all":   "mod+shift+r",
-    "forward":     "mod+shift+f",
-    "delete":      "Delete",
-    "search":      "mod+e",
-    "go_to_inbox": "mod+shift+i"
+    "new_message": "ctrl+shift+m",
+    "new_item_in_current_view": "ctrl+n",
+    "send": "alt+s",
+    "send_alt": "ctrl+Return",
+    "reply": "ctrl+r",
+    "reply_all": "ctrl+shift+r",
+    "forward": "ctrl+f",
+    "forward_as_attachment": "ctrl+alt+f",
+    "reply_with_meeting": "ctrl+alt+r",
+    "delete_item": "Delete",
+    "delete_and_ignore_conversation": "ctrl+shift+d",
+    "open_message": "ctrl+o",
+    "mark_read": "ctrl+q",
+    "mark_unread": "ctrl+u",
+    "flag_for_follow_up": "ctrl+shift+g",
+    "mark_not_junk": "ctrl+alt+j",
+    "move_to_folder": "ctrl+shift+v",
+    "copy_to_folder": "ctrl+shift+y",
+    "search": "ctrl+e",
+    "search_all_mail": "ctrl+alt+a",
+    "advanced_find": "ctrl+shift+f",
+    "find_in_open_item": "F4",
+    "go_to_inbox": "ctrl+shift+i",
+    "go_to_outbox": "ctrl+shift+o",
+    "go_to_folder": "ctrl+y",
+    "mail_view": "ctrl+1",
+    "calendar_view": "ctrl+2",
+    "people_view": "ctrl+4",
+    "back": "alt+Left",
+    "forward_view": "alt+Right",
+    "next_open_message": "ctrl+.",
+    "previous_open_message": "ctrl+,",
+    "check_for_new_mail": "F9",
+    "switch_pane": "F6",
+    "page_down_in_reading_pane": "Space",
+    "page_up_in_reading_pane": "shift+Space",
+    "new_appointment": "ctrl+shift+a",
+    "new_meeting_request": "ctrl+shift+q",
+    "new_contact": "ctrl+shift+c",
+    "new_task": "ctrl+shift+k",
+    "new_note": "ctrl+shift+n",
+    "new_folder": "ctrl+shift+e",
+    "address_book": "ctrl+shift+b",
+    "check_names": "ctrl+k",
+    "attach_file": "alt+n a f",
+    "save": "ctrl+s",
+    "save_as": "F12",
+    "print": "ctrl+p",
+    "item_properties": "alt+Return",
+    "close_window_or_menu": "Escape",
+    "home_tab": "alt+h",
+    "file_menu": "alt+f",
+    "ribbon_search_box": "alt+q",
+    "open_split_button": "alt+Down"
   },
+  "consequential": ["send", "send_alt", "delete_item", "delete_and_ignore_conversation"],
+  "essentials": ["new_message", "send", "search", "go_to_inbox", "reply", "forward", "calendar_view", "attach_file"],
   "workflows": {
     "compose_and_send": {
       "name": "compose and send an email",
       "steps": [
-        { "type": "pressKey",    "key": "mod+n",          "note": "new message window" },
-        { "type": "wait",        "ms": 1200,             "note": "Outlook's compose is slow to mount, especially in Electron" },
+        { "type": "pressKey", "key": "ctrl+shift+m", "note": "new message window, from any view" },
+        { "type": "wait", "ms": 1200, "note": "wait for the message window" },
         { "type": "typeAtFocus", "field": "recipient" },
-        { "type": "pressKey",    "key": "Tab",           "note": "some Outlook builds put Cc between To and Subject — watch the next focus" },
-        { "type": "pressKey",    "key": "Tab",           "note": "advance past Cc/Bcc to Subject" },
+        { "type": "pressKey", "key": "Tab", "note": "moves to the next header field; Cc may sit between To and Subject, so read which field has focus" },
         { "type": "typeAtFocus", "field": "subject" },
-        { "type": "pressKey",    "key": "Tab" },
+        { "type": "pressKey", "key": "Tab" },
         { "type": "typeAtFocus", "field": "body" },
-        { "type": "pressKey",    "key": "mod+Return",    "note": "primary send" },
-        { "type": "wait",        "ms": 400 },
-        { "type": "verify",      "name": "window_closed_or_sent_folder", "note": "if still open, try alt+s as fallback" }
+        { "type": "verify", "name": "recipient_subject_body_filled", "note": "confirm the fields before sending" },
+        { "type": "pressKey", "key": "alt+s", "note": "send" },
+        { "type": "verify", "name": "message_window_closed" }
       ]
     },
     "reply": {
-      "name": "reply to the open email",
+      "name": "reply to the selected or open email",
       "steps": [
-        { "type": "pressKey",    "key": "mod+r" },
-        { "type": "wait",        "ms": 600 },
+        { "type": "pressKey", "key": "ctrl+r" },
+        { "type": "wait", "ms": 600 },
         { "type": "typeAtFocus", "field": "body" },
-        { "type": "pressKey",    "key": "mod+Return" }
+        { "type": "pressKey", "key": "alt+s", "note": "send" }
+      ]
+    },
+    "search": {
+      "name": "search mail",
+      "steps": [
+        { "type": "pressKey", "key": "ctrl+e", "note": "search box; F3 also works" },
+        { "type": "typeAtFocus", "field": "query" },
+        { "type": "pressKey", "key": "Return" }
       ]
     }
   },
   "tips": [
-    "Outlook/Teams/Slack/Discord are Electron/WebView2 apps — ALWAYS wait ~4s after launch before any UIA query",
-    "Cmd+Return primary send; Alt+S fallback on Windows, Cmd+Shift+D fallback on Mac Mail",
-    "Tab order varies: some builds include Cc/Bcc between To and Subject",
-    "The Send button is reliably keyboard-reachable — don't try to click it by name"
-  ]
+    "This guide is for classic Outlook on Windows (OUTLOOK.EXE); the new Outlook (olk) uses different keys, for example ctrl+n for a new message.",
+    "ctrl+n creates the item type of the current view (a message in Mail, an appointment in Calendar); ctrl+shift+m creates a message from anywhere.",
+    "Send is alt+s; ctrl+Return is also listed as send. Return alone in the body only adds a line.",
+    "The ctrl+number view keys can change with the app configuration; ctrl+1 Mail and ctrl+2 Calendar are the usual ones.",
+    "ctrl+f forwards the message here; it does not open a find box. Use ctrl+e to search and F4 to find text inside an open item.",
+    "ctrl+shift+i goes to the Inbox, but inside an open message it shows blocked external content instead.",
+    "Ribbon KeyTips such as alt+n a f (attach a file) are pressed in sequence inside a message window.",
+    "ctrl+shift+d deletes the conversation and ignores future replies to it."
+  ],
+  "sources": [
+    "https://support.microsoft.com/en-us/office/keyboard-shortcuts-for-outlook-3cdeb221-7ae5-4c1d-8c1d-9e63216c1efd"
+  ],
+  "lastVerified": "2026-11-18"
 }

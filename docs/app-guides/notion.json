@@ -1,0 +1,159 @@
+{
+  "app": "notion",
+  "name": "Notion",
+  "kind": "desktop",
+  "processNames": [
+    "Notion"
+  ],
+  "domainHints": [
+    "notion.so",
+    "www.notion.so"
+  ],
+  "shortcuts": {
+    "open_search": "mod+p",
+    "search_in_page": "mod+f",
+    "copy_page_url": "mod+l",
+    "go_back": "mod+[",
+    "go_forward": "mod+]",
+    "go_up_one_page_level": "mod+shift+u",
+    "peek_previous_database_page": {
+      "default": "ctrl+k",
+      "darwin": "ctrl+shift+k"
+    },
+    "peek_next_database_page": {
+      "default": "ctrl+j",
+      "darwin": "ctrl+shift+j"
+    },
+    "toggle_dark_mode": "mod+shift+l",
+    "new_page": "mod+n",
+    "new_window": "mod+shift+n",
+    "new_tab": "mod+t",
+    "reopen_closed_tab": "mod+shift+t",
+    "zoom_in": "mod+Plus",
+    "zoom_out": "mod+-",
+    "line_break_in_block": "shift+Return",
+    "add_comment": "mod+shift+m",
+    "bold": "mod+b",
+    "italic": "mod+i",
+    "underline": "mod+u",
+    "strikethrough": "mod+shift+s",
+    "add_link_to_selected_text": "mod+k",
+    "inline_code": "mod+e",
+    "indent_block": "Tab",
+    "outdent_block": "shift+Tab",
+    "turn_into_text": {
+      "default": "ctrl+shift+0",
+      "darwin": "cmd+alt+0"
+    },
+    "turn_into_heading_1": {
+      "default": "ctrl+shift+1",
+      "darwin": "cmd+alt+1"
+    },
+    "turn_into_heading_2": {
+      "default": "ctrl+shift+2",
+      "darwin": "cmd+alt+2"
+    },
+    "turn_into_heading_3": {
+      "default": "ctrl+shift+3",
+      "darwin": "cmd+alt+3"
+    },
+    "turn_into_to_do": {
+      "default": "ctrl+shift+4",
+      "darwin": "cmd+alt+4"
+    },
+    "turn_into_bulleted_list": {
+      "default": "ctrl+shift+5",
+      "darwin": "cmd+alt+5"
+    },
+    "turn_into_numbered_list": {
+      "default": "ctrl+shift+6",
+      "darwin": "cmd+alt+6"
+    },
+    "turn_into_toggle_list": {
+      "default": "ctrl+shift+7",
+      "darwin": "cmd+alt+7"
+    },
+    "turn_into_code_block": {
+      "default": "ctrl+shift+8",
+      "darwin": "cmd+alt+8"
+    },
+    "turn_into_page": {
+      "default": "ctrl+shift+9",
+      "darwin": "cmd+alt+9"
+    },
+    "select_current_block": "Escape",
+    "select_block_at_cursor": "mod+a",
+    "extend_block_selection_up": "shift+Up",
+    "extend_block_selection_down": "shift+Down",
+    "edit_selected_block": "Return",
+    "delete_selected_blocks": "Backspace",
+    "duplicate_selected_blocks": "mod+d",
+    "open_block_actions_menu": "mod+/",
+    "move_selected_block_up": "mod+shift+Up",
+    "move_selected_block_down": "mod+shift+Down",
+    "move_selected_block_left": "mod+shift+Left",
+    "move_selected_block_right": "mod+shift+Right",
+    "toggle_selected_image_full_screen": "Space",
+    "expand_or_close_all_toggles": "mod+alt+t",
+    "apply_last_used_color": "mod+shift+h",
+    "activate_current_block": "mod+Return",
+    "table_fill_cells_right": "mod+r",
+    "table_fill_cells_down": "mod+d"
+  },
+  "consequential": [
+    "delete_selected_blocks"
+  ],
+  "essentials": ["open_search", "new_page", "go_back", "go_up_one_page_level", "open_block_actions_menu", "turn_into_heading_1", "turn_into_to_do", "select_current_block"],
+  "workflows": {
+    "jump_to_page": {
+      "name": "open a page by name",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "mod+p",
+          "note": "search and recent pages"
+        },
+        {
+          "type": "wait",
+          "ms": 400
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "page name"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
+    },
+    "insert_block_with_slash_command": {
+      "name": "insert a block by type on an empty line",
+      "steps": [
+        {
+          "type": "typeAtFocus",
+          "field": "/ followed by the block name, for example /todo or /h2"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
+    }
+  },
+  "tips": [
+    "The same shortcuts apply in the desktop app and in the browser; new page, new window, new tab and reopen closed tab are listed for the desktop app only.",
+    "mod+k also opens search; with text selected it adds a link instead.",
+    "activate_current_block opens a page, checks or unchecks a to-do, opens or closes a toggle, or makes an image full screen.",
+    "Typing / opens the block menu: /text, /page, /bullet, /num, /todo, /toggle, /div, /quote, /h1, /h2, /h3, /code, /image, /toc. Escape closes it.",
+    "Markdown while typing: **bold**, *italic*, `code`, ~strike~; at line start \"# \", \"## \", \"### \" for headings, \"- \" bullet, \"[]\" to-do, \"1. \" numbered, \"> \" toggle, --- divider.",
+    "Typing @ mentions a person, page or date (a mentioned person is notified); [[ links a page; Escape dismisses the menu.",
+    "On Windows the ctrl+shift+digit block shortcuts can collide with other software that uses ctrl+shift.",
+    "The block actions menu (mod+/) has a text box: type an action, block type or color to change the selected blocks; it also edits several selected database rows at once.",
+    "Shortcuts are documented for English QWERTY keyboards."
+  ],
+  "sources": [
+    "https://www.notion.com/help/keyboard-shortcuts"
+  ],
+  "lastVerified": "2026-11-18"
+}

@@ -1,0 +1,127 @@
+{
+  "app": "file-explorer",
+  "name": "File Explorer",
+  "kind": "desktop",
+  "os": [
+    "win32"
+  ],
+  "processNames": [
+    "explorer"
+  ],
+  "shortcuts": {
+    "focus_address_bar": "alt+d",
+    "focus_address_bar_alt": "ctrl+l",
+    "open_address_bar_list": "F4",
+    "focus_search_box": "ctrl+e",
+    "new_window": "ctrl+n",
+    "new_tab": "ctrl+t",
+    "close_tab": "ctrl+w",
+    "next_tab": "ctrl+Tab",
+    "previous_tab": "ctrl+shift+Tab",
+    "go_to_tab_1": "ctrl+1",
+    "go_to_tab_2": "ctrl+2",
+    "close_window": "alt+F4",
+    "back": "alt+Left",
+    "forward": "alt+Right",
+    "up_one_level": "alt+Up",
+    "refresh": "F5",
+    "new_folder": "ctrl+shift+n",
+    "rename": "F2",
+    "delete_to_recycle_bin": "Delete",
+    "delete_permanently": "shift+Delete",
+    "properties": "alt+Return",
+    "context_menu": "shift+F10",
+    "select_all": "ctrl+a",
+    "copy": "ctrl+c",
+    "cut": "ctrl+x",
+    "paste": "ctrl+v",
+    "undo": "ctrl+z",
+    "redo": "ctrl+y",
+    "extend_selection_up": "shift+Up",
+    "extend_selection_down": "shift+Down",
+    "toggle_preview_pane": "alt+p",
+    "toggle_details_pane": "alt+shift+p",
+    "view_large_icons": "ctrl+shift+2",
+    "view_details": "ctrl+shift+6",
+    "cycle_window_elements": "F6",
+    "expand_folder_or_first_subfolder": "Right",
+    "collapse_folder_or_go_to_parent": "Left",
+    "expand_all_folders_in_navigation_pane": "ctrl+shift+e",
+    "scroll_to_top": "Home",
+    "scroll_to_bottom": "End",
+    "toggle_full_screen": "F11"
+  },
+  "consequential": [
+    "delete_to_recycle_bin",
+    "delete_permanently",
+    "close_window"
+  ],
+  "essentials": ["focus_address_bar", "focus_search_box", "new_folder", "rename", "up_one_level", "back", "new_tab", "refresh"],
+  "workflows": {
+    "go_to_path": {
+      "name": "open a folder by its path",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "alt+d",
+          "note": "selects the address bar"
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "folder path"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
+    },
+    "search_folder": {
+      "name": "search the current folder",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "ctrl+e",
+          "note": "search box; ctrl+f and F3 do the same"
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "query"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
+    },
+    "rename_item": {
+      "name": "rename the selected item",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "F2"
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "new name"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
+    }
+  },
+  "tips": [
+    "Delete moves the selection to the Recycle Bin; shift+Delete removes it for good with no Recycle Bin copy.",
+    "ctrl+w closes the active tab, and the whole window when it is the last tab.",
+    "ctrl+1 to ctrl+9 switch to a tab by position; ctrl+shift+1 to ctrl+shift+9 change the view style instead (2 is Large icons, 6 is Details).",
+    "Backspace also goes to the previous folder, like alt+Left.",
+    "To pick several separate items, hold ctrl, move with the arrow keys and press Space on each one.",
+    "shift+F10 opens the context menu for the selected item."
+  ],
+  "sources": [
+    "https://support.microsoft.com/en-us/windows/keyboard-shortcuts-in-windows-dcc61a57-8ff0-cffe-9796-cb9706c75eec"
+  ],
+  "lastVerified": "2026-11-18"
+}

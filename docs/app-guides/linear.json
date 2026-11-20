@@ -1,0 +1,190 @@
+{
+  "app": "linear",
+  "name": "Linear",
+  "kind": "web",
+  "domainHints": [
+    "linear.app"
+  ],
+  "processNames": [
+    "Linear"
+  ],
+  "shortcuts": {
+    "open_command_menu": "mod+k",
+    "search_workspace": "/",
+    "search_in_current_view": "mod+f",
+    "open_recent_issues_search": "o i",
+    "open_favorites_menu": "o f",
+    "open_team": "o t",
+    "open_label_view": "o l",
+    "open_user_profile": "o u",
+    "open_customer": "o q",
+    "open_project_documents": "o d",
+    "go_to_inbox": "g i",
+    "go_to_my_issues": "g m",
+    "go_to_triage": "g t",
+    "go_to_active_issues": "g a",
+    "go_to_backlog": "g b",
+    "go_to_archive": "g x",
+    "go_to_customers": "g q",
+    "create_issue": "c",
+    "create_issue_from_template": "alt+c",
+    "next_item_in_list": "j",
+    "previous_item_in_list": "k",
+    "select_issue": "x",
+    "select_all_issues_in_view": "mod+a",
+    "clear_selection": "Escape",
+    "peek_issue": "Space",
+    "open_assignee_menu": "a",
+    "assign_to_me": "i",
+    "add_to_project": "shift+p",
+    "add_to_milestone": "shift+m",
+    "move_issue_to_another_team": "mod+shift+m",
+    "create_sub_issue": "mod+shift+o",
+    "subscribe_or_unsubscribe": "shift+s",
+    "manage_subscribers": "mod+shift+s",
+    "restore_archived_or_deleted_item": "#",
+    "undo": "mod+z",
+    "open_filter_menu": "f",
+    "open_display_options": "shift+v",
+    "toggle_board_and_list_layout": "mod+b",
+    "save_filtered_view": "alt+v",
+    "toggle_favorite": "alt+f",
+    "board_move_issue_to_column_top": "alt+shift+Up",
+    "board_move_issue_to_column_bottom": "alt+shift+Down",
+    "board_toggle_swimlane": "t",
+    "toggle_project_details_sidebar": "mod+i",
+    "inbox_delete_notification": "Backspace",
+    "inbox_delete_all_read_notifications": "shift+Backspace",
+    "inbox_toggle_read": "u",
+    "inbox_mark_all_read": "alt+u",
+    "snooze_or_set_reminder": "h",
+    "triage_accept": "1",
+    "triage_decline": "2",
+    "triage_mark_duplicate": "3",
+    "post_comment": "mod+Return",
+    "attach_file_to_comment": "mod+shift+a",
+    "comment_on_selected_text": "mod+alt+m",
+    "editor_bold": "mod+b",
+    "editor_italic": "mod+i",
+    "editor_underline": "mod+u",
+    "editor_strikethrough": "mod+shift+s",
+    "editor_inline_code": "mod+e",
+    "editor_link": "mod+k",
+    "editor_bulleted_list": "mod+shift+8",
+    "editor_numbered_list": "mod+shift+9",
+    "editor_checklist": "mod+shift+7",
+    "editor_toggle_checklist_item": "mod+Return",
+    "editor_code_block": "mod+shift+\\"
+  },
+  "consequential": [
+    "post_comment",
+    "inbox_delete_notification",
+    "inbox_delete_all_read_notifications",
+    "inbox_mark_all_read",
+    "triage_decline",
+    "triage_mark_duplicate"
+  ],
+  "essentials": ["open_command_menu", "create_issue", "search_workspace", "go_to_my_issues", "go_to_inbox", "next_item_in_list", "open_assignee_menu", "post_comment"],
+  "workflows": {
+    "open_issue_by_id": {
+      "name": "open an issue by its ID or title",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "o i",
+          "note": "recent issues search; matches ID or title words"
+        },
+        {
+          "type": "wait",
+          "ms": 400
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "issue ID or title"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
+    },
+    "run_action_from_command_menu": {
+      "name": "run any action on the open or selected issues by name",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "mod+k"
+        },
+        {
+          "type": "wait",
+          "ms": 300
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "action name, for example Share issue or Remove parent"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
+    },
+    "search_workspace": {
+      "name": "search issues, projects and documents",
+      "steps": [
+        {
+          "type": "pressKey",
+          "key": "/"
+        },
+        {
+          "type": "wait",
+          "ms": 300
+        },
+        {
+          "type": "typeAtFocus",
+          "field": "query"
+        },
+        {
+          "type": "pressKey",
+          "key": "Return"
+        }
+      ]
+    }
+  },
+  "tips": [
+    "The same shortcuts apply in the browser and the desktop app; the desktop app has fewer clashes with browser shortcuts.",
+    "A letter pair such as g i or o f is two presses in a row, not a chord.",
+    "Whether comments post with mod+Return or plain Return is an account preference; check before typing Return in a comment.",
+    "In the command menu, type i then a space to limit results to issues; p for projects, u users, t teams, l labels, f favorites, d documents.",
+    "With issues selected (x, or shift+Up/Down to extend), mod+k applies an action to all of them.",
+    "In an issue list or board, mod+b and mod+shift+s act on the view or selection; inside a text editor the same keys format text.",
+    "Deleted issues stay in the team archive (g x) for 30 days and can be restored there with #; mod+z right after a delete also restores.",
+    "Closing the new-issue dialog with Escape asks whether to keep it as a draft.",
+    "In the editor, / opens the formatting menu and Markdown is converted as typed."
+  ],
+  "sources": [
+    "https://linear.app/docs/search",
+    "https://linear.app/docs/creating-issues",
+    "https://linear.app/docs/assigning-issues",
+    "https://linear.app/docs/inbox",
+    "https://linear.app/docs/my-issues",
+    "https://linear.app/docs/triage",
+    "https://linear.app/docs/default-team-pages",
+    "https://linear.app/docs/delete-archive-issues",
+    "https://linear.app/docs/board-layout",
+    "https://linear.app/docs/display-options",
+    "https://linear.app/docs/filters",
+    "https://linear.app/docs/custom-views",
+    "https://linear.app/docs/favorites",
+    "https://linear.app/docs/projects",
+    "https://linear.app/docs/project-milestones",
+    "https://linear.app/docs/parent-and-sub-issues",
+    "https://linear.app/docs/comment-on-issues",
+    "https://linear.app/docs/documents",
+    "https://linear.app/docs/customer-requests",
+    "https://linear.app/docs/editor",
+    "https://linear.app/docs/account-preferences",
+    "https://linear.app/docs/get-the-app"
+  ],
+  "lastVerified": "2026-11-18"
+}
