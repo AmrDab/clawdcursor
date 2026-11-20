@@ -67,7 +67,8 @@ describe('overlay state across processes', () => {
     for (const [tool, action] of [['accessibility', 'read_tree'], ['system', 'ocr'], ['system', 'copy_all_text'], ['window', 'list']] as const) {
       expect(await why(tool, action), tool + ' ' + action).toBeNull();
     }
-    for (const [tool, action] of [['computer', 'click'], ['computer', 'type'], ['accessibility', 'invoke'], ['window', 'focus']] as const) {
+    for (const [tool, action] of [['computer', 'click'], ['computer', 'type'], ['accessibility', 'invoke'], ['window', 'focus'],
+      ['computer', 'hover'], ['computer', 'mouse_move'], ['computer', 'move_relative'], ['browser', 'evaluate'], ['browser', 'connect']] as const) {
       expect(await why(tool, action), tool + ' ' + action).toMatchObject({ guard: 'own_ui', why: expect.stringMatching(/a pause is waiting for the user on screen [(]shown by clawdcursor process/) });
     }
     expect(await why('accessibility', 'read_tree', { processId: 5555 })).toMatchObject({ guard: 'own_ui', why: expect.stringMatching(/own on-screen control/) });

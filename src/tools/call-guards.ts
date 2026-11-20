@@ -29,6 +29,12 @@ export interface GuardedCall {
 }
 
 /**
+ * Under another process's pause card these act too, though no outcome line counts them: a pointer move (it moves the user's
+ * cursor), a page script (it can click and type in the page) and a browser connect (it can start a browser).
+ */
+const ALSO_ACTS = new Set(['computer.hover', 'computer.move', 'computer.mouse_move', 'computer.move_relative', 'browser.evaluate', 'browser.connect']);
+
+/**
  * A call as the guards see it. Allowed while paused / stopped by its compact name; never a batch step with a
  * precondition, which reads the screen.
  */
@@ -37,7 +43,7 @@ export function guardedCall(tool: string, action: string | undefined, args: Reco
   return {
     tool, action, args,
     pauseSafe: !precondition && isPauseSafeCall(c.tool, c.action), stopSafe: !precondition && isStopSafeCall(c.tool, c.action),
-    acts: isActingAction(c.tool, c.action),
+    acts: isActingAction(c.tool, c.action) || ALSO_ACTS.has(`${c.tool}.${c.action}`),
   };
 }
 
