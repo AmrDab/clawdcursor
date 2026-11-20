@@ -10,7 +10,7 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   __setControlDirForTests, __setForegroundReaderForTests, __setIdleReaderForTests, turnTiming, holdControl, releaseHold,
-  isHeld, setOnHold, giveControlBack, stopControl, isGuardRefusal, STOPPED_TEXT, withTurnBudget, type HoldEvent,
+  isHeld, setOnHold, giveControlBack, stopControl, resumeControl, isGuardRefusal, STOPPED_TEXT, withTurnBudget, type HoldEvent,
 } from '../core/control';
 import { guardInputMethods, ownInputAt, _resetHeldKeys } from '../platform/pointer-guard';
 import { withForegroundBurst } from '../platform/foreground-burst';
@@ -179,6 +179,18 @@ describe('real input while the user is using the computer', () => {
     await sleep(5);
     expect((await refused(d.keyPress('b'))).message).toMatch(BUSY);
     expect(d.sent).toEqual(['key a']);
+  });
+
+  it("the user's Resume click on a pause card is not them using the computer, with nothing held or after a Stop", async () => {
+    const d = fakeDesktop();
+    userAt = Date.now();               // their click on the card's Resume (nothing was held)
+    releaseHold('pause_resume');
+    await d.mouseClick(1, 1);
+    stopControl('pill');
+    userAt = Date.now();               // their click on Resume after a Stop
+    resumeControl('pause_resume');
+    await d.mouseClick(2, 2);
+    expect(d.sent).toEqual(['click 1,1', 'click 2,2']);
   });
 
   it('where idle time cannot be read (Linux), nothing is refused', async () => {

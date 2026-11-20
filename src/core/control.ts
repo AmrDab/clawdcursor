@@ -191,9 +191,11 @@ export function holdControl(by: string): void {
 
 /** The user's Resume on the pill: the waiting acts go on (in every process), and their click on it is not a takeover. */
 export function releaseHold(by: string): void {
+  // Every Resume (the pill, a pause card, the one after a Stop) is the user's click: not them using the computer, even
+  // with nothing held (live 2026-11-20: the click on a pause card's Resume got the agent's next step refused).
+  resumedAt = Date.now();
   if (!isHeld()) { if (pillHeld) tell('resumed'); return; }
   dropHold();
-  resumedAt = Date.now();
   logger.info('control.release', { by, pid: process.pid });
   tell('resumed');
 }
