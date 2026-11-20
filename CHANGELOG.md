@@ -7,6 +7,12 @@ All notable changes to Clawd Cursor will be documented in this file.
 ### Fixed
 - **macOS: a key press or typed text that fails is an error.** On the `smart_type`, `shortcuts_run` and `minimize_window` path it was logged and reported as done.
 - **A read inside a `batch` comes back whole, and so does the step that stops it.** The stopping step ends with its `[failed · CODE · hint · next]` line, as a direct call would. `find` prints its coordinates note after the elements, not before. A batch longer than its step cap is refused before step 1, with the cap and the step count in the message.
+- **Downloads from the agent's browser land in your Downloads folder under their own names** (Windows, macOS, and Linux's own Downloads folder), and the next result says where. They went to a hidden temp folder with random names, where the agent could not find or use them.
+- **`browser type` with a trailing newline presses Enter** after typing (and says so), as `computer type` does; the newline is no longer typed into the field.
+- **`browser type` into a wrapper element fills the input inside it** and reads that input back; when nothing editable has focus it fails instead of typing into whatever does.
+- **`browser click` by text prefers an exact match**, then a prefix, then a partial one; it skips hidden and disabled elements, says which element it clicked, and fails with a short list when several partial matches tie.
+- **A selector that matches nothing is an error** for `browser read` and `cdp_read_text`, not text returned as page content.
+- **`browser connect` takes `port`** and attaches to the browser already on that port (what `relaunch_with_cdp` asks for), launching nothing in its place.
 
 ## [2.2.0] - 2026-11-18
 

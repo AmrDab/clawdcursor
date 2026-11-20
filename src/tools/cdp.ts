@@ -30,7 +30,12 @@ export function getCdpTools(): ToolDefinition[] {
       safetyTier: 0,
       handler: async ({ selector, maxLength, frame }, ctx) => {
         if (!(await ctx.cdp.isConnected())) return { text: 'Not connected to CDP. Call cdp_connect first.', isError: true };
-        const text = await ctx.cdp.readText(selector ?? 'body', maxLength ?? 3000, frame);
+        let text: string;
+        try {
+          text = await ctx.cdp.readText(selector ?? 'body', maxLength ?? 3000, frame);
+        } catch (e: any) {
+          return { text: `Read failed: ${e.message}`, isError: true };   // e.g. the selector matches nothing
+        }
         return { text: wrapUntrustedScreenContent(String(text ?? '')) };   // page text is the page's, not ours
       },
     },

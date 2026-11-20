@@ -31,6 +31,7 @@ import { withSteps, watchChildProcesses } from '../core/observability/steps';
 import { inMcpSession } from '../core/verify/assertions';
 import { allowNames, setHost } from '../core/observability/telemetry';
 import { classifyResult, renderResultLine, isJsonText, isActingAction, isUnverifiableAction } from '../core/result-codes';
+import { quoteScreenText } from '../core/untrusted-screen-content';
 import { refusalBefore, afterCall, forgetScreenIfActed, guardedCall } from '../tools/call-guards';
 import { OPAQUE_MARK } from '../tools/blind-hints';
 import { bareStepName } from '../tools/batch';
@@ -412,6 +413,10 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
           content.push({ type: 'image', data: result.image.data, mimeType: result.image.mimeType });
         }
         content.push({ type: 'text', text: withOutcome(result.text, !!result.isError) });
+        // What the agent's browser downloaded since the last call, now in the user's Downloads folder (cdp-driver.ts). A
+        // block of its own: a JSON or value result stays exactly as it was.
+        const saved: string[] = (ctx.cdp as { takeSavedDownloads?: () => string[] } | undefined)?.takeSavedDownloads?.() ?? [];
+        if (saved.length) content.push({ type: 'text', text: `Downloaded to: ${saved.map(quoteScreenText).join(', ')}` });
         return { content, isError: result.isError };
       },
     );

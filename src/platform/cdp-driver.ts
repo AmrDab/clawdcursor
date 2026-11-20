@@ -41,6 +41,33 @@ import { fenceCdpOnly } from '../core/fence';
 import { quoteScreenText } from '../core/untrusted-screen-content';
 import { guardInputMethods } from './pointer-guard';
 
+/**
+ * The user's Downloads folder: ~/Downloads on every OS, or on Linux the folder user-dirs.dirs names (often localized).
+ * What the agent's browser downloads is kept there under its own name (owner, 2026-11-20: Playwright puts downloads in a
+ * temp folder with random names and no extension, so a downloaded picture could not be found or used).
+ */
+export function downloadsDir(home: string = os.homedir(), platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'linux') {
+    try {
+      const m = /^XDG_DOWNLOAD_DIR="([^"]+)"/m.exec(fs.readFileSync(path.join(home, '.config', 'user-dirs.dirs'), 'utf8'));
+      if (m) return m[1].replace(/^\$HOME/, home);
+    } catch { /* not set: ~/Downloads */ }
+  }
+  return path.join(home, 'Downloads');
+}
+
+/** Where a download goes in `dir`: the site's own file name, made safe, with " (1)", " (2)"… when that name is taken. */
+export function freeDownloadPath(dir: string, suggested: string): string {
+  let name = path.posix.basename(String(suggested ?? '').replace(/\\/g, '/')).replace(/[<>:"|?*\x00-\x1f]/g, '_').trim();
+  if (!name || /^\.+$/.test(name)) name = 'download';
+  const ext = path.extname(name);
+  const stem = name.slice(0, name.length - ext.length);
+  for (let n = 0; ; n++) {
+    const file = path.join(dir, n ? `${stem} (${n})${ext}` : name);
+    if (!fs.existsSync(file)) return file;
+  }
+}
+
 // ── Default CDP port — matches browser-config.ts and tool launch flags ──
 const DEFAULT_CDP_PORT = 9223;
 /** How long an attach-only connect waits for the user's browser to open its port: a host may start it seconds before (#378). */
@@ -139,6 +166,19 @@ export interface CDPInteractionResult {
   read?: () => Promise<FieldShown | null>;
   /** Origin of the iframe the element was found in; absent for the page itself (#398). */
   frame?: string;
+  /** What a click by text hit, as the page names it (e.g. `<button> "Search"`), so the reply says which element took it. */
+  clicked?: string;
+}
+
+/** Elements a type goes into: a text input, a textarea, or an editable element. A wrapper around one is not itself typeable. */
+const EDITABLE = 'input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]):not([type=file]), textarea, [contenteditable]:not([contenteditable=false])';
+
+/** The element a type should go to: `loc` when it is editable itself, else the editable inside it (a wrapper div), else null. */
+async function editableOf(loc: Locator): Promise<Locator | null> {
+  const own = await loc.evaluate((el: Element, sel: string) => el.matches(sel), EDITABLE, { timeout: 1000 }).catch(() => true);
+  if (own) return loc;
+  const inner = loc.locator(EDITABLE).first();
+  return (await inner.count().catch(() => 0)) > 0 ? inner : null;
 }
 
 /** What a form element shows: `value` its text (a <select>: the chosen option's label, `option` its value). */
@@ -244,6 +284,10 @@ export class CDPDriver {
   getConnectionMode(): 'dedicated' | 'attached' | 'unknown' { return this.connectionMode; }
 
   private connectError = '';
+  /** Downloads kept in the user's Downloads folder that no tool result has named yet (takeSavedDownloads). */
+  private savedDownloads: string[] = [];
+  private downloadPages = new WeakSet<Page>();
+  private downloadsTo: () => string = () => downloadsDir();
   /** Why the last connect / ensureConnected failed, in words an agent can act on (#378); '' once connected. */
   getConnectError(): string { return this.connectError; }
 
@@ -332,6 +376,13 @@ export class CDPDriver {
         !BLOCKED_URL_PATTERNS.some(blocked => url.includes(blocked));
 
       const contexts = this.browser.contexts();
+      // Every page's downloads, those opened later included, are kept in the user's Downloads folder (keepDownloads).
+      for (const c of contexts) {
+        try {
+          c.pages().forEach(p => this.keepDownloads(p));
+          c.on('page', p => this.keepDownloads(p));
+        } catch { /* a convenience: it never fails a connect */ }
+      }
       const allPages: Page[] = contexts.flatMap(ctx => ctx.pages());
       const userPages = allPages.filter(p => isUserPage(p.url()));
       // Extension/devtools pages (e.g. a wallet's background UI) are never the
@@ -363,6 +414,29 @@ export class CDPDriver {
       return false;
     }
   }
+
+  /** A finished download of this page is copied to the user's Downloads folder under its own name (downloadsDir). */
+  private keepDownloads(page: Page): void {
+    if (this.downloadPages.has(page)) return;
+    this.downloadPages.add(page);
+    page.on('download', download => {
+      void (async () => {
+        const dir = this.downloadsTo();
+        fs.mkdirSync(dir, { recursive: true });
+        const file = freeDownloadPath(dir, download.suggestedFilename());
+        await download.saveAs(file);   // waits for it to finish
+        this.savedDownloads.push(file);
+      })().catch(() => { /* cancelled or failed: nothing kept */ });
+    });
+  }
+
+  /** The downloads kept since the last time this was asked, for the next tool result to name; emptied. */
+  takeSavedDownloads(): string[] {
+    return this.savedDownloads.splice(0);
+  }
+
+  /** For test code only: where downloads are kept. */
+  __setDownloadsDirForTests(dir: string): void { this.downloadsTo = () => dir; }
 
   /**
    * Ensure a CDP connection exists WITHOUT disturbing the user's own browser.
@@ -783,28 +857,39 @@ export class CDPDriver {
   }
 
   /**
-   * Click an element by its visible text content.
+   * Click an element by its visible text content. A visible, enabled control whose text or label IS `text` wins; then one
+   * that starts with it; then one that holds it. Several of the last two kinds are refused with a short list, since the
+   * first of them is a guess. The reply says which element took the click.
    */
   async clickByText(text: string, deadline = Infinity, inFrame?: string): Promise<CDPInteractionResult> {
     this.requirePage();
     try {
       // Per frame, both passes (named controls, then locators) before the next frame: a match on the page always wins over
       // an iframe's. `deadline` stops the iframe walk and caps the locator click (#101).
-      const found = await this.inFrames(async (f): Promise<{ el?: ElementHandle; loc?: Locator } | null> => {
-        const el = await this.controlByText(f, text);
-        if (el) return { el };
-        const loc = await this.locatorByText(f, text);
-        return loc ? { loc } : null;
+      const found = await this.inFrames(async (f): Promise<{ el?: ElementHandle; loc?: Locator; ambiguous?: string[] } | null> => {
+        const byControl = await this.controlByText(f, text);
+        if (byControl) return byControl;
+        return this.locatorByText(f, text);
       }, { deadline, frame: inFrame });
       if (!found) return { success: false, error: `no element found with text "${text}" in ${await this.searched(inFrame)}` };
       if ('foreign' in found) return this.foreign(found.foreign);
       const frame = this.frameUrl(found.frame);
-      if (found.hit.el) {
-        await found.hit.el.evaluate((el: Element) => (el as HTMLElement).click());   // a JS click works on background tabs
-        return { success: true, method: 'js.clickByText', frame };
+      if (found.hit.ambiguous) {
+        return { success: false, error: `"${text}" matches several elements and none exactly: ${found.hit.ambiguous.join(', ')}. Click one by its selector (cdp_page_context lists them), or give its full text` };
       }
-      await found.hit.loc!.click({ timeout: Math.max(1, Math.min(3000, deadline - Date.now())), force: true });
-      return { success: true, method: 'playwright.getByText', frame };
+      if (found.hit.el) {
+        // A JS click works on background tabs
+        const clicked = await found.hit.el.evaluate((el: Element) => {
+          (el as HTMLElement).click();
+          const label = ((el.textContent || '').trim() || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').slice(0, 60);
+          return `<${el.tagName.toLowerCase()}> "${label}"`;
+        });
+        return { success: true, method: 'js.clickByText', frame, clicked: typeof clicked === 'string' ? clicked : undefined };
+      }
+      const loc = found.hit.loc!;
+      const clicked = await loc.evaluate((el: Element) => `<${el.tagName.toLowerCase()}> "${(el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60)}"`, undefined, { timeout: 1000 }).catch(() => undefined);
+      await loc.click({ timeout: Math.max(1, Math.min(3000, deadline - Date.now())), force: true });
+      return { success: true, method: 'playwright.getByText', frame, clicked: typeof clicked === 'string' ? clicked : undefined };
     } catch (err) {
       return {
         success: false,
@@ -813,43 +898,67 @@ export class CDPDriver {
     }
   }
 
-  /** clickByText's first pass in one frame: the first visible button, link, menu item or tab whose text or aria-label holds `text`. */
-  private async controlByText(f: Frame, text: string): Promise<ElementHandle | null> {
+  /**
+   * clickByText's first pass in one frame: among the visible, enabled buttons, links, menu items and tabs, the one whose text
+   * or aria-label is `text`, else starts with it, else holds it (case and spacing aside). A tie in the first tier takes the
+   * first; a tie in the others is returned as a list of names, not a pick.
+   */
+  private async controlByText(f: Frame, text: string): Promise<{ el?: ElementHandle; ambiguous?: string[] } | null> {
     const h = await f.evaluateHandle((searchText: string) => {
-      const lower = searchText.toLowerCase();
+      const norm = (t: string) => t.replace(/\s+/g, ' ').trim().toLowerCase();
+      const want = norm(searchText);
       const seen = new Set<Element>();
-      const candidates: HTMLElement[] = [];
+      const tiers: HTMLElement[][] = [[], [], []];   // exact, prefix, substring
       for (const sel of ['button, [role="button"]', 'a[href]', '[role="link"], [role="menuitem"], [role="tab"]']) {
         for (const el of document.querySelectorAll(sel)) {
-          if (!seen.has(el)) {
-            seen.add(el);
-            candidates.push(el as HTMLElement);
-          }
-        }
-      }
-      for (const htmlEl of candidates) {
-        const elText = (htmlEl.textContent || '').trim().toLowerCase();
-        const ariaLabel = (htmlEl.getAttribute('aria-label') || '').toLowerCase();
-        if (elText.includes(lower) || ariaLabel.includes(lower)) {
+          if (seen.has(el)) continue;
+          seen.add(el);
+          const htmlEl = el as HTMLElement;
           const style = getComputedStyle(htmlEl);
-          if (style.display === 'none' || style.visibility === 'hidden') continue;
-          return htmlEl;
+          // getClientRects is empty for an element that is not rendered (itself or an ancestor display:none)
+          if (style.display === 'none' || style.visibility === 'hidden' || htmlEl.getClientRects().length === 0) continue;
+          if ((htmlEl as HTMLButtonElement).disabled || htmlEl.getAttribute('aria-disabled') === 'true') continue;
+          const names = [norm(htmlEl.textContent || ''), norm(htmlEl.getAttribute('aria-label') || '')];
+          const rank = names.some(n => n === want) ? 0 : names.some(n => n.startsWith(want)) ? 1 : names.some(n => n.includes(want)) ? 2 : -1;
+          if (rank >= 0) tiers[rank].push(htmlEl);
         }
       }
-      return null;
+      const best = tiers.find(t => t.length);
+      if (!best) return null;
+      if (best === tiers[0] || best.length === 1) return best[0];
+      return {
+        ambiguous: best.slice(0, 5).map(el => `<${el.tagName.toLowerCase()}> "${(el.textContent || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim().slice(0, 40)}"`),
+      };
     }, text);
-    return h.asElement();
+    const el = h.asElement();
+    if (el) return { el };
+    const v = await h.jsonValue().catch(() => null) as { ambiguous?: string[] } | null;
+    return v?.ambiguous ? { ambiguous: v.ambiguous.map(quoteScreenText) } : null;
   }
 
-  /** clickByText's second pass in one frame: the first Playwright locator (role name, then any text) with a match. */
-  private async locatorByText(f: Frame, text: string): Promise<Locator | null> {
-    for (const locator of [
-      f.getByRole('button', { name: text }),
-      f.getByRole('link', { name: text }),
-      f.getByRole('menuitem', { name: text }),
-      f.getByText(text, { exact: false }),
-    ]) {
-      if ((await locator.count().catch(() => 0)) > 0) return locator.first();
+  /**
+   * clickByText's second pass in one frame: Playwright locators (role name, then any text), exact names before partial ones,
+   * visible and enabled matches only. Several partial matches come back as a list of names, not a pick.
+   */
+  private async locatorByText(f: Frame, text: string): Promise<{ loc?: Locator; ambiguous?: string[] } | null> {
+    for (const exact of [true, false]) {
+      for (const locator of [
+        f.getByRole('button', { name: text, exact }),
+        f.getByRole('link', { name: text, exact }),
+        f.getByRole('menuitem', { name: text, exact }),
+        f.getByText(text, { exact }),
+      ]) {
+        const n = Math.min(await locator.count().catch(() => 0), 5);
+        const usable: Locator[] = [];
+        for (let i = 0; i < n; i++) {
+          const el = locator.nth(i);
+          if (await el.isVisible().catch(() => false) && await el.isEnabled().catch(() => false)) usable.push(el);
+        }
+        if (!usable.length) continue;
+        if (exact || usable.length === 1) return { loc: usable[0] };
+        const names = await Promise.all(usable.map(async el => quoteScreenText(((await el.textContent().catch(() => '')) ?? '').replace(/\s+/g, ' ').trim().slice(0, 40))));
+        return { ambiguous: names };
+      }
     }
     return null;
   }
@@ -871,22 +980,34 @@ export class CDPDriver {
     return this.typeIn(f, selector, text);
   }
 
-  /** typeInField within one frame. */
+  /**
+   * typeInField within one frame. A wrapper around the field (a styled div) is resolved to the input inside it, for the fill and
+   * for the read-back. The keys fallback types only where the focus is editable: otherwise the text would go to whatever else has focus.
+   */
   private async typeIn(f: Frame, selector: string, text: string): Promise<CDPInteractionResult> {
     const pg = this.requirePage();
     const frame = this.frameUrl(f);
+    const named = f.locator(selector).first();
+    const field = await editableOf(named);
     try {
       await this.moveCursorToSelector(selector, f);
       // Try fill() first — works for inputs, textareas, and [contenteditable]
-      await f.fill(selector, text, { timeout: 5000, force: true });
-      return { success: true, method: 'playwright.fill', read: readerOf(f.locator(selector).first()), frame };
+      await (field ?? named).fill(text, { timeout: 5000, force: true });
+      return { success: true, method: 'playwright.fill', read: readerOf(field ?? named), frame };
     } catch {
       // Fall back to click + clear + type for stubborn elements
       try {
-        await f.click(selector, { timeout: 3000, force: true });
+        await (field ?? named).click({ timeout: 3000, force: true });
+        const editable = await f.evaluate(() => {
+          const a = document.activeElement as HTMLElement | null;
+          return !!a && (a.isContentEditable || /^(input|textarea)$/i.test(a.tagName));
+        }).catch(() => false);
+        if (!editable) {
+          return { success: false, error: `"${selector}" is not an editable field and clicking it did not focus one; nothing was typed. Use the input inside it` };
+        }
         await pg.keyboard.press('Control+a');
         await pg.keyboard.type(text, { delay: 20 });
-        return { success: true, method: 'playwright.type', read: readerOf(f.locator(selector).first()), frame };
+        return { success: true, method: 'playwright.type', read: readerOf(field ?? f.locator(':focus').first()), frame };
       } catch (err) {
         return {
           success: false,
@@ -912,8 +1033,9 @@ export class CDPDriver {
       if ('foreign' in hit) return this.foreign(hit.foreign);
       if (typeof hit.hit === 'string') return this.typeIn(hit.frame, hit.hit, text);
 
-      await hit.hit.fill(text, { timeout: 5000, force: true });
-      return { success: true, method: 'playwright.getByLabel', read: readerOf(hit.hit), frame: this.frameUrl(hit.frame) };
+      const field = (await editableOf(hit.hit)) ?? hit.hit;   // a label can name a wrapper: fill and read the input inside it
+      await field.fill(text, { timeout: 5000, force: true });
+      return { success: true, method: 'playwright.getByLabel', read: readerOf(field), frame: this.frameUrl(hit.frame) };
     } catch (err) {
       return {
         success: false,
@@ -1184,7 +1306,8 @@ export class CDPDriver {
       unread ? `[+${unread} iframe${unread === 1 ? '' : 's'} not read: past the ${maxLength}-character limit. Read one with a selector inside it]` : '',
       foreign.size ? `[cross-origin iframe${foreign.size === 1 ? '' : 's'} not read: ${[...foreign].join(', ')}. To read one, pass frame:"<its origin>"]` : '',
     ].filter(Boolean).join('\n');
-    out = own === null && !out ? `[element not found: ${selector}]` : out.substring(0, maxLength);
+    if (own === null && !out) throw new Error(`element not found: "${selector}" in ${await this.searched(inFrame)}`);   // a miss is an error, not page content
+    out = out.substring(0, maxLength);
     return notes ? `${out}\n\n${notes}` : out;
   }
 

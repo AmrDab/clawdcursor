@@ -47,13 +47,13 @@ function fakeFrame(url: string, has: Has = {}) {
       if (has.hung) return new Promise(() => {});
       if (has.detached) throw new Error('Frame was detached');
       const hit = (has.texts ?? []).includes(text);
-      return { asElement: () => hit ? { evaluate: async () => { f.clicked.push(text); } } : null };
+      return { asElement: () => hit ? { evaluate: async () => { f.clicked.push(text); } } : null, jsonValue: async () => null };
     },
     frameElement: async () => ({ evaluate: async () => !has.hidden, boundingBox: async () => has.box ?? null }),
     getByRole: () => none(),
     getByText: (t: string) => (has.plain ?? []).includes(t) ? some(() => f.clicked.push(`text:${t}`)) : none(),
     getByLabel: (label: string) => (has.labels ?? []).includes(label) ? some(() => f.filled.push(label)) : none(),
-    locator: (sel: string) => (sel in (has.selectors ?? {})) ? some(() => {}, () => f.filled.filter(x => x.startsWith(`${sel}=`)).pop()?.slice(sel.length + 1)) : none(),
+    locator: (sel: string) => (sel in (has.selectors ?? {})) ? some(t => { if (t !== undefined) f.filled.push(`${sel}=${t}`); }, () => f.filled.filter(x => x.startsWith(`${sel}=`)).pop()?.slice(sel.length + 1)) : none(),
     async fill(sel: string, text: string) { f.filled.push(`${sel}=${text}`); },
     async selectOption(sel: string, v: string) {
       if (!(has.options ?? []).includes(v)) return [];
@@ -64,14 +64,17 @@ function fakeFrame(url: string, has: Has = {}) {
   return f;
 }
 function none() {
-  return { count: async () => 0, first: () => ({ isVisible: async () => false, boundingBox: async () => null }) };
+  const el = { isVisible: async () => false, isEnabled: async () => false, boundingBox: async () => null, textContent: async () => '' };
+  return { count: async () => 0, first: () => el, nth: () => el };
 }
-function some(act: () => void, shown: () => string | undefined = () => undefined) {
+function some(act: (typed?: string) => void, shown: () => string | undefined = () => undefined) {
   const el = {
-    isVisible: async () => true, boundingBox: async () => null, fill: async () => { act(); }, click: async () => { act(); },
-    evaluate: async () => { const v = shown(); return v === undefined ? null : { value: v, option: v, readable: true }; },   // readerOf (#399)
+    isVisible: async () => true, isEnabled: async () => true, boundingBox: async () => null, textContent: async () => '',
+    fill: async (t?: string) => { act(t); }, click: async () => { act(); }, locator: () => none(),
+    evaluate: async (_fn?: unknown, arg?: unknown) => { if (typeof arg === 'string') return true; const v = shown();   // editableOf's matches(): a field itself
+      return v === undefined ? null : { value: v, option: v, readable: true }; },   // readerOf (#399)
   };
-  return { count: async () => 1, first: () => el };
+  return { count: async () => 1, first: () => el, nth: () => el };
 }
 
 /** `children` are iframes of `main` unless one already has a parent (a nested iframe). */
@@ -247,7 +250,7 @@ describe('browser tool reaches into iframes (#398)', () => {
       fakeFrame(`${APP}/editor?token=secret`, { selectors: { body: '{ "a": 1 }' } }),
     );
     expect(await d.readText('body')).toBe(`Outer page\n\n--- iframe ${APP} ---\n{ "a": 1 }`);
-    expect(await d.readText('#nope')).toBe('[element not found: #nope]');
+    await expect(d.readText('#nope')).rejects.toThrow('element not found: "#nope"');
   });
 
   it('read_text caps each iframe\'s text at 1500 characters', async () => {
