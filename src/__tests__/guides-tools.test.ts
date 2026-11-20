@@ -161,7 +161,9 @@ describe('guide hint on open_file', () => {
   });
 
   it('a program on Windows: the guide of the program the open reports', async () => {
-    const r = await openFile.handler({ path: 'C:/Windows/notepad.exe' }, ctxFor('win32', { title: 'Untitled - Notepad', pid: 7 }));
+    const notepad = path.join(dir, 'notepad.exe');   // a real file on every OS: CI runs Linux
+    fs.writeFileSync(notepad, '');
+    const r = await openFile.handler({ path: notepad }, ctxFor('win32', { title: 'Untitled - Notepad', pid: 7 }));
     expect(r.text).toContain('guide: Notepad keys (Windows): new_item ctrl+n.');
   });
 

@@ -17,10 +17,11 @@ const openFile = getExtraTools().find(t => t.name === 'open_file')!;
 
 const dir = join(tmpdir(), `clawd-of-${process.pid}`);
 const SAM = join(dir, "Sam's $notes.txt");
+const CALC = join(dir, 'calc.exe');   // a real file on every OS: CI runs Linux, where C:/Windows does not exist
 beforeAll(async () => {
   await fs.mkdir(dir, { recursive: true });
   // open_file stats the path first: these are the files the tests below open.
-  for (const f of ['report.pdf', "Sam's $notes.txt", 'a.txt', 'nope']) await fs.writeFile(join(dir, f), '');
+  for (const f of ['report.pdf', "Sam's $notes.txt", 'a.txt', 'nope', 'calc.exe']) await fs.writeFile(join(dir, f), '');
 });
 afterAll(async () => { await fs.rm(dir, { recursive: true, force: true }); });
 
@@ -62,28 +63,28 @@ describe('open_file — a file is opened by its own program: no Explorer window 
   // Live: `Opened: C:/Windows/System32/calc.exe (window: "Screenshots - File Explorer")`, and Calculator never started.
   it('a program: launchApp is told Explorer is only the launcher, and which processes are the program', async () => {
     const spy = vi.fn(async () => ({}));
-    await openFile.handler({ path: 'C:/Windows/System32/calc.exe' }, ctx(spy));
+    await openFile.handler({ path: CALC }, ctx(spy));
     expect(spy).toHaveBeenCalledWith('explorer.exe', expect.objectContaining({
-      url: 'C:/Windows/System32/calc.exe', viaLauncher: true, noStartMenuFallback: true,
+      url: CALC, viaLauncher: true, noStartMenuFallback: true,
       processNames: expect.arrayContaining(['calc', 'CalculatorApp']),
     }));
   });
 
   it('a program whose window was not found: says so, and names no window', async () => {
-    const r = await openFile.handler({ path: 'C:/Windows/System32/calc.exe' }, ctx(async () => ({})));
+    const r = await openFile.handler({ path: CALC }, ctx(async () => ({})));
     expect(r.text).toMatch(/neither a window nor a process of calc\.exe was found/);
     expect(r.text).not.toMatch(/\(window:/);
   });
 
   it('a program whose process is up but whose window is not yet: started, with its pid, and how to reach it', async () => {
-    const r = await openFile.handler({ path: 'C:/Windows/System32/calc.exe' }, ctx(async () => ({ pid: 400, processName: 'CalculatorApp' })));
+    const r = await openFile.handler({ path: CALC }, ctx(async () => ({ pid: 400, processName: 'CalculatorApp' })));
     expect(r.isError).toBeFalsy();
     expect(r.text).toMatch(/pid=400\) but its window isn't up yet/);
     expect(r.text).toContain('window {"action":"focus","processName":"CalculatorApp"}');
   });
 
   it('a program whose own window surfaced is reported', async () => {
-    const r = await openFile.handler({ path: 'C:/Windows/System32/calc.exe' }, ctx(async () => ({ title: 'Calculator', pid: 400 })));
+    const r = await openFile.handler({ path: CALC }, ctx(async () => ({ title: 'Calculator', pid: 400 })));
     expect(r.text).toMatch(/Opened: .*calc\.exe \(window: .*Calculator/);
   });
 
