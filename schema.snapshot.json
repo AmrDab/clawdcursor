@@ -399,7 +399,7 @@
         },
         {
           "name": "window",
-          "description": "Windows, apps and displays at the OS level. For what is INSIDE a window use `accessibility`; for a web page's DOM `browser`. Read: `list` (every visible window: title, process, pid, bounds), `active` (the focused window), `list_displays` (monitors, bounds, DPI), `screen_size`. Arrange (target with processName, processId or a title substring; none = the foreground window): `focus`, `maximize`, `minimize`, `restore`, `resize` (x, y, width, height). `close` asks the app to close, like its ✕: unsaved work can be lost, so ask the user first unless they asked for it. Open: `open_app` (name; launches or focuses), `open_file` (path, default app; an .exe/.app is executed), `open_url` (url, default browser), `navigate` (url, in clawdcursor's own browser), `switch_tab` (index 1–9, or direction). Returns text: the window list, or one line saying what happened; a failure says why.",
+          "description": "Windows, apps and displays at the OS level. For what is INSIDE a window use `accessibility`; for a web page's DOM `browser`. Read: `list` (every open app: process, pid, window count; titles and bounds only for windows clawdcursor opened or worked in), `active` (the focused window), `list_displays` (monitors, bounds, DPI), `screen_size`. Arrange (target with processName, processId or a title substring; none = the foreground window): `focus`, `maximize`, `minimize`, `restore`, `resize` (x, y, width, height). `close` asks the app to close, like its ✕: unsaved work can be lost, so ask the user first unless they asked for it. Open: `open_app` (name; launches or focuses), `open_file` (path, default app; an .exe/.app is executed), `open_url` (url, default browser), `navigate` (url, in clawdcursor's own browser), `switch_tab` (index 1–9, or direction). Returns text: the window list, or one line saying what happened; a failure says why.",
           "inputSchema": {
             "type": "object",
             "properties": {
@@ -426,11 +426,11 @@
               },
               "processName": {
                 "type": "string",
-                "description": "Process name to focus (e.g. \"notepad\", \"msedge\")"
+                "description": "List only this app's windows, with titles (name contains this, any case)"
               },
               "processId": {
                 "type": "number",
-                "description": "Process ID to focus"
+                "description": "List only this process's windows, with titles"
               },
               "title": {
                 "type": "string",
@@ -2394,10 +2394,19 @@
         },
         {
           "name": "get_windows",
-          "description": "[inspect] List visible top-level windows with title, process, and bounds. Useful when the active window is wrong or missing.",
+          "description": "[inspect] List the open apps (process name, pid, and how many windows each has), and the title, process and bounds of the windows clawdcursor itself opened or worked in. The titles of other windows are not listed: a document title can hold private text. To see one app's window titles (to focus or close the right one), pass processName or processId: that app's windows are then listed in full.",
           "inputSchema": {
             "type": "object",
-            "properties": {}
+            "properties": {
+              "processName": {
+                "type": "string",
+                "description": "List only this app's windows, with titles (name contains this, any case)"
+              },
+              "processId": {
+                "type": "number",
+                "description": "List only this process's windows, with titles"
+              }
+            }
           },
           "annotations": {
             "readOnlyHint": true

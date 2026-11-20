@@ -141,7 +141,7 @@ async function serveStdio(opts: ServeOptions): Promise<void> {
   // no restart needed.
   const { hasConsent, acceptConsentFromEnv } = await import('./onboarding');
   // A host that collected consent in its own UI (the .mcpb install screen)
-  // passes it as CLAWDCURSOR_CONSENT=true.
+  // passes it as CLAWDCURSOR_CONSENT=true (false revokes it).
   if (acceptConsentFromEnv()) process.stderr.write('[clawdcursor] Consent accepted via the host\'s install setting.\n');
   if (!hasConsent()) {
     process.stderr.write(

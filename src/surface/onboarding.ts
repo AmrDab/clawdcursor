@@ -39,12 +39,16 @@ function saveConsent(source?: string): void {
  * "Allow clawdcursor to control this computer" at install and passes it as
  * CLAWDCURSOR_CONSENT=true; an extension user never opens a terminal to run
  * `clawdcursor consent --accept`. Anything that can set this variable could
- * already run that command, so it grants nothing new. Returns true when it
- * recorded consent.
+ * already run that command, so it grants nothing new. Unticking the box
+ * sends an explicit false/0, which revokes the recorded consent so the
+ * setting means what it says; an unset or unrecognised value changes
+ * nothing. Returns true when it recorded consent.
  */
 export function acceptConsentFromEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = (env.CLAWDCURSOR_CONSENT ?? '').trim();
+  if (/^(false|0)$/i.test(v)) { revokeConsent(); return false; }
   if (hasConsent()) return false;
-  if (!/^(true|1)$/i.test((env.CLAWDCURSOR_CONSENT ?? '').trim())) return false;
+  if (!/^(true|1)$/i.test(v)) return false;
   saveConsent('host-setting:CLAWDCURSOR_CONSENT');
   return true;
 }

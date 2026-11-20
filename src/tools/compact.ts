@@ -457,7 +457,7 @@ export function getCompactTools(): ToolDefinition[] {
       name: 'window',
       description:
         'Windows, apps and displays at the OS level. For what is INSIDE a window use `accessibility`; for a web page\'s DOM `browser`. ' +
-        'Read: `list` (every visible window: title, process, pid, bounds), `active` (the focused window), `list_displays` (monitors, bounds, DPI), `screen_size`. ' +
+        'Read: `list` (every open app: process, pid, window count; titles and bounds only for windows clawdcursor opened or worked in), `active` (the focused window), `list_displays` (monitors, bounds, DPI), `screen_size`. ' +
         'Arrange (target with processName, processId or a title substring; none = the foreground window): `focus`, `maximize`, `minimize`, `restore`, `resize` (x, y, width, height). ' +
         '`close` asks the app to close, like its ✕: unsaved work can be lost, so ask the user first unless they asked for it. ' +
         'Open: `open_app` (name; launches or focuses), `open_file` (path, default app; an .exe/.app is executed), `open_url` (url, default browser), `navigate` (url, in clawdcursor\'s own browser), `switch_tab` (index 1–9, or direction). ' +
