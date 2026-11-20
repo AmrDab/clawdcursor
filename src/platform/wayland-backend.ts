@@ -343,6 +343,7 @@ export class WaylandBackend {
         await execFileAsync('ydotool', ['key', `${modCodes[i]}:0`], { timeout: TIMEOUT_MS })
           .catch(err => { stuck ??= err; });
       }
+      // eslint-disable-next-line no-unsafe-finally -- a key left held outranks the act's own error: the user's keyboard is stuck
       if (stuck) throw new Error(`A modifier key may still be held: releasing it failed (${stuck instanceof Error ? stuck.message : String(stuck)})`);
     }
   }

@@ -353,7 +353,7 @@ describe('the Worker', () => {
   });
 
   it('answers 429 when the rate limit is spent, before reading the body, and takes a request while it is not', async () => {
-    const arrayBuffer = vi.fn(async () => new TextEncoder().encode('[]').buffer);
+    const arrayBuffer = vi.fn(async () => new Uint8Array(Buffer.from('[]')).buffer);
     const req = { url: 'https://telemetry.clawdcursor.com/v1/events', method: 'POST', headers: new Headers(), arrayBuffer } as unknown as Request;
     const limit = vi.fn(async () => ({ success: false }));
     expect((await worker.fetch(req, { LIMITER: { limit } } as unknown as Env)).status).toBe(429);

@@ -768,7 +768,7 @@ export class WindowsAdapter implements PlatformAdapter {
       return flat;
     } catch (err) {
       // A read that timed out or crashed is not an empty window: an empty result sends the agent to "custom canvas" and pixels.
-      throw new Error(`UI tree read failed: ${err instanceof Error ? err.message : String(err)}`);
+      throw new Error(`UI tree read failed: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
     }
   }
 

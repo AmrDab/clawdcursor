@@ -641,7 +641,7 @@ export class LinuxAdapter implements PlatformAdapter {
       // A read that timed out or crashed is not an empty window: an empty result sends the agent to "custom canvas" and pixels.
       const e = err as { killed?: boolean; code?: unknown; message?: string };
       const timedOut = e?.killed === true || e?.code === 'ETIMEDOUT';
-      throw new Error(timedOut ? `UI tree read timed out after ${A11Y_TIMEOUT_MS}ms` : `UI tree read failed: ${e?.message ?? String(err)}`);
+      throw new Error(timedOut ? `UI tree read timed out after ${A11Y_TIMEOUT_MS}ms` : `UI tree read failed: ${e?.message ?? String(err)}`, { cause: err });
     }
   }
 
@@ -844,7 +844,7 @@ export class LinuxAdapter implements PlatformAdapter {
     } catch (err) {
       // A bridge timeout is not "element not found": the agent must hear it, and not retry the act blind.
       const e = err as { killed?: boolean; code?: unknown };
-      if (e?.killed === true || e?.code === 'ETIMEDOUT') throw new Error(`invoke timed out after ${A11Y_TIMEOUT_MS}ms`);
+      if (e?.killed === true || e?.code === 'ETIMEDOUT') throw new Error(`invoke timed out after ${A11Y_TIMEOUT_MS}ms`, { cause: err });
       return { success: false };
     }
   }
