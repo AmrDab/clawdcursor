@@ -2,8 +2,8 @@
  * config.ts — Config resolution for the daemon (port, vision).
  *
  * Precedence ladder (first defined value wins per field):
- *   CLI flags > project ./.clawdcursor-config.json > user ~/.clawdcursor/config.json
- *   > env vars (CLAWD_* canonical, OPENCLAW_* deprecated) > DEFAULT_CONFIG
+ *   CLI flags > env vars (CLAWD_* canonical, OPENCLAW_* deprecated) > project config (package directory)
+ *   > user ~/.clawdcursor/config.json > DEFAULT_CONFIG
  *
  * OPENCLAW_* env vars are still read but emit a deprecation warning on first
  * read; CLAWD_* wins when both are set.
@@ -26,7 +26,7 @@ export interface ResolveInput {
     port?: number | string;
     noVision?: boolean;
   };
-  /** Override the default project config path (./.clawdcursor-config.json). */
+  /** Override the default project config path (<package dir>/.clawdcursor-config.json). */
   projectConfigPath?: string;
   /** Override the default user config path (~/.clawdcursor/config.json). */
   userConfigPath?: string;
@@ -94,12 +94,12 @@ export function resolveConfig(input?: ResolveInput): ResolvedConfig {
   const cli = input?.cliFlags;
   const cliPort = cli?.port !== undefined ? Number(cli.port) : undefined;
 
-  // Project config: package dir first (matches the historical lookup), then cwd.
+  // Project config: the one in the package directory only. A file in the working directory is never read: whoever
+  // controls a folder the app is started from must not be able to change its settings.
   const projectConfigPath = input?.projectConfigPath
     ?? (() => {
       const pkgPath = path.resolve(getPackageRoot(), '.clawdcursor-config.json');
-      if (fs.existsSync(pkgPath)) return pkgPath;
-      return path.join(process.cwd(), '.clawdcursor-config.json');
+      return pkgPath;
     })();
   const projectJson = safeReadJson(projectConfigPath);
   const project = projectJson ? parseStoredConfig(projectJson) : {};
@@ -123,12 +123,12 @@ export function resolveConfig(input?: ResolveInput): ResolvedConfig {
       project.port,
       user.port,
     ) ?? DEFAULT_CONFIG.server.port,
-    // CLI only ever forces vision OFF; noVision:false must not override a config file.
+    // Order: command-line flag, environment, project file, user file. CLI only ever forces vision OFF; noVision:false must not override anything.
     disableVision: first<boolean>(
       cli?.noVision === true ? true : undefined,
+      envDisableVision,
       project.disableVision,
       user.disableVision,
-      envDisableVision,
     ) ?? false,
   };
 }

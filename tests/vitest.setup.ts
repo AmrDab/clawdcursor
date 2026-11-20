@@ -109,3 +109,10 @@ vi.mock('@nut-tree-fork/nut-js', () => {
     centerOf: vi.fn(() => ({ x: 0, y: 0 })),
   };
 });
+
+// Unit tests never write the user's data dir or ask the real desktop (idle time, foreground window, window list, what is
+// at a point). Shipped code has no switch for this: only test code swaps the readers.
+// Imported here, not at the top: they compute paths from the home directory, which is set above.
+(await import('../src/core/control')).__useTestDoublesForTests();
+(await import('../src/core/overlay-state')).__useTestDoublesForTests();
+(await import('../src/platform/pointer-guard')).__useTestDoublesForTests();

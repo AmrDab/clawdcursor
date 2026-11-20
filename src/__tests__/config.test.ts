@@ -1,6 +1,6 @@
 /**
  * Tests for config resolution (src/config.ts).
- * Precedence: CLI > project > user > env > default.
+ * Precedence: CLI > env > project > user > default.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -83,15 +83,31 @@ describe('disableVision', () => {
     expect(resolve({ cliFlags: { noVision: false }, projectConfigPath: writeJson('p.json', { disableVision: true }) }).disableVision).toBe(true);
   });
 
-  it('project wins over user, user wins over env', () => {
+  it('project wins over user', () => {
     expect(resolve({
       projectConfigPath: writeJson('p.json', { disableVision: true }),
       userConfigPath: writeJson('u.json', { disableVision: false }),
     }).disableVision).toBe(true);
+  });
+
+  it('the environment beats project and user files', () => {
     expect(resolve({
+      projectConfigPath: writeJson('p.json', { disableVision: false }),
       userConfigPath: writeJson('u.json', { disableVision: false }),
       envOverride: { CLAWD_DISABLE_VISION: '1' },
+    }).disableVision).toBe(true);
+    expect(resolve({
+      projectConfigPath: writeJson('p.json', { disableVision: true }),
+      envOverride: { CLAWD_DISABLE_VISION: '0' },
     }).disableVision).toBe(false);
+  });
+
+  it('a config file in the working directory is ignored', () => {
+    fs.writeFileSync(path.join(tmp, '.clawdcursor-config.json'), JSON.stringify({ disableVision: true, port: 4999 }));
+    vi.spyOn(process, 'cwd').mockReturnValue(tmp);
+    const r = resolveConfig({ userConfigPath: none(), envOverride: {} });
+    expect(r.disableVision).toBe(false);
+    expect(r.port).not.toBe(4999);
   });
 
   it('CLAWD_DISABLE_VISION=1 resolves true without a warning', () => {

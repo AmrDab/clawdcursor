@@ -68,6 +68,10 @@ All notable changes to Clawd Cursor will be documented in this file.
   that could take the foreground and not give it back.
 - **`smart_click` presses the only element that contains the name.** With exactly one element named like "What's New"
   for "New", it presses that one and says so; with several, it lists them as before.
+### Changed
+- **Settings come only from the environment, command-line flags and `~/.clawdcursor`.** A `.env` file and a
+  `.clawdcursor-config.json` in the working directory are no longer read, and `CLAWD_DISABLE_VISION` now takes
+  precedence over the config files.
 
 ## [2.2.0] - 2026-11-18
 
