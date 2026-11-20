@@ -189,7 +189,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'prefer it over pixel coordinates. Pass `expect` on consequential actions so a failed one ' +
       'reports a DEVIATION instead of a hollow success. Each action result and error ends with one line: ' +
       '[confirmed | unverified | refused · CODE · hint · next | failed · CODE · hint · next] — follow its next call instead of guessing. ' +
-      'A reply that says the user is using the computer, or paused clawdcursor (PAUSED, USER_ACTIVE), means nothing was sent and the user has the desktop: call the same step again until it runs, and do not give up or act another way meanwhile. A STOPPED reply is different: do not retry it. ' +
+      'PAUSED (the user paused clawdcursor) means nothing was sent: call the same step again until it runs, and do not give up or act another way meanwhile. USER_ACTIVE (the user is using the computer, which they may while you work in the background) means nothing was sent: keep working by name meanwhile, and call that step again in a few seconds. A STOPPED reply is different: do not retry it. ' +
       'A native API, CLI or direct file edit that does the same job is cheaper: use it when it exists, and never decline a task ' +
       'because none does. Full usage guide: the `clawdcursor` skill registered in your agent, or ' +
       'https://clawdcursor.com/llms.txt.';

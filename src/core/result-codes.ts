@@ -92,9 +92,9 @@ const RULES: Rule[] = [
   // The pill's Pause (control.ts). A waiting reply, not a refusal: the same step again.
   { code: 'PAUSED', outcome: 'refused', test: /paused by the user — they have the desktop/i,
     hint: 'the user paused clawdcursor; call the same step again to keep waiting: it runs once they click Resume on the pill. Do not give up or act some other way' },
-  // The user is using the computer (control.ts); they did not press Pause, so this is not PAUSED. Also the same step again.
-  { code: 'USER_ACTIVE', outcome: 'refused', test: /the user is using the computer — clawdcursor is waiting/i,
-    hint: 'the user is using the computer; call the same step again to keep waiting: it runs once they are idle (or click Resume on the pill, when it offers one). Do not give up or act some other way' },
+  // The user is using the computer (control.ts); they did not press Pause, so this is not PAUSED.
+  { code: 'USER_ACTIVE', outcome: 'refused', test: /the user is using the computer/i,
+    hint: "the user is using the computer, which they may while you work in the background; nothing was sent. Keep working by name meanwhile (pass the app's processId), and call this step again in a few seconds" },
   // Confirm mode (confirm-mode.ts): the user did not let a held act through. A held act still waiting is PAUSE_PENDING above.
   { code: 'NOT_CONFIRMED', outcome: 'refused', test: /not confirmed: confirm mode/i,
     hint: 'confirm mode held this act and the user did not let it through; nothing was sent, do not retry it' },

@@ -241,6 +241,13 @@ async function untouchedSinceOwnInput(): Promise<boolean> {
   return !!i && base !== null && Math.abs(i.tick - base) <= TICK_SLACK_MS;
 }
 
+// Real input while the user is using the computer (turn below). Starts like activeText: a guard refusal (isGuardRefusal).
+const BUSY_TEXT =
+  'the user is using the computer, and nothing was sent: this step needs the keyboard, the mouse or its window in front, ' +
+  'and while clawdcursor works in the background the user is free to use them. Keep working in the background meanwhile: ' +
+  "read and act by name with the app's processId (accessibility read_tree, invoke, set_value). A step that has no way by " +
+  'name: call it again in a few seconds.';
+
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 /**
@@ -286,8 +293,8 @@ async function waitUntilIdle(since: number): Promise<boolean> {
 }
 
 /**
- * The user took over: busy when the agent wanted to start, or their input in the middle of a burst (whose window and
- * cursor are already theirs again). Nothing is sent and nothing is held: the call waits until they are idle, then the step
+ * The user took over a foreground burst (foreground-burst.ts): busy when it wanted to start, or their input in the middle
+ * of it (whose window and cursor are already theirs again). Other real input does not wait for them (turn below). Nothing is sent and nothing is held: the call waits until they are idle, then the step
  * goes on by itself (owner, 2026-11-19: no Resume click needed). Still working when the call's budget ends: the waiting
  * reply, and the agent calls the same step again. The pill's Pause meanwhile turns it into a hold. Throws the waiting
  * reply, or STOPPED.
@@ -308,15 +315,19 @@ export async function takeover(): Promise<void> {
 }
 
 /**
- * Before an act: wait while held; before real input also wait for the user to be idle (a takeover when they are not).
- * Not for this call's own acts inside a foreground burst, which keeps the same rule itself (foreground-burst.ts). Not in the
- * middle of a gesture of the agent's (a button or a key it holds down): it is finished, never left pressed while the user
- * works; its start (mouseDown, keyDown) waited for them.
+ * Before an act: wait while held. Real input while the user is using the computer is refused at once, nothing held and the
+ * pill not told (owner, 2026-11-20: "running in background" means they may use the computer, and the agent must not stall
+ * waiting for them): it goes on in the background by name and calls the step again later. Not for this call's own acts
+ * inside a foreground burst, which keeps its own rule (foreground-burst.ts). Not in the middle of a gesture of the agent's
+ * (a button or a key it holds down): it is finished, never left pressed while the user works; its start was checked.
  */
 async function turn(real: boolean): Promise<void> {
   if (inForegroundBurst() || gestureInProgress()) return;
   if (isHeld()) await waitWhileHeld();
-  if (real && !(await userIsIdle())) await takeover();
+  if (real && !(await userIsIdle())) {
+    movedAt = 0;   // a window that comes up meanwhile is the user's doing, not the agent's
+    throw new Error(BUSY_TEXT);
+  }
 }
 
 // A hold counts as busy: the burst then waits in takeover() for the Resume, and never starts under the pill's Pause.
