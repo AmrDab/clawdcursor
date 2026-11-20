@@ -97,7 +97,7 @@ const HOST_PILL_START_MS = 2_000;
  * Which form of the overlay to draw: running (default) or paused for the user. `activity` is what the running pill says
  * ("Typing in Edge"); `app` names the agent's window on the paused card.
  */
-export interface OverlayMode { paused?: PauseInfo; activity?: string; app?: string; ring?: boolean }
+export interface OverlayMode { paused?: PauseInfo; activity?: string; app?: string }
 
 /**
  * "Typing in Edge" — what the running pill shows for a guarded method (pointer-guard.ts GUARDED_METHODS); undefined for
@@ -158,8 +158,6 @@ export const overlayEnv = (mode: OverlayMode, extra: NodeJS.ProcessEnv = {}): No
   // Always set, so a stray variable in our own environment never shows.
   CLAWD_BANNER_ACTIVITY: mode.activity ?? '',
   CLAWD_BANNER_APP: mode.app ?? '',
-  // The amber ring when the pill appears: the first pill of a session only (ring: false after it).
-  CLAWD_BANNER_RING: mode.ring === false ? '0' : '1',
   // The message is model-written: say so on screen, so injected text can't pose
   // as clawdcursor's own instructions. The drawer plays a short system sound when
   // the paused pill appears, so a user who isn't looking hears it's their turn
@@ -470,7 +468,6 @@ class ControlBanner {
   private mode: IndicatorMode = 'background';
   private waiting: string | null = null; // the pill's line while the agent waits ("waiting for Notepad to load")
   private baseFg = false;                // `base` came from a foreground act: dropped once the agent is back in the background
-  private ringShown = false;             // the pill's appear ring was shown this session
   private base = '';     // what the agent is doing ("Typing in Edge"), without the mode
   private activity = ''; // the line the running pill was last sent (the user's turn: its label)
 
@@ -678,11 +675,9 @@ class ControlBanner {
     let forPause: number | undefined;
     const hosted = this.hostPill() !== null;
     try {
-      const ring = !this.ringShown;
       child = this.spawner(this.paused
-        ? { paused: this.paused, app: appLabel(workingIn()?.processName, workingIn()?.appName), ring }
-        : { activity: this.activity = this.turnLabel ?? this.line(), ring });
-      this.ringShown = true;
+        ? { paused: this.paused, app: appLabel(workingIn()?.processName, workingIn()?.appName) }
+        : { activity: this.activity = this.turnLabel ?? this.line() });
       // Which pause this pill answers. Its answer counts while that pause is the
       // current one, even if the process already exited (stdout can drain after
       // 'exit'); a pill from an earlier pause can never answer a newer one.
@@ -866,7 +861,6 @@ class ControlBanner {
   __setPlatformEnabledForTests(v: boolean): void { this.enabled = v; this.ready = () => v; this.glowSpawner = () => { throw new Error('no glow unless a test gives one'); }; }
   __resetForTests(): void {
     this.forceHide();
-    this.ringShown = false;
     this.pinned = false;
     this.onStopRequested = undefined;
     this.capturable = process.platform === 'linux';

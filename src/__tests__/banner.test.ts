@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
-import { controlBanner, outlineFlags, glowFlags, glowColorFlags, outlineWindowNumber, overlayEnv, type OverlayMode } from '../core/banner';
+import { controlBanner, outlineFlags, glowFlags, glowColorFlags, outlineWindowNumber } from '../core/banner';
 import { stopControl, __setControlDirForTests, __setForegroundReaderForTests, isHeld, releaseHold } from '../core/control';
 import { guardInputMethods, setOwnUiPids, agentWaiting } from '../platform/pointer-guard';
 import { withForegroundBurst } from '../platform/foreground-burst';
@@ -420,23 +420,20 @@ describe('the indicator has two modes', () => {
     expect(lines().at(-1)).toBe('ACTIVITY running in background · Clicking');
   });
 
-  it('the appear ring is for the first pill of this process only: a pill back after an idle hide does not ring', () => {
-    const modes: OverlayMode[] = [];
-    controlBanner.__setSpawnerForTests(m => { modes.push(m); const c = new FakeChild(); spawned.push(c); return c as unknown as ChildProcess; });
-    controlBanner.touch();
-    vi.advanceTimersByTime(31_000);   // the idle hide
-    controlBanner.touch();
-    expect(modes.map(m => m.ring)).toEqual([true, false]);
-    expect(overlayEnv({ ring: false }).CLAWD_BANNER_RING).toBe('0');
-    expect(overlayEnv({}).CLAWD_BANNER_RING).toBe('1');
-  });
-
-  it('the Windows pill reads stdin as UTF-8 and keeps a fixed width', () => {
+  it('the Windows pill reads stdin as UTF-8, keeps one small size and runs long text like a marquee', () => {
     const ps = readFileSync(join(__dirname, '..', '..', 'scripts', 'banner.ps1'), 'utf8');
     expect(ps).toContain('new System.Text.UTF8Encoding(false)');   // "·" and "—" came out as box-drawing characters
-    expect(ps).toContain('$activity.AutoEllipsis = $true');
-    expect(ps).toContain('$x += $activity.Width + 6');              // never its preferred (text) width
-    expect(ps).toContain("if ($env:CLAWD_BANNER_RING -eq '0') { return }");
+    expect(ps).toContain("MeasureText('running in background', $activity.Font)");
+    expect(ps).toContain('$x += $track.Width + 6');                 // never the text's width
+    expect(ps).toContain('if ($x -le -$script:loop) { $x += $script:loop }');
+    expect(ps).toContain('$form.add_ActivityChanged([Action[string]]{ param($t) Set-Activity $t; Update-Layout })');
+  });
+
+  it('no pill appears with an amber ring (it read as the agent outlining its own pill)', () => {
+    for (const f of [['banner.ps1'], ['mac', 'overlay.swift']]) {
+      const src = readFileSync(join(__dirname, '..', '..', 'scripts', ...f), 'utf8');
+      expect(src).not.toMatch(/Start-Pulse|CLAWD_BANNER_RING|let appeared = Date\(\)/);
+    }
   });
 
   it('does not send the same line twice while the mode holds', async () => {
@@ -693,13 +690,10 @@ describe('the full-screen glow is the foreground-mode drawer only', () => {
     expect((ps.match(/\$form\.KeepOnTop\(\)/g) ?? []).length).toBe(2);   // the running and the paused timer
     // Dragging: by hand with the mouse, on the body only; the position is kept, on screen, instead of top-centre.
     expect(ps).toContain('function Enable-Drag(');
-    expect(ps).toContain('foreach ($c in @($form, $dot, $brand, $activity, $elapsed)) { Enable-Drag $c }');
+    expect(ps).toContain('foreach ($c in @($form, $dot, $brand, $track, $activity, $elapsed)) { Enable-Drag $c }');
     expect(ps).toContain('foreach ($c in @($form, $dot, $title, $msg)) { Enable-Drag $c }');
     expect(ps).not.toMatch(/Enable-Drag \$(stop|yes|no|send|reply)/);
     expect(ps).toContain('if ($script:userPos) { $at = Get-OnScreen $script:userPos $f }');
-    // Appearing: solid amber outline for 3 s, then a fade: not a loop.
-    expect(ps).toContain('function Start-Pulse');
-    expect(ps).toContain('if ($k -le 0) { $script:pulse.Stop() }');
   });
 
   it('the Windows outline is click-through, never activates, and stays out of captures', () => {

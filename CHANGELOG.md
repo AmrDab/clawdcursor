@@ -8,10 +8,10 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **The pill says which mode the agent is in.** `running in background` (the amber outline round its window) or `requires
   foreground` (the full-screen amber glow while it uses the mouse and keyboard), then what it is doing: `requires
   foreground · Clicking in Paint`. In the code the two modes are now named `foreground` and `background`.
-- **The pill keeps one size, and its text is readable on Windows.** The activity has a fixed width and is cut with "…"; the
-  "·" and "—" no longer show as box-drawing characters. While the agent waits (a wait, or an app it started that is still
-  loading) the pill says "waiting" or "waiting for <app> to load". After foreground work it says "running in background"
-  without the last foreground act. The amber ring shows only when the first pill appears, not each time it comes back.
+- **The pill keeps one small size, and its text is readable on Windows.** Text longer than "running in background" runs
+  through it like a marquee; the "·" and "—" no longer show as box-drawing characters. While the agent waits (a wait, or an
+  app it started that is still loading) the pill says "waiting" or "waiting for <app> to load". After foreground work it
+  says "running in background" without the last foreground act. The pill no longer flashes an amber ring when it appears.
 - **The agent's drawn pointer shows only for background work.** When it uses the real mouse, your own cursor moves and
   no second pointer follows it.
 - **`smart_click` and `smart_type` find an element by name in the background first**, the way `invoke` does (a window

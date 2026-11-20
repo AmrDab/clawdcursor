@@ -390,32 +390,11 @@ function Enable-Drag($c) {
     $c.Add_MouseUp({ $script:drag = $null })
 }
 
-# A cue when the pill appears: the outline is solid amber for 3 s, then fades back over 1 s. Never a loop. Timed by the
-# clock, not by ticks: this timer ticks unevenly, and a 1.5 s fade and then three short flashes both went unnoticed by
-# the owner (2026-11-17).
-$script:edgeW = 1
-function Start-Pulse {
-    # Only the first pill of a session (banner.ts sets CLAWD_BANNER_RING=0 after it): a ring each time the pill comes back
-    # read as the agent outlining its own pill (owner, 2026-11-19).
-    if ($env:CLAWD_BANNER_RING -eq '0') { return }
-    $script:base = $script:edge; $script:amber = [System.Drawing.Color]::FromArgb(245, 158, 11)
-    $script:pulseAt = [Diagnostics.Stopwatch]::StartNew()
-    $script:pulse = New-Object System.Windows.Forms.Timer
-    $script:pulse.Interval = 60
-    $script:pulse.Add_Tick({
-        $ms = $script:pulseAt.ElapsedMilliseconds
-        $k = if ($ms -lt 3000) { 1.0 } else { [Math]::Max(0.0, 1 - ($ms - 3000) / 1000.0) }
-        $script:edgeW = if ($k -gt 0) { 4 } else { 1 }
-        $script:edge = [System.Drawing.Color]::FromArgb([int]($script:base.R + ($script:amber.R - $script:base.R) * $k), [int]($script:base.G + ($script:amber.G - $script:base.G) * $k), [int]($script:base.B + ($script:amber.B - $script:base.B) * $k))
-        $form.Invalidate()
-        if ($k -le 0) { $script:pulse.Stop() }
-    })
-    $script:pulse.Start()
-}
+# No amber ring when the pill appears (owner, 2026-11-19: an amber ring round the pill read as the agent outlining it).
 $form.Add_Paint({
     param($s, $e)
     $e.Graphics.SmoothingMode = 'AntiAlias'
-    $pen = New-Object System.Drawing.Pen($script:edge, $script:edgeW)
+    $pen = New-Object System.Drawing.Pen($script:edge, 1)
     $e.Graphics.DrawPath($pen, (New-RoundPath ($form.Width - 1) ($form.Height - 1) $script:radius))
     $pen.Dispose()
 })
@@ -641,7 +620,7 @@ if ($env:CLAWD_BANNER_MODE -eq 'paused') {
     }
 
     foreach ($c in @($form, $dot, $title, $msg)) { Enable-Drag $c }
-    $form.Add_Shown({ $form.StartStdinCommands(); Start-Pulse })
+    $form.Add_Shown({ $form.StartStdinCommands() })
     [System.Windows.Forms.Application]::Run($form)
     exit 0
 }
@@ -665,13 +644,36 @@ $dot      = New-Object Orb
 $dot.BackColor = $form.BackColor
 $brand    = New-PillLabel 'ClawdCursor' 'Segoe UI Semibold' 9 $muted
 $activity = New-PillLabel 'Working' 'Segoe UI Semibold' 9.5 ([System.Drawing.Color]::White)
-if ($env:CLAWD_BANNER_ACTIVITY) { $activity.Text = [string]$env:CLAWD_BANNER_ACTIVITY }
 $elapsed  = New-PillLabel '0:00' 'Segoe UI' 9 $muted
-# Fixed widths (owner, 2026-11-19: the pill must not grow and shrink as its text changes). The activity is cut with "…";
-# the clock has room for 99:59.
-$activity.AutoSize = $false
-$activity.AutoEllipsis = $true
-$activity.Size = New-Object System.Drawing.Size(([System.Windows.Forms.TextRenderer]::MeasureText('requires foreground · Pressing keys in Designcenter', $activity.Font).Width), $activity.PreferredHeight)
+# The pill keeps one small size (owner, 2026-11-19: never growing with its text, and "small like it was before"). The
+# activity shows through a window as wide as "running in background"; text that does not fit runs through it like an
+# LED marquee sign, round and round. The clock has room for 99:59.
+$track = New-Object System.Windows.Forms.Panel
+$track.BackColor = $form.BackColor
+$track.Size = New-Object System.Drawing.Size(([System.Windows.Forms.TextRenderer]::MeasureText('running in background', $activity.Font).Width), $activity.PreferredHeight)
+$track.Controls.Add($activity)
+$script:loop = 0                                     # px from one copy of the text to the next; 0: it fits and stands still
+$script:still = [Diagnostics.Stopwatch]::StartNew()  # a new text stands still a moment before it runs
+function Set-Activity([string]$t) {
+    $one = [System.Windows.Forms.TextRenderer]::MeasureText($t, $activity.Font).Width
+    if ($one -le $track.Width) { $script:loop = 0; $activity.Text = $t }
+    else {
+        $two = $t + '      ' + $t
+        $script:loop = [System.Windows.Forms.TextRenderer]::MeasureText($two, $activity.Font).Width - $one
+        $activity.Text = $two
+    }
+    $activity.Location = New-Object System.Drawing.Point(0, 0)
+    $script:still.Restart()
+}
+Set-Activity $(if ($env:CLAWD_BANNER_ACTIVITY) { [string]$env:CLAWD_BANNER_ACTIVITY } else { 'Working' })
+$marquee = New-Object System.Windows.Forms.Timer
+$marquee.Interval = 30
+$marquee.Add_Tick({
+    if ($script:loop -le 0 -or $script:still.ElapsedMilliseconds -lt 1200) { return }
+    $x = $activity.Left - 1
+    if ($x -le -$script:loop) { $x += $script:loop }
+    $activity.Left = $x
+})
 $elapsed.AutoSize = $false
 $elapsed.TextAlign = 'MiddleLeft'
 $elapsed.Size = New-Object System.Drawing.Size(([System.Windows.Forms.TextRenderer]::MeasureText('99:59', $elapsed.Font).Width), $elapsed.PreferredHeight)
@@ -705,13 +707,13 @@ $hold.Add_MouseEnter({ $hold.BackColor = if ($hold.Tag -eq 'BANNER_RESUME') { $r
 $hold.Add_MouseLeave({ $hold.BackColor = if ($hold.Tag -eq 'BANNER_RESUME') { $resumeIdle } else { $holdIdle } })
 $hold.Add_Click({ [Console]::Out.WriteLine([string]$hold.Tag); [Console]::Out.Flush() })
 
-$form.Controls.AddRange(@($dot, $brand, $activity, $elapsed, $hold, $stop))
+$form.Controls.AddRange(@($dot, $brand, $track, $elapsed, $hold, $stop))
 
 function Update-Layout {
     $x = 12
     $dot.Location = New-Object System.Drawing.Point(($x - 2), 9);     $x += $dot.Width + 2
     $brand.Location = New-Object System.Drawing.Point($x, 11);        $x += $brand.PreferredWidth + 4
-    $activity.Location = New-Object System.Drawing.Point($x, 10);     $x += $activity.Width + 6
+    $track.Location = New-Object System.Drawing.Point($x, 10);        $x += $track.Width + 6
     $elapsed.Location = New-Object System.Drawing.Point($x, 11);      $x += $elapsed.Width + 10
     $hold.Location = New-Object System.Drawing.Point($x, 7);          $x += $hold.Width + 6
     $stop.Location = New-Object System.Drawing.Point($x, 7);          $x += $stop.Width + 7
@@ -721,7 +723,7 @@ function Update-Layout {
 }
 Update-Layout
 
-$form.add_ActivityChanged([Action[string]]{ param($t) $activity.Text = $t; Update-Layout })
+$form.add_ActivityChanged([Action[string]]{ param($t) Set-Activity $t; Update-Layout })
 $form.add_OrbChanged([Action[string]]{ param($s) $dot.State = $s })
 $form.add_HeldChanged([Action[bool]]{
     param($on)
@@ -740,12 +742,13 @@ $timer.Add_Tick({
     $form.KeepOnTop()
 })
 $timer.Start()
+$marquee.Start()
 
 $stopHandler = { Send-Line 'BANNER_STOP' }
 $stop.Add_Click($stopHandler)
 $form.Add_MouseDoubleClick($stopHandler)
-foreach ($c in @($dot, $brand, $activity, $elapsed)) { $c.Add_MouseDoubleClick($stopHandler) }
+foreach ($c in @($dot, $brand, $track, $activity, $elapsed)) { $c.Add_MouseDoubleClick($stopHandler) }
 
-foreach ($c in @($form, $dot, $brand, $activity, $elapsed)) { Enable-Drag $c }
-$form.Add_Shown({ $form.StartStdinCommands(); Start-Pulse })
+foreach ($c in @($form, $dot, $brand, $track, $activity, $elapsed)) { Enable-Drag $c }
+$form.Add_Shown({ $form.StartStdinCommands() })
 [System.Windows.Forms.Application]::Run($form)
