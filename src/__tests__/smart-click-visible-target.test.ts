@@ -193,9 +193,9 @@ describe('the reply names the element acted on, and a partial match is listed, n
     Object.defineProperty(process, 'platform', { ...realPlatform, value: 'win32' });
     try {
       const { ctx, mouseClick, a11y } = ctxFor(async () => INEXACT);
-      a11y.invokeElement.mockImplementation(async (q: { name?: string }) => q.name === "What's New"
+      a11y.invokeElement.mockImplementation((async (q: { name?: string }) => q.name === "What's New"
         ? { success: true, action: 'click', target: { name: "What's New", controlType: 'ControlType.Hyperlink', match: 'exact' } }
-        : INEXACT);
+        : INEXACT) as unknown as () => Promise<unknown>);
       const r = await smartClick.handler({ target: 'New', timeout: 1500 }, ctx);
       expect(a11y.invokeElement).toHaveBeenLastCalledWith(expect.objectContaining({ name: "What's New", action: 'click' }));
       expect(r.isError).toBeFalsy();

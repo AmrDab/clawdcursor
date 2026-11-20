@@ -85,7 +85,7 @@ describe('21 — click honours button:"middle" and count 3, and refuses what it 
     for (const bad of [{ button: 'back' }, { count: 4 }, { count: 0 }, { count: 2.5 }]) {
       const p = platform();
       const r = await tool('click').execute({ x: 1, y: 2, space: 'screen', ...bad }, asCtx(p));
-      expect(r.isError).toBe(true);
+      expect((r as { isError?: boolean }).isError).toBe(true);
       expect(p.mouseClick).not.toHaveBeenCalled();
     }
   });
@@ -125,7 +125,7 @@ describe('26 — invoke automationId is passed as an id, not used as a name', ()
     const r = await tool('invoke_element').execute({ automationId: 'btnSave', processId: 7 }, ctx);
     expect(r.success).toBe(true);
     expect(invokeElement).toHaveBeenCalledWith(expect.objectContaining({ automationId: 'btnSave', processId: 7 }));
-    expect(invokeElement.mock.calls[0][0]).not.toHaveProperty('name');
+    expect((invokeElement.mock.calls[0] as unknown[])[0]).not.toHaveProperty('name');
   });
 
   it('a name given with it goes along too', async () => {
