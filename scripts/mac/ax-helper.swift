@@ -25,6 +25,7 @@
 //   ax-helper find      [--pid N] [--name S] [--role R] [--id S] [--max-results N] [--timeout-ms N]
 //   ax-helper invoke    [--pid N] --action A [--name S] [--role R] [--id S] [--value V] [--timeout-ms N]
 //   ax-helper type      --text S [--timeout-ms N]   (types into whatever has the keyboard; send --text via --args-stdin)
+//   ax-helper key       --code N [--mods command,shift,option,control] [--phase tap|down|up] [--us-layout 1] [--timeout-ms N]
 //   (every command also takes --ax-timeout-ms N: how long ONE call to ONE app may block, and
 //    --args-stdin 1: read name / id / value / … as one JSON object of strings from stdin instead of argv — argv is
 //    readable by every process on the Mac while this one runs)
@@ -32,6 +33,7 @@
 // Secure text fields: their value is never read out of the process.
 import AppKit
 import ApplicationServices
+import Carbon.HIToolbox
 import CoreGraphics
 import Foundation
 
@@ -1659,7 +1661,99 @@ func cmdType() -> Never {
     emit(["ok": true, "typed": typed])
 }
 
+// MARK: - key
+
+/// Is the active keyboard layout a US one? A letter key's virtual key code is a position on a US keyboard: on another layout
+/// the same code is another character, so a shortcut aimed by letter would press the wrong key.
+func layoutIsUS() -> Bool {
+    guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+          let raw = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) else { return false }
+    let id = Unmanaged<CFString>.fromOpaque(raw).takeUnretainedValue() as String
+    return id == "com.apple.keylayout.US" || id == "com.apple.keylayout.ABC"
+}
+
+/// One key by virtual key code, with modifier flags: --phase tap (down then up, the default), down or up. The modifiers are
+/// flags on the key's own events, added to the flags the system already holds, so a modifier the agent holds with key-down stays.
+/// Refuses (kind "permission") when this process may not post key events, so the caller sends the key another way: a key that
+/// is posted and silently dropped is the failure to avoid. --us-layout 1: the code was picked from a US keyboard's letters, so
+/// any other active layout is refused (kind "failed").
+func cmdKey() -> Never {
+    requireUsableSession()
+    guard let code = UInt16(opts["code"] ?? "") else { fail("failed", "key: needs --code N") }
+    let phase = opts["phase"] ?? "tap"
+    guard ["tap", "down", "up"].contains(phase) else { fail("failed", "key: --phase is tap, down or up") }
+    var flags: CGEventFlags = []
+    for m in (opts["mods"] ?? "").split(separator: ",") {
+        switch m {
+        case "command": flags.insert(.maskCommand)
+        case "shift": flags.insert(.maskShift)
+        case "option": flags.insert(.maskAlternate)
+        case "control": flags.insert(.maskControl)
+        default: fail("failed", "key: unknown modifier \"\(m)\"")
+        }
+    }
+    if #available(macOS 10.15, *), !CGPreflightPostEventAccess() {
+        fail("permission", "the app running clawdcursor may not post keyboard events (System Settings → Privacy & Security → Accessibility)")
+    }
+    if opts["us-layout"] == "1" && !layoutIsUS() { fail("failed", "key: the active keyboard layout is not a US one") }
+    let source = CGEventSource(stateID: .hidSystemState)
+    var events: [CGEvent] = []
+    for down in (phase == "tap" ? [true, false] : [phase == "down"]) {
+        guard let ev = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(code), keyDown: down) else { fail("failed", "key: could not build the key event") }
+        if !flags.isEmpty { ev.flags.formUnion(flags) }
+        events.append(ev)
+    }
+    for ev in events { ev.post(tap: .cghidEventTap) }
+    emit(["ok": true])
+}
+
 // MARK: - pagetext
+
+/// A web page's text with a line break at the end of every block (heading, paragraph, list item, table row…). Text runs
+/// (AXStaticText) are joined as they come: the page's own spaces are in them. A secure text field is never read.
+struct PageWalk {
+    var out = ""
+    var nodes = 0
+    var aborted = false   // out of time or nodes: the caller then uses the single read
+    /// Roles that start and end on a line of their own.
+    static let blocks: Set<String> = ["AXHeading", "AXParagraph", "AXGroup", "AXList", "AXListItem", "AXTable", "AXRow", "AXOutline",
+                                      "AXWebArea", "AXToolbar", "AXTabGroup", "AXRadioGroup", "AXMenu"]
+    /// An AXGroup the browser makes for an inline element: it stays in its line.
+    static let inlineDescriptions: Set<String> = ["code", "emphasis", "strong", "mark", "time", "insertion", "deletion", "subscript",
+                                                  "superscript", "abbreviation"]
+
+    mutating func breakLine() {
+        while out.last == " " || out.last == "\t" { out.removeLast() }
+        if !out.isEmpty && out.last != "\n" { out.append("\n") }
+    }
+
+    mutating func visit(_ el: AXUIElement, depth: Int) {
+        if aborted { return }
+        nodes += 1
+        if nodes > 20_000 || depth > 80 || timeUp() { aborted = true; return }
+        let a = multi(el, ["AXRole", "AXSubrole", "AXRoleDescription", "AXValue", "AXChildren"])
+        if str(a["AXSubrole"]) == "AXSecureTextField" { return }
+        let role = str(a["AXRole"]) ?? ""
+        switch role {
+        case "AXStaticText":
+            if let v = str(a["AXValue"]) { out += v }
+            return
+        case "AXTextField", "AXTextArea", "AXComboBox":
+            breakLine()
+            if let v = str(a["AXValue"]) { out += v }
+            breakLine()
+            return
+        case "AXImage":
+            return
+        default:
+            break
+        }
+        let block = PageWalk.blocks.contains(role) && !PageWalk.inlineDescriptions.contains((str(a["AXRoleDescription"]) ?? "").lowercased())
+        if block { breakLine() }
+        for kid in (a["AXChildren"] as? [AXUIElement]) ?? [] { visit(kid, depth: depth + 1) }
+        if block { breakLine() } else if role == "AXCell", let last = out.last, last != " ", last != "\n" { out.append(" ") }
+    }
+}
 
 /// The whole text of the frontmost app's document — what VoiceOver reads — with no keystrokes: nothing is selected and
 /// the clipboard is not touched (copy_all_text pressed Cmd+A / Cmd+C, which left the page highlighted). An editor with the
@@ -1704,16 +1798,27 @@ func cmdPageText() -> Never {
         }
     }
     guard let area = web else { fail("failed", "no web page or text document has the focus") }
+    // The whole area in one read, as before: the fallback, and the yardstick the block walk is checked against.
+    var whole: String? = nil
     var range: CFTypeRef?
-    guard AXUIElementCopyParameterizedAttributeValue(area, "AXTextMarkerRangeForUIElement" as CFString, area, &range) == .success,
-          let markers = range else {
-        fail("failed", "the page does not expose its text range")
+    if AXUIElementCopyParameterizedAttributeValue(area, "AXTextMarkerRangeForUIElement" as CFString, area, &range) == .success, let markers = range {
+        var out: CFTypeRef?
+        if AXUIElementCopyParameterizedAttributeValue(area, "AXStringForTextMarkerRange" as CFString, markers, &out) == .success,
+           let text = out as? String, !text.isEmpty { whole = text }
     }
-    var out: CFTypeRef?
-    guard AXUIElementCopyParameterizedAttributeValue(area, "AXStringForTextMarkerRange" as CFString, markers, &out) == .success,
-          let text = out as? String, !text.isEmpty else {
-        fail("failed", "the page did not return its text")
+    // The single read runs headings, paragraphs and list items together ("lazy dog.Second paragraph", #266). Walk the page's
+    // blocks instead and end each with a line break, as Windows (UIA TextPattern) and Linux (AT-SPI) do. It is used only when
+    // it kept (nearly) every character the whole read found; otherwise nothing that read today gets worse.
+    var walk = PageWalk()
+    walk.visit(area, depth: 0)
+    walk.breakLine()
+    func letters(_ s: String) -> Int {
+        s.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) && $0.value != 0xFFFC }.count
     }
+    if !walk.aborted, !walk.out.isEmpty, letters(walk.out) * 10 >= letters(whole ?? "") * 9 {
+        emit(["ok": true, "text": String(walk.out.prefix(maxChars)), "source": "AXWebArea:blocks", "elapsedMs": elapsedMs()])
+    }
+    guard let text = whole else { fail("failed", "the page did not return its text") }
     emit(["ok": true, "text": String(text.prefix(maxChars)), "source": "AXWebArea", "elapsedMs": elapsedMs()])
 }
 
@@ -1739,8 +1844,9 @@ case "tree": cmdTree()
 case "find": cmdFind()
 case "invoke": cmdInvoke()
 case "type": cmdType()
+case "key": cmdKey()
 case "focus": cmdFocus()
 case "pagetext": cmdPageText()
 case "window-of": cmdWindowOf()
-default: fail("failed", "usage: ax-helper windows|window-at|window-of|active|frontmost|idle|apps|focused|tree|find|invoke|type|focus|pagetext [options] (got \"\(command)\")")
+default: fail("failed", "usage: ax-helper windows|window-at|window-of|active|frontmost|idle|apps|focused|tree|find|invoke|type|key|focus|pagetext [options] (got \"\(command)\")")
 }

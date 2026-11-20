@@ -2,6 +2,11 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **macOS: a key press or typed text that fails is an error.** On the `smart_type`, `shortcuts_run` and `minimize_window` path it was logged and reported as done.
+
 ## [2.2.0] - 2026-11-18
 
 ### Added

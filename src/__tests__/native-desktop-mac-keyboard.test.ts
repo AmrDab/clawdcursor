@@ -198,6 +198,19 @@ describe('the keyboard guard covers the MCP route too', () => {
     await desktop().typeText('abc');
     expect(helper.type).toHaveBeenCalledWith('abc');
   });
+
+  it('when osascript fails and there is no helper, typing is an error, not a silent success', async () => {
+    osascriptFails = true;
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const d = desktop();
+    (d as unknown as { helper: null }).helper = null;
+    await expect(d.typeText('abc')).rejects.toThrow(/osascript failed/);
+  });
+
+  it('a key press that osascript fails is an error, not a silent success', async () => {
+    osascriptFails = true;
+    await expect(desktop().keyPress('cmd+s')).rejects.toThrow(/osascript failed/);
+  });
 });
 
 describe('a modal dialog of another app: typed into, and the agent is told', () => {

@@ -66,6 +66,36 @@ export async function typeTextMac(ax: Pick<MacAx, 'typeUnicode'>, text: string, 
   );
 }
 
+/**
+ * Virtual key codes of the letter, digit and unshifted punctuation keys of a US keyboard: the REAL key a character is on, so a page
+ * that reads event.code / keyCode sees it. A character is never sent through the helper as text (that is every key "A" with a
+ * Unicode string attached). The helper checks that a US layout is active.
+ */
+const US_KEY_CODES: Record<string, number> = {
+  a: 0, s: 1, d: 2, f: 3, h: 4, g: 5, z: 6, x: 7, c: 8, v: 9, b: 11, q: 12, w: 13, e: 14, r: 15, y: 16, t: 17,
+  '1': 18, '2': 19, '3': 20, '4': 21, '6': 22, '5': 23, '=': 24, '9': 25, '7': 26, '-': 27, '8': 28, '0': 29,
+  ']': 30, o: 31, u: 32, '[': 33, i: 34, p: 35, l: 37, j: 38, "'": 39, k: 40, ';': 41, '\\': 42, ',': 43, '/': 44,
+  n: 45, m: 46, '.': 47, '`': 50,
+};
+
+/**
+ * One key through the helper's CGEvent path, ahead of System Events. `code`: a named key's virtual key code (Return, arrows…);
+ * `char`: one printable character. `mods` are System Events' names (`MAC_MODIFIER[m].name`). False — nothing was sent — when
+ * the helper is not built, may not post key events, or the key has no helper form (an uppercase letter or shifted symbol with
+ * modifiers, a non-US layout): the caller then runs the System Events program it always ran. Never for a modifier key itself.
+ * The keyboard-owner guard and every other check run before this, in the caller.
+ */
+export async function pressKeyMac(
+  ax: Partial<Pick<MacAx, 'postKey'>>,
+  key: { code?: number; char?: string; mods: string[]; phase?: 'tap' | 'down' | 'up' },
+): Promise<boolean> {
+  const phase = key.phase ?? 'tap';
+  if (key.code !== undefined) return (await ax.postKey?.({ code: key.code, mods: key.mods, phase })) === true;
+  if (key.char === undefined || phase !== 'tap') return false;
+  const code = US_KEY_CODES[key.char];
+  return code !== undefined && (await ax.postKey?.({ code, mods: key.mods, phase, usLayout: true })) === true;
+}
+
 /** A key with modifiers can only be a key of the keyboard layout: System Events would press ⌘A for ⌘é (#242). */
 export function refuseNonAsciiChord(key: string, hasModifiers: boolean): void {
   if (hasModifiers && hasNonAscii(key)) {

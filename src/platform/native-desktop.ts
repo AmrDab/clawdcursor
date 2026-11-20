@@ -606,10 +606,9 @@ export class NativeDesktop {
         await runAppleScript(`tell application "System Events" to keystroke "${escaped}"`, 10000);
       } catch (err: any) {
         console.warn(`   ⌨️  macOS type failed: ${err.message?.substring(0, 100)}`);
-        // Fallback: try helper anyway
-        if (this.helper) {
-          await this.helper.type(text);
-        }
+        // Fallback: try helper anyway. With no helper the text was not typed, and the caller must hear it (it reported done).
+        if (!this.helper) throw err;
+        await this.helper.type(text);
       }
       return;
     }
@@ -676,7 +675,7 @@ export class NativeDesktop {
   private async macKeyPress(keyCombo: string): Promise<void> {
     // A system dialog or the lock screen owning the keyboard refuses here (a bare Escape is never checked).
     await this.guardMacKeys(keyCombo);
-    const { MAC_MODIFIER, runAppleScript, hasNonAscii, refuseNonAsciiChord, typeTextMac } = await import('./mac-keyboard');
+    const { MAC_MODIFIER, runAppleScript, hasNonAscii, pressKeyMac, refuseNonAsciiChord, typeTextMac } = await import('./mac-keyboard');
 
     if (keyCombo === '+') {
       await runAppleScript('tell application "System Events" to keystroke "+"', 5000);
@@ -690,11 +689,12 @@ export class NativeDesktop {
     }
     // Modifier names → System Events syntax, by the aliases keys.ts knows (mod / cmd / meta = Cmd, opt = Option). An
     // unknown one is refused before anything is pressed: dropped, `opt+x` typed a plain x.
-    const modUsing = parts.slice(0, -1).map(m => {
+    const modNames = parts.slice(0, -1).map(m => {
       const mod = modifierOf(m, 'darwin');
       if (!mod) throw new Error(`Unknown modifier: "${m}"`);
-      return `${MAC_MODIFIER[mod].name} down`;
+      return MAC_MODIFIER[mod].name;
     });
+    const modUsing = modNames.map(n => `${n} down`);
 
     const specialKeys: Record<string, string> = {
       'return': 'key code 36', 'enter': 'key code 36',
@@ -723,6 +723,14 @@ export class NativeDesktop {
       await typeTextMac(defaultMacAx(), key, 5000);
       return;
     }
+    // The helper's CGEvent keys first (never for a modifier key on its own); System Events when it cannot take this key.
+    if (!bareModifier) {
+      const fast = special ? { code: Number(special.slice('key code '.length)) } : key.length === 1 ? { char: key } : null;
+      if (fast) {
+        const { defaultMacAx } = await import('./mac-ax');
+        if (await pressKeyMac(defaultMacAx(), { ...fast, mods: modNames })) return;
+      }
+    }
     if (special) {
       if (modUsing.length > 0) {
         script = `tell application "System Events" to ${special} using {${modUsing.join(', ')}}`;
@@ -741,11 +749,8 @@ export class NativeDesktop {
       throw new Error(`Unknown key: "${key}"`);
     }
 
-    try {
-      await runAppleScript(script, 5000);
-    } catch (err: any) {
-      console.warn(`   ⌨️  macOS key press failed: ${err.message?.substring(0, 100)}`);
-    }
+    // A failed press is an error, as in MacOSAdapter.keyPress: swallowed, smart_type and shortcuts_run reported it done.
+    await runAppleScript(script, 5000);
   }
 
   /**

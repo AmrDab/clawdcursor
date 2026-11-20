@@ -2,7 +2,8 @@
  * macOS PlatformAdapter — all macOS-specific code lives here.
  *
  * Strategy:
- *   - Keystrokes: osascript + System Events (CGEvent from helper is blocked by TCC)
+ *   - Keystrokes: named keys and letter/digit shortcuts through the ax helper's CGEvent when it is built and may post events
+ *     (CGPreflightPostEventAccess); text through System Events (non-ASCII through the helper's Unicode events); System Events otherwise
  *   - Mouse: nut-js (nut-js mouse events ARE delivered)
  *   - Screenshot: screenshot-helper Swift binary (avoids ReplayKit CPU spin)
  *   - Accessibility: mac-ax.ts (the ax-helper Swift binary, osascript JXA as the fallback)
@@ -41,7 +42,7 @@ import { llmSize } from './coord-scale';
 import { clampRegion } from './grab-image';
 import { wheelUnitsPerNotch } from './wheel';
 import { readMainScreenInfo, readDisplayList } from './mac-screen';
-import { MAC_MODIFIER, MacKeyboardGuard, hasNonAscii, refuseNonAsciiChord, runAppleScript, typeTextMac, utf8ClipboardEnv } from './mac-keyboard';
+import { MAC_MODIFIER, MacKeyboardGuard, hasNonAscii, pressKeyMac, refuseNonAsciiChord, runAppleScript, typeTextMac, utf8ClipboardEnv } from './mac-keyboard';
 import { modifierOf } from './keys';
 import {
   defaultMacAx, MacAxError,
@@ -927,6 +928,11 @@ export class MacOSAdapter implements PlatformAdapter {
       await typeTextMac(this.ax, key, 6_000);
       return;
     }
+    // The helper's CGEvent keys first (never for a modifier key on its own); System Events when it cannot take this key.
+    if (!bareModifier) {
+      const fast = keyCode !== undefined ? { code: keyCode } : key.length === 1 ? { char: key } : null;
+      if (fast && await pressKeyMac(this.ax, { ...fast, mods })) return;
+    }
     let script: string;
     if (keyCode !== undefined) {
       script = `tell application "System Events" to key code ${keyCode}${usingClause}`;
@@ -950,6 +956,7 @@ export class MacOSAdapter implements PlatformAdapter {
     }
     const code = MAC_KEY_CODES[lower];
     if (code !== undefined) {
+      if (await pressKeyMac(this.ax, { code, mods: [], phase: 'down' })) return;
       const script = `tell application "System Events" to key down (key code ${code})`;
       await runAppleScript(script, 3_000).catch(() => {});
       return;
@@ -972,6 +979,7 @@ export class MacOSAdapter implements PlatformAdapter {
     }
     const code = MAC_KEY_CODES[lower];
     if (code !== undefined) {
+      if (await pressKeyMac(this.ax, { code, mods: [], phase: 'up' })) return;
       const script = `tell application "System Events" to key up (key code ${code})`;
       await runAppleScript(script, 3_000).catch(() => {});
       return;
