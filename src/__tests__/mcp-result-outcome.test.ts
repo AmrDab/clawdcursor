@@ -48,6 +48,7 @@ vi.mock('../core/banner', () => ({
 import { createMcpServer, type McpServerLike, type McpToolResult } from '../surface/mcp-server';
 import type { ToolContext } from '../tools/registry';
 import { logger } from '../core/observability/logger';
+import * as path from 'path';
 
 // ── Minimal fake ToolContext — matches mcp-server.test.ts fakeCtx() ──────────
 function fakeCtx(): ToolContext {
@@ -504,5 +505,25 @@ describe('coordinate clicks with none by name are nudged to smart_click, once', 
     await click(); await click();
     for (let i = 0; i < 3; i++) expect(NUDGE.test(text(await scroll()))).toBe(false);
     expect(NUDGE.test(text(await click()))).toBe(true);
+  });
+});
+
+describe("downloads the agent's browser kept", () => {
+  beforeEach(() => {
+    capturedHandlers.clear();
+    vi.clearAllMocks();
+    mockClientCaps.mockReturnValue(undefined);
+    mockHasConsent.mockReturnValue(true);
+  });
+
+  it('are named once, in a block of their own after the result, which stays exactly as it was', async () => {
+    const saved = [path.join('Downloads', 'Hopetoun_falls.jpg')];
+    await createMcpServer({ ctx: { ...fakeCtx(), cdp: { takeSavedDownloads: () => saved.splice(0) } }, compact: true });
+    const system = capturedHandlers.get('system')!;
+    const r = await system({ action: 'build_uri', scheme: 'mailto', path: 'a@b.com' });
+    const texts = r.content.filter(c => c.type === 'text').map(c => (c as { text: string }).text);
+    expect(texts).toEqual(['mailto:a@b.com', `Downloaded to: "${path.join('Downloads', 'Hopetoun_falls.jpg')}"`]);
+    const again = await system({ action: 'build_uri', scheme: 'mailto', path: 'a@b.com' });
+    expect(again.content).toHaveLength(1);
   });
 });

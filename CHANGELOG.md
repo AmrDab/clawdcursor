@@ -5,6 +5,7 @@ All notable changes to Clawd Cursor will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **Downloads from the agent's browser land in your Downloads folder under their own names** (Windows, macOS, and Linux's own Downloads folder), and the next result says where. They went to a hidden temp folder with random names, where the agent could not find or use them.
 - **`browser type` with a trailing newline presses Enter** after typing (and says so), as `computer type` does; the newline is no longer typed into the field.
 - **`browser type` into a wrapper element fills the input inside it** and reads that input back; when nothing editable has focus it fails instead of typing into whatever does.
 - **`browser click` by text prefers an exact match**, then a prefix, then a partial one; it skips hidden and disabled elements, says which element it clicked, and fails with a short list when several partial matches tie.

@@ -41,6 +41,33 @@ import { fenceCdpOnly } from '../core/fence';
 import { quoteScreenText } from '../core/untrusted-screen-content';
 import { guardInputMethods } from './pointer-guard';
 
+/**
+ * The user's Downloads folder: ~/Downloads on every OS, or on Linux the folder user-dirs.dirs names (often localized).
+ * What the agent's browser downloads is kept there under its own name (owner, 2026-11-20: Playwright puts downloads in a
+ * temp folder with random names and no extension, so a downloaded picture could not be found or used).
+ */
+export function downloadsDir(home: string = os.homedir(), platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'linux') {
+    try {
+      const m = /^XDG_DOWNLOAD_DIR="([^"]+)"/m.exec(fs.readFileSync(path.join(home, '.config', 'user-dirs.dirs'), 'utf8'));
+      if (m) return m[1].replace(/^\$HOME/, home);
+    } catch { /* not set: ~/Downloads */ }
+  }
+  return path.join(home, 'Downloads');
+}
+
+/** Where a download goes in `dir`: the site's own file name, made safe, with " (1)", " (2)"… when that name is taken. */
+export function freeDownloadPath(dir: string, suggested: string): string {
+  let name = path.posix.basename(String(suggested ?? '').replace(/\\/g, '/')).replace(/[<>:"|?*\x00-\x1f]/g, '_').trim();
+  if (!name || /^\.+$/.test(name)) name = 'download';
+  const ext = path.extname(name);
+  const stem = name.slice(0, name.length - ext.length);
+  for (let n = 0; ; n++) {
+    const file = path.join(dir, n ? `${stem} (${n})${ext}` : name);
+    if (!fs.existsSync(file)) return file;
+  }
+}
+
 // ── Default CDP port — matches browser-config.ts and tool launch flags ──
 const DEFAULT_CDP_PORT = 9223;
 /** How long an attach-only connect waits for the user's browser to open its port: a host may start it seconds before (#378). */
@@ -257,6 +284,10 @@ export class CDPDriver {
   getConnectionMode(): 'dedicated' | 'attached' | 'unknown' { return this.connectionMode; }
 
   private connectError = '';
+  /** Downloads kept in the user's Downloads folder that no tool result has named yet (takeSavedDownloads). */
+  private savedDownloads: string[] = [];
+  private downloadPages = new WeakSet<Page>();
+  private downloadsTo: () => string = () => downloadsDir();
   /** Why the last connect / ensureConnected failed, in words an agent can act on (#378); '' once connected. */
   getConnectError(): string { return this.connectError; }
 
@@ -345,6 +376,13 @@ export class CDPDriver {
         !BLOCKED_URL_PATTERNS.some(blocked => url.includes(blocked));
 
       const contexts = this.browser.contexts();
+      // Every page's downloads, those opened later included, are kept in the user's Downloads folder (keepDownloads).
+      for (const c of contexts) {
+        try {
+          c.pages().forEach(p => this.keepDownloads(p));
+          c.on('page', p => this.keepDownloads(p));
+        } catch { /* a convenience: it never fails a connect */ }
+      }
       const allPages: Page[] = contexts.flatMap(ctx => ctx.pages());
       const userPages = allPages.filter(p => isUserPage(p.url()));
       // Extension/devtools pages (e.g. a wallet's background UI) are never the
@@ -376,6 +414,29 @@ export class CDPDriver {
       return false;
     }
   }
+
+  /** A finished download of this page is copied to the user's Downloads folder under its own name (downloadsDir). */
+  private keepDownloads(page: Page): void {
+    if (this.downloadPages.has(page)) return;
+    this.downloadPages.add(page);
+    page.on('download', download => {
+      void (async () => {
+        const dir = this.downloadsTo();
+        fs.mkdirSync(dir, { recursive: true });
+        const file = freeDownloadPath(dir, download.suggestedFilename());
+        await download.saveAs(file);   // waits for it to finish
+        this.savedDownloads.push(file);
+      })().catch(() => { /* cancelled or failed: nothing kept */ });
+    });
+  }
+
+  /** The downloads kept since the last time this was asked, for the next tool result to name; emptied. */
+  takeSavedDownloads(): string[] {
+    return this.savedDownloads.splice(0);
+  }
+
+  /** For test code only: where downloads are kept. */
+  __setDownloadsDirForTests(dir: string): void { this.downloadsTo = () => dir; }
 
   /**
    * Ensure a CDP connection exists WITHOUT disturbing the user's own browser.
