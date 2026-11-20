@@ -744,7 +744,7 @@ describe('the full-screen glow is the foreground-mode drawer only', () => {
     expect(ps).not.toContain('new IntPtr(-1)');
   });
 
-  it('with several agent windows the outline is sent them all, the working one first (Windows)', async () => {
+  it('with several agent windows only the one it works in now is outlined (Windows)', async () => {
     const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
     Object.defineProperty(process, 'platform', { value: 'win32' });
     let fg: { processId: number; processName: string; handle: number } = { processId: 100, processName: 'msedge', handle: 0x5a0 };
@@ -755,7 +755,7 @@ describe('the full-screen glow is the foreground-mode drawer only', () => {
       await d.keyPress('a');
       await d.focusWindow({ processId: 300 });
       await d.keyPress('b');
-      expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300 1440 100']);
+      expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300']);   // not "1970 300 1440 100" (owner, 2026-11-19)
     } finally {
       Object.defineProperty(process, 'platform', platform);
       __setForegroundReaderForTests(null);
@@ -774,5 +774,14 @@ describe('the window frame never goes round clawdcursor\'s own windows', () => {
     } finally {
       setOwnUiPids(() => [...controlBanner.overlayPids()]);
     }
+  });
+
+  it('the pill\'s own window is never outlined, even named as the working window', () => {
+    controlBanner.__setSpawnerForTests(() => { const c = Object.assign(new FakeChild(), { pid: 4242 }); spawned.push(c); return c as unknown as ChildProcess; });
+    controlBanner.pin();
+    expect(controlBanner.overlayPids()).toContain(4242);
+    controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
+    controlBanner.setWorkingWindow({ processId: 4242, handle: 0x9f0 });   // the pill's process
+    expect(outlines[0].written).toEqual(['TARGET 1440 100']);
   });
 });

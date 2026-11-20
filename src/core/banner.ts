@@ -7,8 +7,8 @@
  *   - the outline: a thin, click-through amber border around the window the
  *     agent is working in (control.ts workingWindow), and nothing else: no fill,
  *     nothing on the rest of the screen, nothing at all while no window is known.
- *     On Windows every agent window (control.ts agentWindows) has one while it is
- *     visible, in front or not. Spawned/killed in lockstep with the pill;
+ *     Only that one window, while it is visible, in front or not (owner, 2026-11-19: outlines on the agent's earlier
+ *     windows too were overwhelming). Never the pill or another overlay. Spawned/killed in lockstep with the pill;
  *     `TARGET <handle> <pid>` on its stdin names the window, a bare `TARGET` none.
  *   - the glow (Windows, macOS): a click-through amber glow along every screen edge, the FOREGROUND mode of the indicator: up only
  *     while the agent's input goes to the foreground (a guarded keyboard/mouse method, an R2 burst: foreground()) and for
@@ -69,7 +69,7 @@ import { macOverlayBinary } from '../platform/mac-swift-binary';
 import { setBeforePointerPress, setBeforeCapture, setOwnUiPids, isOwnUiPid, setOnAgentInput, setOnAgentPoint, setOnAgentWait, GUARDED_METHODS, isForegroundInput } from '../platform/pointer-guard';
 import type { PauseAnswer, PauseInfo } from './pause-gate';
 import { publishOverlayState, foreignOverlayState } from './overlay-state';
-import { agentWindows, holdControl, isStopped, releaseHold, setOnHold, workingIn, workingWindow, type HoldEvent } from './control';
+import { holdControl, isStopped, releaseHold, setOnHold, workingIn, workingWindow, type HoldEvent } from './control';
 import { appLabel } from './app-label';
 import { burstCount, resetBurstCount, setOnBurst, type BurstEvent } from '../platform/foreground-burst';
 import { logger } from './observability/logger';
@@ -375,14 +375,8 @@ class ControlBanner {
   setWorkingWindow(w: WorkingWindow | undefined): void {
     if (w && isOwnUiPid(w.processId)) return;   // the pill and the other overlays are never framed
     this.working = w;
-    // Windows draws one border per window: the working one, then the agent's other windows that have a handle.
-    // Every OS gets the same multi-window line. Windows and macOS draw a border per window; the Linux drawer reads the
-    // first pair and ignores the rest (one outline there), so it degrades without breaking.
-    const others = w
-      ? agentWindows().filter(a => Number(a.handle) && !isOwnUiPid(a.processId) && Number(a.handle) !== Number(w.handle))
-        .map(a => ` ${outlineWindowNumber(a.handle, a.processId)} ${a.processId}`).join('')
-      : '';
-    const line = w ? `TARGET ${outlineWindowNumber(w.handle, w.processId)} ${w.processId}${others}` : 'TARGET';
+    // The window the agent works in now and no other (owner, 2026-11-19: its earlier windows outlined too were overwhelming).
+    const line = w ? `TARGET ${outlineWindowNumber(w.handle, w.processId)} ${w.processId}` : 'TARGET';
     if (line === this.target) return;
     if (send(this.outlineChild, line)) this.target = line;
   }

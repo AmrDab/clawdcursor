@@ -12,6 +12,7 @@ All notable changes to Clawd Cursor will be documented in this file.
   through it like a marquee; the "·" and "—" no longer show as box-drawing characters. While the agent waits (a wait, or an
   app it started that is still loading) the pill says "waiting" or "waiting for <app> to load". After foreground work it
   says "running in background" without the last foreground act. The pill no longer flashes an amber ring when it appears.
+- **Only the window the agent works in now is outlined.** Its earlier windows no longer keep an outline each.
 - **The agent's drawn pointer shows only for background work.** When it uses the real mouse, your own cursor moves and
   no second pointer follows it.
 - **`smart_click` and `smart_type` find an element by name in the background first**, the way `invoke` does (a window
