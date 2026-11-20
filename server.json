@@ -6,12 +6,12 @@
     "url": "https://github.com/AmrDab/clawdcursor",
     "source": "github"
   },
-  "version": "2.2.0",
+  "version": "2.3.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "clawdcursor",
-      "version": "2.2.0",
+      "version": "2.3.0",
       "transport": {
         "type": "stdio"
       },

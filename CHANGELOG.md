@@ -2,12 +2,41 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
-## [Unreleased]
+## [2.3.0] - 2026-11-20
+
+### Security
+- **Settings in the working directory could start a program and turn off clawdcursor's safeguards (GHSA-cx4w-xx82-f6f6,
+  high).** A `.env` or `.clawdcursor-config.json` in the folder clawdcursor started in could name a program for the pill to
+  start, record consent, hide the on-screen indicator, or turn guards off. Settings now come only from the environment,
+  command-line flags and `~/.clawdcursor`. Affects 2.2.0 and earlier.
+
+### Changed
+- **`window list` shows open apps, not every window title.** It lists each app's process name and pid, with a window count
+  when an app has several windows; the title, bounds and size appear only for windows clawdcursor opened or worked in, and for one app's windows when the
+  call names it (`processName` or `processId`). A
+  document's title can hold private text.
+- **The pill says which mode the agent is in.** `running in background` (the amber outline round its window) or `requires
+  foreground` (the full-screen amber glow while it uses the mouse and keyboard), then what it is doing: `requires
+  foreground · Clicking in Paint`. In the code the two modes are now named `foreground` and `background`.
+- **The pill keeps one small size, and its text is readable on Windows.** Text longer than "running in background" runs
+  through it like a marquee; the "·" and "—" no longer show as box-drawing characters. While the agent waits (a wait, or an
+  app it started that is still loading) the pill says "waiting" or "waiting for <app> to load". After foreground work it
+  says "running in background" without the last foreground act. The pill no longer flashes an amber ring when it appears.
+- **Only the window the agent works in now is outlined.** Its earlier windows no longer keep an outline each.
+- **The agent's drawn pointer shows only for background work.** When it uses the real mouse, your own cursor moves and
+  no second pointer follows it.
+- **`smart_click` and `smart_type` find an element by name in the background first**, the way `invoke` does (a window
+  message, then the element's own action with your window put back), instead of through the older accessibility path
+  that could take the foreground and not give it back.
+- **`smart_click` presses the only element that contains the name.** With exactly one element named like "What's New"
+  for "New", it presses that one and says so; with several, it lists them as before.
+- **Settings come only from the environment, command-line flags and `~/.clawdcursor`.** A `.env` file and a
+  `.clawdcursor-config.json` in the working directory are no longer read, and `CLAWD_DISABLE_VISION` now takes
+  precedence over the config files.
 
 ### Fixed
 - **macOS: a key press or typed text that fails is an error.** On the `smart_type`, `shortcuts_run` and `minimize_window` path it was logged and reported as done.
 - **A read inside a `batch` comes back whole, and so does the step that stops it.** The stopping step ends with its `[failed · CODE · hint · next]` line, as a direct call would. `find` prints its coordinates note after the elements, not before. A batch longer than its step cap is refused before step 1, with the cap and the step count in the message.
-- **Downloads from the agent's browser land in your Downloads folder under their own names** (Windows, macOS, and Linux's own Downloads folder), and the next result says where. They went to a hidden temp folder with random names, where the agent could not find or use them.
 - **Pictures, PDFs, text, audio and video downloaded in the agent's own browser land in your Downloads folder under their own names** (Windows, macOS, and Linux's own Downloads folder), and the next result says where. They went to a hidden temp folder with random names, where the agent could not find or use them. Other file types (programs, scripts, archives) stay there, and file names are made safe.
 - **`browser type` with a trailing newline presses Enter** after typing (and says so), as `computer type` does; the newline is no longer typed into the field.
 - **`browser type` into a wrapper element fills the input inside it** and reads that input back; when nothing editable has focus it fails instead of typing into whatever does.
@@ -31,21 +60,14 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **`open_file` on a path that does not exist fails** instead of saying `Opened`.
 - **The granular `minimize_window` really minimizes**, as `minimize_window_to_taskbar` does; it used to press Win+Down, which
   restored a maximized window.
-
 - **Hints name a tool and its action in words** ("the browser tool, action page_context"), not as call-shaped text such as `browser {"action":"page_context"}`: a host prefixes the tool names, so the bare name was not a tool it had. On the granular surface they name the granular tool.
 - **`within` reaches another top-level window of the same app**, such as a browser's "Restore pages?" bubble, when it matches that window's title (Windows).
 - **When a typed submit is held and the focus is not on a text field, the result says where the focus is** ("the focus is on Pane 'Profiles', not a text field") instead of blaming an autocomplete suggestion.
 - **The setup and doctor hints tell users to register `clawdcursor mcp --compact`.**
-### Changed
-- **`window list` shows open apps, not every window title.** It lists each app's process name and pid, with a window count
-  when an app has several windows; the title, bounds and size appear only for windows clawdcursor opened or worked in, and for one app's windows when the
-  call names it (`processName` or `processId`). A
-  document's title can hold private text.
-
-### Fixed
 - **Unticking "Allow clawdcursor to control this computer" in the Claude Desktop extension now withdraws consent.** The host
   sends `CLAWDCURSOR_CONSENT=false` (or `0`), which removes the recorded consent for that copy; an unset variable changes
   nothing.
+- **A dialog the agent's own action opened is no longer refused as a window switch.** After an action such as "Attach files" opens the app's own Open dialog, input goes to that dialog and the outline follows it; a different app in front is still refused.
 - **A dialog the agent's own action opened is no longer refused as a window switch.** After an action such as "Attach files" opens the app's own Open dialog, input goes to that dialog and the outline follows it, also when the app draws the dialog in another of its processes (Edge) and you have not touched the mouse or keyboard since; a different app in front is still refused.
 - **A takeover no longer says "paused by the user" when they did not press Pause.** While the user is using the computer, a step that needs the keyboard, the mouse or its window in front replies "the user is using the computer" (code `USER_ACTIVE`). The pill's Pause keeps `PAUSED`, and a pause card waiting for an answer is now `PAUSE_PENDING`.
 - **While the agent works in the background, you can use your computer and it keeps working.** A step that needs the keyboard, the mouse or its window in front is not sent while you use them; it answers at once, and the agent goes on by name in the background and tries that step again once you have been idle for 1 s. No wait, no "Paused — your turn" and no Resume click. Only the pill's Pause holds the agent until Resume. Your own click on Resume (the pill, a pause card, after a Stop) never counts as using the computer.
@@ -53,26 +75,6 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **`clawdcursor resume` clears a hold**, not only a stop.
 - **A pause card is withdrawn when the session that asked for it ends.** A card shown by another clawdcursor process now blocks input and window changes only; reading the screen still works.
 - The server instructions say what a waiting reply means: call the same step again, and do not retry a Stop.
-### Changed
-- **The pill says which mode the agent is in.** `running in background` (the amber outline round its window) or `requires
-  foreground` (the full-screen amber glow while it uses the mouse and keyboard), then what it is doing: `requires
-  foreground · Clicking in Paint`. In the code the two modes are now named `foreground` and `background`.
-- **The pill keeps one small size, and its text is readable on Windows.** Text longer than "running in background" runs
-  through it like a marquee; the "·" and "—" no longer show as box-drawing characters. While the agent waits (a wait, or an
-  app it started that is still loading) the pill says "waiting" or "waiting for <app> to load". After foreground work it
-  says "running in background" without the last foreground act. The pill no longer flashes an amber ring when it appears.
-- **Only the window the agent works in now is outlined.** Its earlier windows no longer keep an outline each.
-- **The agent's drawn pointer shows only for background work.** When it uses the real mouse, your own cursor moves and
-  no second pointer follows it.
-- **`smart_click` and `smart_type` find an element by name in the background first**, the way `invoke` does (a window
-  message, then the element's own action with your window put back), instead of through the older accessibility path
-  that could take the foreground and not give it back.
-- **`smart_click` presses the only element that contains the name.** With exactly one element named like "What's New"
-  for "New", it presses that one and says so; with several, it lists them as before.
-### Changed
-- **Settings come only from the environment, command-line flags and `~/.clawdcursor`.** A `.env` file and a
-  `.clawdcursor-config.json` in the working directory are no longer read, and `CLAWD_DISABLE_VISION` now takes
-  precedence over the config files.
 
 ## [2.2.0] - 2026-11-18
 
