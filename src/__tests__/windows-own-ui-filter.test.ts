@@ -17,7 +17,7 @@ vi.mock('sharp', () => ({ default: vi.fn() }));
 
 const runCalls: Array<Record<string, unknown>> = [];
 const PILL = { processId: 777, processName: 'powershell', title: '', bounds: { x: 900, y: 0, width: 430, height: 40 }, isMinimized: false };
-const SHELL = { processId: 888, processName: 'powershell', title: 'Windows PowerShell', bounds: { x: 0, y: 0, width: 800, height: 600 }, isMinimized: false };
+const SHELL = { processId: 888, handle: 5001, processName: 'powershell', title: 'Windows PowerShell', bounds: { x: 0, y: 0, width: 800, height: 600 }, isMinimized: false };
 
 vi.mock('../platform/ps-runner', () => ({
   psRunner: {
@@ -46,7 +46,7 @@ describe('Windows: the pill is never a lookup candidate', () => {
   it('focus by the shared interpreter name lands on the user\'s shell, never the pill', async () => {
     expect(await new WindowsAdapter().focusWindow({ processName: 'powershell' })).toBe(true);
     const focus = runCalls.find(c => c.cmd === 'focus-window');
-    expect(focus?.processId).toBe(SHELL.processId);
+    expect(focus?.handle).toBe(SHELL.handle);   // the one matching window, by its handle: the pill is not a candidate
   });
 
   // The focus_window tool resolves names through the a11y bridge, not the adapter: the filter sits at the source.

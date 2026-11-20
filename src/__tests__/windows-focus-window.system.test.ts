@@ -39,6 +39,7 @@ describe.runIf(process.platform === 'win32')('ps-bridge focus-window (run for re
     ownedByTitle: `[ScreenPM]::Owners[200] = 100; [Win32UIA]::Foreground = 200\nFocus @($notepad) @((Win 'Save As' 200 7)) @{ title = 'save as' }`,
     pidOnly: `[ScreenPM]::Owners[200] = 100; [Win32UIA]::Foreground = 100\nFocus @($notepad) @((Win 'Save As' 200 7)) @{ processId = 7 }`,
     typedTitle: `[Win32UIA]::Foreground = 200\nFocus @((Win 'Other' 100 1), (Win $edgeTitle 200 2)) @() @{ title = 'CC Test Page - [InPrivate] - Microsoft Edge' }`,
+    pidTitleNoMatch: `[Win32UIA]::Foreground = 100\nFocus @($notepad) @() @{ processId = 7; title = 'Restore pages?' }`,
     typedTitleAndPid: `[Win32UIA]::Foreground = 300\nFocus @((Win 'Other' 100 2), (Win 'Notes' 200 2), (Win $edgeTitle 300 2)) @() @{ processId = 2; title = 'microsoft  EDGE' }`,
   };
   const keys = Object.keys(CASES) as Array<keyof typeof CASES>;
@@ -79,5 +80,12 @@ describe.runIf(process.platform === 'win32')('ps-bridge focus-window (run for re
   it('the title as typed matches a title with a zero-width space, alone or with the pid', () => {
     expect(r.typedTitle.reply).toMatchObject({ success: true, handle: 200 });
     expect(r.typedTitleAndPid.reply).toMatchObject({ success: true, handle: 300 });
+  });
+
+  // Audit 2026-11-19 (20): a pid with a title that matched nothing fell back to the pid's first window and said it matched.
+  it('a pid with a title that matches none of its windows is "not found", not the process\'s first window', () => {
+    expect(r.pidTitleNoMatch.reply).toMatchObject({ success: false });
+    expect(r.pidTitleNoMatch.reply.error).toContain('Window not found');
+    expect(r.pidTitleNoMatch.calls).toEqual([]);
   });
 });

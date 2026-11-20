@@ -11,11 +11,10 @@ import { isBrowserProcess } from '../platform/browser-config';
 import { windowTextIncludes } from '../platform/window-text';
 import { narrowedScopeNote } from './scope-note';
 import { untrusted } from '../core/miss-text';
-import { isGuardRefusal } from '../core/control';
 import { wakeForNameSearch, onTopOfLine } from './name-search-help';
 import { copyAllText } from '../platform/copy-all-text';
 import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, CUT_VALUE_NEXT_STEP, cdpBrowserPid, cdpStepFor, nameMissHint, shownValue, shownHelp } from './blind-hints';
-import { wrapUntrustedScreenContent, screenJson, quoteScreenText } from '../core/untrusted-screen-content';
+import { wrapUntrustedScreenContent, screenJson } from '../core/untrusted-screen-content';
 
 /**
  * The most characters copy_all_text returns in one result. A host may keep a large tool result out of the conversation:
@@ -489,23 +488,13 @@ export function getA11yTools(): ToolDefinition[] {
       handler: async ({ processName, processId, title }, ctx) => {
         await ctx.ensureInitialized();
 
-        const windows = await ctx.a11y.getWindows(true);
-        let target = (windows ?? []).find((w: any) => {
-          if (processId && w.processId === processId) return true;
-          if (processName && w.processName.toLowerCase().includes(processName.toLowerCase())) return true;
-          if (title && windowTextIncludes(w.title, title)) return true;
-          return false;
-        });
-
-        if (!target) return { text: `No window found matching: ${processName || processId || title}` };
-
-        // Focus first (required for minimize shortcut), then minimize
-        await ctx.a11y.focusWindow(undefined, target.processId).catch((e: unknown) => { if (isGuardRefusal(e)) throw e; });
-        await new Promise(r => setTimeout(r, 200));
-        const minimizeKey = process.platform === 'darwin' ? 'cmd+m' : 'super+down';
-        await ctx.desktop.keyPress(minimizeKey);
-
-        return { text: `Minimized: ${quoteScreenText(String(target.title ?? ''))} [${quoteScreenText(String(target.processName ?? ''))}] pid:${target.processId}` };
+        // The real minimize (the same as minimize_window_to_taskbar): the old Win+Down keystroke RESTORED a maximized window,
+        // and Windows reported "Minimized". The window is matched by every field given and named in the reply.
+        if (!ctx.platform) return { text: 'minimize_window: no platform adapter is available.', isError: true };
+        const query = { ...(processName ? { processName } : {}), ...(processId ? { processId } : {}), ...(title ? { title } : {}) };
+        const ok = await ctx.platform.setWindowState('minimize', Object.keys(query).length ? query : undefined);
+        const note = ctx.platform.takeWindowNote?.();
+        return ok ? { text: note ?? 'Minimized window.' } : { text: note ?? 'Minimize request failed.', isError: true };
       },
     },
   ];

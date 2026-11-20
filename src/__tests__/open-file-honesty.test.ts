@@ -16,7 +16,12 @@ import type { ToolContext } from '../tools/types';
 const openFile = getExtraTools().find(t => t.name === 'open_file')!;
 
 const dir = join(tmpdir(), `clawd-of-${process.pid}`);
-beforeAll(async () => { await fs.mkdir(dir, { recursive: true }); });
+const SAM = join(dir, "Sam's $notes.txt");
+beforeAll(async () => {
+  await fs.mkdir(dir, { recursive: true });
+  // open_file stats the path first: these are the files the tests below open.
+  for (const f of ['report.pdf', "Sam's $notes.txt", 'a.txt', 'nope']) await fs.writeFile(join(dir, f), '');
+});
 afterAll(async () => { await fs.rm(dir, { recursive: true, force: true }); });
 
 function ctx(launchApp: any): ToolContext {
@@ -95,23 +100,37 @@ describe('open_file — a refused path says why; macOS and Linux go through the 
     ({ ensureInitialized: async () => {}, platform: { platform, launchApp: vi.fn(launchApp) } } as unknown as ToolContext);
 
   it('Windows: the adapter\'s refusal reaches the agent', async () => {
-    const r = await openFile.handler({ path: 'C:\\x\\a"b.txt' }, ctx(async () => { throw new Error('launchApp: the path or URL to open contains a double quote or a control character'); }));
+    const r = await openFile.handler({ path: join(dir, 'a.txt') }, ctx(async () => { throw new Error('launchApp: the path or URL to open contains a double quote or a control character'); }));
     expect(r.isError).toBe(true);
     expect(r.text).toMatch(/double quote or a control character/);
   });
 
   it.each([['darwin', 'open'], ['linux', 'xdg-open']])('%s: hands the path to `%s`, and claims no window', async (platform, opener) => {
     const spy = vi.fn(async () => ({}));
-    const r = await openFile.handler({ path: "/home/x/Sam's $notes.txt" }, tool(platform, spy));
-    expect(spy).toHaveBeenCalledWith(opener, { url: "/home/x/Sam's $notes.txt" });
+    const r = await openFile.handler({ path: SAM }, tool(platform, spy));
+    expect(spy).toHaveBeenCalledWith(opener, { url: SAM });
     expect(r.isError).toBeFalsy();
     expect(r.text).toMatch(/^Opened: .*no window was checked/);
     expect(r.text).not.toMatch(/list_windows/);
   });
 
   it.each([['darwin'], ['linux']])('%s: the opener\'s failure is the result', async (platform) => {
-    const r = await openFile.handler({ path: '/nope' }, tool(platform, async () => { throw new Error('The file /nope does not exist.'); }));
+    const r = await openFile.handler({ path: join(dir, 'nope') }, tool(platform, async () => { throw new Error('The file /nope does not exist.'); }));
     expect(r.isError).toBe(true);
     expect(r.text).toMatch(/does not exist/);
+  });
+});
+
+// Audit 2026-11-19 (27): a path that does not exist said "Opened: <path>".
+describe('open_file — a path that is not there fails, on every platform', () => {
+  it.each(['win32', 'darwin', 'linux'])('%s: stats first, and never hands a missing path to the opener', async (platform) => {
+    const launchApp = vi.fn(async () => ({ title: 'x' }));
+    const c = { ensureInitialized: async () => {}, platform: { platform, launchApp } } as unknown as ToolContext;
+    for (const path of [join(dir, 'missing.docx'), join(dir, 'no-such-folder', 'a.txt')]) {
+      const r = await openFile.handler({ path }, c);
+      expect(r.isError).toBe(true);
+      expect(r.text).toBe(`open_file failed: no such file or folder: ${path}`);
+    }
+    expect(launchApp).not.toHaveBeenCalled();
   });
 });

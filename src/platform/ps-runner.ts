@@ -28,7 +28,8 @@ interface PendingCall {
   command: Record<string, unknown>;
   resolve: (value: unknown) => void;
   reject:  (reason: unknown) => void;
-  timer:   ReturnType<typeof setTimeout>;
+  /** Set when the command is sent to the bridge, not when it is queued: time spent waiting is not the command's. */
+  timer?:  ReturnType<typeof setTimeout>;
 }
 
 export class PSRunner {
@@ -157,19 +158,7 @@ export class PSRunner {
         reject(new Error(`PSRunner queue full (${MAX_QUEUE_SIZE}) — backpressure. Try again later.`));
         return;
       }
-      const call: PendingCall = {
-        command,
-        resolve,
-        reject,
-        timer: setTimeout(() => {
-          console.error(`[PSBridge] Command timeout after ${CALL_TIMEOUT}ms: ${String(command.cmd)}`);
-          reject(new Error(`PSRunner timeout: ${String(command.cmd)}`));
-          // The bridge is still busy with THIS command. Sending the next one
-          // would make its late reply resolve the wrong call (no request ids),
-          // so tear the process down; the next run() starts a fresh bridge.
-          if (this.current === call) this._teardownAfterTimeout();
-        }, CALL_TIMEOUT),
-      };
+      const call: PendingCall = { command, resolve, reject };
       this.queue.push(call);
       this._drain();
     });
@@ -196,12 +185,22 @@ export class PSRunner {
 
   private _drain(): void {
     if (this.current || this.queue.length === 0 || !this.proc || this.dead) return;
-    this.current = this.queue.shift()!;
+    const call = this.current = this.queue.shift()!;
+    call.timer = setTimeout(() => {
+      console.error(`[PSBridge] Command timeout after ${CALL_TIMEOUT}ms: ${String(call.command.cmd)}`);
+      call.reject(new Error(`PSRunner timeout: ${String(call.command.cmd)}`));
+      // A call that timed out must never run later (an invoke reported as TIMEOUT that still acts, then is retried).
+      const at = this.queue.indexOf(call);
+      if (at >= 0) this.queue.splice(at, 1);
+      // The bridge is still busy with THIS command. Sending the next one
+      // would make its late reply resolve the wrong call (no request ids),
+      // so tear the process down; the next run() starts a fresh bridge.
+      if (this.current === call) this._teardownAfterTimeout();
+    }, CALL_TIMEOUT);
     try {
       const line = JSON.stringify(this.current.command) + '\n';
       this.proc.stdin!.write(line);
     } catch (err) {
-      const call = this.current;
       this.current = null;
       clearTimeout(call.timer);
       call.reject(err);

@@ -31,7 +31,7 @@ import {
 import { psRunner } from './ps-runner';
 import { withGiveBack } from './give-back';
 import { setWindowsClipboard } from './ps-input';
-import { modifierOf, normalizeKey } from './keys';
+import { modifierOf, normalizeKey, splitCombo } from './keys';
 import { sharpFromGrab } from './grab-image';
 import type {
   PlatformAdapter,
@@ -61,6 +61,8 @@ import { llmSize } from './coord-scale';
 import { setWorkingPoint, onAnyDisplay } from './display-target';
 import { wheelUnitsPerNotch } from './wheel';
 import { normalizeWindowText, windowTextIncludes } from './window-text';
+import { matchWindows, selectionProblem, describeWindow } from './window-match';
+import { sleep } from '../sleep';
 import { structuredMissFields, targetOf } from '../core/miss-text';
 import { psOpts, powershellExe, windowsDirExe } from './ps-spawn';
 import { markStep, timeStep } from '../core/observability/steps';
@@ -413,14 +415,37 @@ export class WindowsAdapter implements PlatformAdapter {
     return f;
   }
 
+  /** What the last focusWindow / setWindowState acted on, or why it did not: the reply names the window. Taken once. */
+  private windowNote: string | null = null;
+  takeWindowNote(): string | null {
+    const n = this.windowNote;
+    this.windowNote = null;
+    return n;
+  }
+
   async focusWindow(query: { processName?: string; processId?: number; title?: string; handle?: number }): Promise<boolean> {
     this.focusFailure = null;
+    this.windowNote = null;
     // An exact window handle names the window by itself: nothing else is passed on, so nothing else can match.
     const byHandle = query.handle !== undefined;
     if (byHandle && !(Number.isInteger(query.handle) && (query.handle as number) > 0)) { this.focusFailure = 'The window handle is not a positive integer.'; return false; }
     let processId = byHandle ? undefined : query.processId;
     let title = byHandle ? undefined : query.title;
     if (byHandle) query = { handle: query.handle };
+
+    // Every given field must match one window (AND). Two or more is an error that lists them, not the first of them.
+    if (!byHandle && (processId !== undefined || title || query.processName)) {
+      const sel = { processName: query.processName, processId, title };
+      const matches = matchWindows(await this.listWindows(), sel);
+      // A title that several windows hold is a guess, so it is an error that lists them. An app named alone (a pid or a
+      // process name) means "bring that app up": its first window, as before, named in the reply. Close stays strict.
+      if (matches.length > 1 && title) { this.focusFailure = selectionProblem(sel, matches); return false; }
+      if (matches.length === 1 && typeof matches[0].handle === 'number' && matches[0].handle > 0) {
+        const ok = await this.focusWindow({ handle: matches[0].handle });
+        if (ok) this.windowNote = `Focused window ${describeWindow(matches[0])}.`;
+        return ok;
+      }
+    }
 
     if (processId === undefined && query.processName) {
       const target = query.processName.toLowerCase();
@@ -461,6 +486,7 @@ export class WindowsAdapter implements PlatformAdapter {
         return false;
       }
       const focusedPid = typeof result.processId === 'number' ? result.processId : processId;
+      this.windowNote = `Focused window "${result.title ?? title ?? ''}"${focusedPid !== undefined ? ` pid:${focusedPid}` : ''}.`;
       if (focusedPid !== undefined) {
         this.lastFocused = { processId: focusedPid, processName: query.processName, title: typeof result.title === 'string' ? result.title : title };
       }
@@ -482,26 +508,30 @@ export class WindowsAdapter implements PlatformAdapter {
     // We drive the transition through a single PowerShell
     // call that wraps Win32 ShowWindow / PostMessage so we don't depend
     // on focus timing of a key-press chord.
+    this.windowNote = null;
     let pid: number | undefined;
     let hwnd: number | undefined;
+    let named: WindowInfo | undefined;   // the window acted on, for the reply
 
     // An exact window handle is the target by itself (the handle is written into the script below: an integer or nothing).
     if (query?.handle !== undefined) {
       if (!Number.isInteger(query.handle) || query.handle <= 0) return false;
       hwnd = query.handle;
+      named = (await this.listWindows()).find(w => w.handle === hwnd);
     } else if (query) {
       // The pid is written into the script below. A tool step (batch) can hand over any JSON, so anything but an integer is
       // refused rather than written there (GHSA-9ppf-38v8-h97v).
       if (query.processId !== undefined && !Number.isInteger(query.processId)) return false;
-      // Prefer pid resolution when we can — cheaper than listWindows.
-      pid = query.processId;
-      if (pid === undefined) {
-        const match = await this.resolveWindow(query);
-        if (match) {
-          pid = match.processId;
-          const handle = (match as any).handle;
-          if (typeof handle === 'number') hwnd = handle;
-        }
+      // Every given field must match (AND), into ONE window handle. Two or more matches is an error that lists them:
+      // close {processName:"chrome", title:"Restore pages?"} used to close the first chrome window of all.
+      const sel = { processName: query.processName, processId: query.processId, title: query.title };
+      if (sel.processId !== undefined || sel.title || sel.processName) {
+        const matches = matchWindows(await this.listWindows(), sel);
+        const problem = selectionProblem(sel, matches);
+        if (problem) { this.windowNote = problem; return false; }
+        named = matches[0];
+        pid = named.processId;
+        if (typeof named.handle === 'number') hwnd = named.handle;
       }
 
       // FAIL CLOSED. A caller that named a window and whose name matched
@@ -516,6 +546,10 @@ export class WindowsAdapter implements PlatformAdapter {
         (query.title !== undefined && query.title !== '') ||
         (query.processName !== undefined && query.processName !== '');
       if (hadSelector && pid === undefined && hwnd === undefined) return false;
+    } else {
+      // No window named: the one in front. Its handle is the target, so the reply can name it.
+      named = await this.getActiveWindow().catch(() => null) ?? undefined;
+      if (typeof named?.handle === 'number') hwnd = named.handle;
     }
 
     const showCmd = state === 'maximize' ? 3       // SW_MAXIMIZE
@@ -543,7 +577,16 @@ export class WindowsAdapter implements PlatformAdapter {
           `$h = ${target};` +
           'if ($h -ne [System.IntPtr]::Zero) { [Win32.NativeMethods]::PostMessage($h, 0x0010, [System.IntPtr]::Zero, [System.IntPtr]::Zero) | Out-Null; "ok" } else { "no-window" }';
         const { stdout } = await execFileAsync(powershellExe(), ['-NoProfile', '-Command', ps], psOpts({ timeout: PS_TIMEOUT_MS }));
-        return stdout.trim() === 'ok';
+        if (stdout.trim() !== 'ok') return false;
+        // A posted request is not a closed window: give it a moment and look.
+        const who = named ? describeWindow(named) : 'the window';
+        if (hwnd === undefined) { this.windowNote = `Close request posted to ${who}.`; return true; }
+        await sleep(1000);
+        const stillOpen = (await this.listWindows()).some(w => w.handle === hwnd);
+        this.windowNote = stillOpen
+          ? `Sent close to ${who}, but it is still open after 1 s (it may be asking to save or confirm: look at the screen).`
+          : `Closed ${who}.`;
+        return true;
       }
 
       if (showCmd !== null) {
@@ -602,8 +645,13 @@ export class WindowsAdapter implements PlatformAdapter {
           '    $ok = $true } }' +
           '  if ($ok) { "ok" } else { "no-window" } }';
         const { stdout } = await execFileAsync(powershellExe(), ['-NoProfile', '-Command', ps],
-          psOpts({ timeout: PS_TIMEOUT_MS, env: { ...process.env, CLAWD_PS_TITLE: normalizeWindowText(query?.title) } }));
-        return stdout.trim() === 'ok';
+          psOpts({ timeout: PS_TIMEOUT_MS, env: { ...process.env,
+            // A resolved handle is the target: the script must not look the window up again by its title (the first
+            // window anywhere with that text), which could be another app's.
+            CLAWD_PS_TITLE: hwnd !== undefined && named ? '' : normalizeWindowText(query?.title) } }));
+        const done = stdout.trim() === 'ok';
+        if (done && named) this.windowNote = `${state === 'minimize' ? 'Minimized' : state === 'maximize' ? 'Maximized' : 'Restored'} window ${describeWindow(named)}.`;
+        return done;
       }
 
       return false;
@@ -718,8 +766,9 @@ export class WindowsAdapter implements PlatformAdapter {
       for (const n of nodes) this.flattenTree(n, flat);
       await this.flagOffscreen(flat);
       return flat;
-    } catch {
-      return [];
+    } catch (err) {
+      // A read that timed out or crashed is not an empty window: an empty result sends the agent to "custom canvas" and pixels.
+      throw new Error(`UI tree read failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -971,7 +1020,9 @@ export class WindowsAdapter implements PlatformAdapter {
           ...(gaveBack ? { gaveBack: true } : {}),
         } : undefined,
       };
-    } catch {
+    } catch (err) {
+      // A bridge timeout is not "element not found": the agent must hear it, and not retry the act blind.
+      if (/timeout|timed out/i.test(err instanceof Error ? err.message : String(err))) throw err;
       return { success: false };
     }
   }
@@ -1241,7 +1292,7 @@ export class WindowsAdapter implements PlatformAdapter {
       return;
     }
 
-    const parts = combo.split('+').map(s => s.trim()).filter(Boolean);
+    const parts = splitCombo(combo);
     if (parts.length === 0) return;
 
     const normalized = parts.map(p => modifierOf(p, 'win32') ?? p);

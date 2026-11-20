@@ -160,7 +160,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
     paramDescriptions: {
       x: 'X coordinate in image-space',
       y: 'Y coordinate in image-space',
-      button: 'Mouse button to click: "left" (default) or "right"',
+      button: 'Mouse button to click: "left" (default), "right" or "middle"',
     },
   },
 

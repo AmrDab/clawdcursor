@@ -17,6 +17,7 @@ import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength } f
 import type { InvokeAction, UiElement } from '../../platform/types';
 import { ocrEngine } from '../../platform/ocr-engine';
 import { selectOption, selectedResult } from '../../platform/select-option';
+import { comboSequence } from '../../platform/keys';
 import { ownsPoint } from '../click-owner';
 import { SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, drawnControlsLine, SPARSE_NEXT_STEP, isSparseTree, CUT_VALUE_NEXT_STEP, cdpStepFor, cdpBrowserPid } from '../blind-hints';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
@@ -254,9 +255,8 @@ export function buildUnifiedTools(): UnifiedTool[] {
             return { success: true, text: `Clicked ${plan.element.id} at its bounds center${plan.offView ? ' (scrolled into view first)' : ''}.`, targetLabel: plan.element.id };
           }
         }
-        // `automationId` is accepted for MCP backward-compat but the PlatformAdapter
-        // invokeElement interface does not expose automationId filtering — it is used
-        // only as a name alias when name is absent.
+        // `automationId` goes to the adapter as an id (Windows UIA AutomationId, macOS AXIdentifier), never as a name: an id
+        // looked up as a name always misses. `name` below is only what the reply calls the element.
         const rawName = typeof args.name === 'string' ? args.name : '';
         const automationId = typeof args.automationId === 'string' ? args.automationId : undefined;
         const name = rawName || automationId || '';
@@ -286,7 +286,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
         // strict — the agent that asked to expand never silently gets a select.
         // Pure adapter-string retries → works on every OS with zero per-OS code,
         // and only the failing path pays the extra round-trips.
-        const page = action === 'click' ? await cdpOf(ctx, processId) : null;   // see set_field_value
+        const page = action === 'click' && rawName ? await cdpOf(ctx, processId) : null;   // see set_field_value
         if (page && (await page.clickByText(name).catch(() => null))?.success) {
           ctx.platform.noteRoute?.(CDP_ROUTE);
           return { success: true, text: `Invoked ${quoteScreenText(name)} via the page (browser).`, targetLabel: name };
@@ -294,7 +294,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
         const ladder: InvokeAction[] = action === 'click' ? ['click', 'select', 'toggle'] : [action];
         await wakeForNameSearch(ctx.platform, processId);
         const { res, used } = await runActivationLadder(
-          (a) => ctx.platform.invokeElement({ name, controlType, processId, action: a, value, within }), ladder);
+          (a) => ctx.platform.invokeElement({ ...(rawName ? { name: rawName } : {}), ...(automationId ? { automationId } : {}), controlType, processId, action: a, value, within }), ladder);
         // Found but no pattern took: click the surfaced bounds centre (same
         // fallback the el_NN path and smart_click already have). Live
         // regression 2026-10: `find` saw the Button, invoke reported "missed".
@@ -690,8 +690,8 @@ export function buildUnifiedTools(): UnifiedTool[] {
             items: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'] },
           },
           interval_ms: { type: 'number', description: 'With path: milliseconds between clicks (default 100, max 5000).' },
-          button: { type: 'string', enum: ['left', 'right'] },
-          count: { type: 'number', description: '1=single, 2=double' },
+          button: { type: 'string', enum: ['left', 'right', 'middle'] },
+          count: { type: 'number', description: '1=single (default), 2=double, 3=triple' },
           space: COORD_SPACE_SCHEMA,
           expect: EXPECT_SCHEMA,
         },
@@ -699,13 +699,14 @@ export function buildUnifiedTools(): UnifiedTool[] {
       },
       changesScreen: true,
       async execute(args, ctx) {
+        const how = clickHow(args);
+        if ('error' in how) return { success: false, isError: true, text: how.error };
         if (args.path !== undefined && args.path !== null) return clickPath(args, ctx);
         const { x: ix, y: iy, warning } = coerceCoord(args.x, args.y);
         if (!Number.isFinite(ix) || !Number.isFinite(iy)) {
           return { success: false, isError: true, text: `click: x/y must be finite numbers, got x=${JSON.stringify(args.x)} y=${JSON.stringify(args.y)}` };
         }
-        const button = args.button === 'right' ? 'right' : 'left';
-        const count = args.count === 2 ? 2 : 1;
+        const { button, count } = how;
         const space = pointerSpace(args);
         const scale = space === 'image' ? imageScale(ctx) : 1;
         // Image coords go through the last frame (any monitor); screen coords pass through.
@@ -898,7 +899,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
           }
         }
         // Read the field back: say whether it shows the text — before Return.
-        const rb = body ? await readBackTyped(() => ctx.platform.getFocusedElement(), body, { submit }) : { result: 'unknown' as const };
+        const rb = body ? await readBackTyped(() => ctx.platform.getFocusedElement(), body, { submit, exact: true }) : { result: 'unknown' as const };
         // The verdict sits inside the leading "(…)", before any quoted text or window title, so content can never pose as
         // it (result-codes reads it from there).
         // Characters as a person counts them (an emoji is one), not UTF-16 units.
@@ -922,7 +923,9 @@ export function buildUnifiedTools(): UnifiedTool[] {
           };
         }
         if (submit) await ctx.platform.keyPress('Return');
-        const note = empty ? ` ⚠ ${EMPTY_AFTER_TYPING}` : rb.result === 'suffix' || rb.result === 'mismatch'
+        const note = empty ? ` ⚠ ${EMPTY_AFTER_TYPING}` : rb.result === 'suffix' && rb.value !== undefined
+          ? ` ⚠ read back: the field now holds ${wrapUntrustedScreenContent(truncate(rb.value, 80))} (not only what was typed). If it should hold only this, select the whole field and type again.`
+          : rb.result === 'suffix' || rb.result === 'mismatch'
           ? ` ⚠ read back: the field shows different text (an autocomplete suggestion, or the field reformatted it); check it before going on.${fieldShows}`
           : '';
         return { success: true, text: `${shown}${note}${inputWarningNote(ctx)}` };
@@ -967,8 +970,8 @@ export function buildUnifiedTools(): UnifiedTool[] {
           return { success: false, isError: true, text: 'key: "repeat" must be a whole number from 1 to 100.' };
         }
         const input = raw.trim();
-        // "+" joins a chord; whitespace separates combos pressed in sequence.
-        const combos = input.split(/\s+/);
+        // "+" joins a chord (spaces around it are part of it: "ctrl + s" is ctrl+s); whitespace separates combos pressed in sequence.
+        const combos = comboSequence(input);
         // The hard key list (lock / log out / secure attention) is refused in the input layer, for every
         // caller: platform/hard-keys.ts, called from guardInputMethods.
         ctx.platform.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
@@ -1001,7 +1004,9 @@ export function buildUnifiedTools(): UnifiedTool[] {
         const q = buildWinQuery(args) ?? {};
         const ok = await ctx.platform.focusWindow(q);
         await sleep(250);
-        return { success: ok, text: ok ? 'Focused matching window.' : ctx.platform.takeFocusFailure?.() ?? 'No matching window found.' };
+        // The reply names the window it focused, or says why none (no match, or the several that matched).
+        const note = ctx.platform.takeWindowNote?.() ?? null;
+        return { success: ok, text: ok ? note ?? 'Focused matching window.' : ctx.platform.takeFocusFailure?.() ?? 'No matching window found.' };
       },
     },
 
@@ -1022,7 +1027,8 @@ export function buildUnifiedTools(): UnifiedTool[] {
       async execute(args, ctx) {
         const q = buildWinQuery(args);
         const ok = await ctx.platform.setWindowState('maximize', q);
-        return { success: ok, text: ok ? 'Maximized window.' : 'Maximize request ignored.' };
+        const note = ctx.platform.takeWindowNote?.();
+        return { success: ok, text: note ?? (ok ? 'Maximized window.' : 'Maximize request ignored.') };
       },
     },
 
@@ -1042,7 +1048,8 @@ export function buildUnifiedTools(): UnifiedTool[] {
       async execute(args, ctx) {
         const q = buildWinQuery(args);
         const ok = await ctx.platform.setWindowState('minimize', q);
-        return { success: ok, text: ok ? 'Minimized window.' : 'Minimize request failed.' };
+        const note = ctx.platform.takeWindowNote?.();
+        return { success: ok, text: note ?? (ok ? 'Minimized window.' : 'Minimize request failed.') };
       },
     },
 
@@ -1062,7 +1069,8 @@ export function buildUnifiedTools(): UnifiedTool[] {
       async execute(args, ctx) {
         const q = buildWinQuery(args);
         const ok = await ctx.platform.setWindowState('normal', q);
-        return { success: ok, text: ok ? 'Restored window.' : 'Restore request failed.' };
+        const note = ctx.platform.takeWindowNote?.();
+        return { success: ok, text: note ?? (ok ? 'Restored window.' : 'Restore request failed.') };
       },
     },
 
@@ -1082,7 +1090,9 @@ export function buildUnifiedTools(): UnifiedTool[] {
       async execute(args, ctx) {
         const q = buildWinQuery(args);
         const ok = await ctx.platform.setWindowState('close', q);
-        return { success: ok, text: ok ? 'Close request posted.' : 'Close request failed.', targetLabel: 'close_window' };
+        // The note names the window and says whether it closed or is still open; or lists the windows that matched.
+        const note = ctx.platform.takeWindowNote?.();
+        return { success: ok, text: note ?? (ok ? 'Close request posted.' : 'Close request failed.'), targetLabel: 'close_window' };
       },
     },
 
@@ -1690,6 +1700,15 @@ function focusBreadcrumb(before: WindowRead, after: WindowRead): string {
 
 const PATH_MAX_POINTS = 100;
 const PATH_MAX_MS = 30_000;
+/** The button and click count a click was asked for; one the adapters cannot send is refused, not turned into a left single click. */
+function clickHow(args: Record<string, unknown>): { button: 'left' | 'right' | 'middle'; count: 1 | 2 | 3 } | { error: string } {
+  const button = args.button ?? 'left';
+  if (button !== 'left' && button !== 'right' && button !== 'middle') return { error: `click: button must be "left", "right" or "middle", got ${JSON.stringify(args.button)}` };
+  const count = args.count ?? 1;
+  if (count !== 1 && count !== 2 && count !== 3) return { error: `click: count must be 1, 2 or 3, got ${JSON.stringify(args.count)}` };
+  return { button, count };
+}
+
 /**
  * click with `path`: one click per point, in order, `interval_ms` apart. Each mouseClick goes through the input guard, so
  * the user's Stop (and a window change) refuses the next point; the reply then says how many landed first.
@@ -1701,8 +1720,9 @@ async function clickPath(args: Record<string, unknown>, ctx: AgentToolContext) {
     return { success: false, isError: true, text: 'click: `path` must be a non-empty array of {x,y} points with finite coords' };
   }
   const points = pts as Array<{ x: unknown; y: unknown }>;
-  const button = args.button === 'right' ? 'right' : 'left';
-  const count = args.count === 2 ? 2 : 1;
+  const how = clickHow(args);
+  if ('error' in how) return { success: false, isError: true, text: how.error };
+  const { button, count } = how;
   const interval = typeof args.interval_ms === 'number' && args.interval_ms >= 0 ? Math.min(5000, args.interval_ms) : 100;
   // One call must end well inside a client's request timeout, or the client gives up while clicks keep landing.
   if (points.length > PATH_MAX_POINTS || points.length * interval > PATH_MAX_MS) {

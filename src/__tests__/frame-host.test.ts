@@ -397,11 +397,11 @@ describe('window focus by process name finds a Store app (#361)', () => {
       expect(focusCalls()[0].processId).toBeUndefined();
     });
   }
-  it('an ordinary process still goes by its pid', async () => {
+  it('an ordinary process is focused by the handle of its one window', async () => {
     run.mockImplementation(async (cmd: { cmd?: string }) => cmd.cmd === 'get-screen-context' ? list
       : cmd.cmd === 'focus-window' ? { success: true, foreground: true, processId: 4242 } : {});
     expect(await new WindowsAdapter().focusWindow({ processName: 'notepad' })).toBe(true);
-    expect(focusCalls()).toEqual([expect.objectContaining({ processId: 4242 })]);
+    expect(focusCalls()).toEqual([expect.objectContaining({ handle: 9001 })]);
   });
 });
 

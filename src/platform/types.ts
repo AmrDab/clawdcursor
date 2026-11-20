@@ -283,6 +283,11 @@ export interface PlatformAdapter {
    * app, which it names). Taken once: a second call is null.
    */
   takeFocusFailure?(): string | null;
+  /**
+   * What the last `focusWindow` / `setWindowState` acted on (a sentence naming the window; for a close, whether it is closed
+   * or still open), or why it acted on nothing (no match, or the several that matched). Taken once: a second call is null.
+   */
+  takeWindowNote?(): string | null;
 
   /**
    * Canonical window-state control. Semantics:

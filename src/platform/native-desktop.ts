@@ -15,7 +15,7 @@ import { beforePointerPress, guardInputMethods } from './pointer-guard';
 import os from 'os';
 import sharp from 'sharp';
 import { mouse, keyboard, screen, Button, Key, Point } from '@nut-tree-fork/nut-js';
-import { normalizeKey, modifierOf } from './keys';
+import { normalizeKey, modifierOf, splitCombo } from './keys';
 import { getNativeHelper, captureScreenViaHelper, ScreenRecordingDeniedError } from './native-helper';
 import { rawScreenGrab } from './screen-grab';
 import { sharpFromGrab, type GrabImage } from './grab-image';
@@ -529,9 +529,20 @@ export class NativeDesktop {
 
   // --- Input Methods ---
 
+  /**
+   * On a Wayland session nut-js reaches no window: its events are dropped, and the call would still say it was done. Input
+   * goes through the Linux adapter instead, which sends it with ydotool / wtype or throws that there is no such tool.
+   */
+  private async waylandInput(): Promise<import('./types').PlatformAdapter | null> {
+    if (process.platform !== 'linux' || !isWaylandSession()) return null;
+    return (await import('./index')).getPlatform();
+  }
+
   async mouseClick(x: number, y: number, button: number = 1): Promise<void> {
     await beforePointerPress(); // clawdcursor's own pill must not be under the click
     if (!this.connected) throw new Error('Not connected');
+    const wl = await this.waylandInput();
+    if (wl) { await wl.mouseClick(x, y, { button: button === 2 ? 'middle' : button === 4 ? 'right' : 'left' }); return; }
     // On macOS: skip the Swift helper (CGEvent blocked by TCC), use nut-js directly.
     // nut-js mouse events ARE delivered on macOS (unlike CGEvent from child processes).
     // physicalToMouse: callers pass PHYSICAL coords (image×imageScale / a11y / OCR);
@@ -547,6 +558,8 @@ export class NativeDesktop {
   async mouseDoubleClick(x: number, y: number): Promise<void> {
     await beforePointerPress(); // clawdcursor's own pill must not be under the click
     if (!this.connected) throw new Error('Not connected');
+    const wl = await this.waylandInput();
+    if (wl) { await wl.mouseClick(x, y, { count: 2 }); return; }
     await this.placePointer(x, y);
     await this.delay(50);
     await mouse.doubleClick(Button.LEFT);
@@ -556,6 +569,8 @@ export class NativeDesktop {
   async mouseRightClick(x: number, y: number): Promise<void> {
     await beforePointerPress(); // clawdcursor's own pill must not be under the click
     if (!this.connected) throw new Error('Not connected');
+    const wl = await this.waylandInput();
+    if (wl) { await wl.mouseClick(x, y, { button: 'right' }); return; }
     await this.placePointer(x, y);
     await this.delay(50);
     await mouse.rightClick();
@@ -587,6 +602,8 @@ export class NativeDesktop {
 
   async typeText(text: string): Promise<void> {
     if (!this.connected) throw new Error('Not connected');
+    const wl = await this.waylandInput();
+    if (wl) { await wl.typeText(text); return; }
     if (IS_MAC) {
       // Use System Events for typing — same reason as keyPress:
       // CGEvent from helper subprocess is silently blocked by TCC.
@@ -618,6 +635,8 @@ export class NativeDesktop {
 
   async keyPress(keyCombo: string): Promise<void> {
     if (!this.connected) throw new Error('Not connected');
+    const wl = await this.waylandInput();
+    if (wl) { await wl.keyPress(keyCombo); return; }
     if (IS_MAC) {
       // macOS: use System Events via osascript for reliable keystroke delivery.
       // CGEvent.post() from a spawned helper is silently blocked by TCC on macOS 15+
@@ -636,7 +655,7 @@ export class NativeDesktop {
       return;
     }
 
-    const parts = keyCombo.split('+').map(k => k.trim()).filter(k => k.length > 0);
+    const parts = splitCombo(keyCombo);
     const keys = parts.map(k => this.mapKey(k));
 
     // If the only key is a TYPE_CHAR (single printable char like *, +, ., etc.),
@@ -682,7 +701,7 @@ export class NativeDesktop {
       return;
     }
 
-    const parts = keyCombo.split('+').map(k => k.trim()).filter(Boolean);
+    const parts = splitCombo(keyCombo);
     const key = parts[parts.length - 1] || keyCombo;
     if (!key) {
       throw new Error(`macKeyPress: empty key after parsing combo "${keyCombo}"`);

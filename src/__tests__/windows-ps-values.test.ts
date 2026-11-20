@@ -54,6 +54,8 @@ describe('WindowsAdapter — values reach PowerShell as data', () => {
   afterEach(() => { __setSystemRootForTests(undefined); fs.rmSync(root, { recursive: true, force: true }); });
 
   it('a window title crosses as $env:CLAWD_PS_TITLE, not in the script', async () => {
+    // A window with no handle of its own: the script finds it by title (a resolved handle is acted on directly).
+    vi.spyOn(adapter, 'listWindows').mockResolvedValue([{ title: EVIL, processName: 'x', processId: 42, bounds: { x: 0, y: 0, width: 1, height: 1 }, isMinimized: false }]);
     await adapter.setWindowState('maximize', { title: EVIL, processId: 42 });
     const ps = calls.find(isPs)!;
     expect(ps.args.join(' ')).not.toContain('calc');
@@ -63,6 +65,7 @@ describe('WindowsAdapter — values reach PowerShell as data', () => {
   // Edge's title carries U+200B / NBSP: compared raw, "Microsoft Edge" never matched it. Both sides are normalized the
   // way window-text.ts (and the bridge's ConvertTo-TitleKey) does.
   it('a title is matched as every other window lookup matches it (format chars dropped, spaces folded, lower case)', async () => {
+    vi.spyOn(adapter, 'listWindows').mockResolvedValue([{ title: 'Inbox - Microsoft Edge', processName: 'msedge', processId: 42, bounds: { x: 0, y: 0, width: 1, height: 1 }, isMinimized: false }]);
     await adapter.setWindowState('minimize', { title: '  Microsoft\u200B\u00A0Edge ', processId: 42 });
     const ps = calls.find(isPs)!;
     expect(ps.opts.env?.CLAWD_PS_TITLE).toBe('microsoft edge');
