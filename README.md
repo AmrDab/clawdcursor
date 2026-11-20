@@ -375,6 +375,13 @@ Restart the host afterwards so it starts the new server. `clawdcursor versions` 
 
 ## What's new
 
+**2.3.0** &mdash; **You keep your computer.** ([full changelog](CHANGELOG.md))
+- While the agent works in the background you can use your computer: a step that needs the mouse or keyboard is not sent while you use them, and the agent goes on by name meanwhile.
+- The pill says "running in background" or "requires foreground", and the outline marks only the window the agent works in now.
+- App guides are back: 32 guides ship in the package, and the agent gets an app's essential keys in one line when it opens.
+- Pictures, PDFs, text and media the agent downloads land in your Downloads folder under their own names.
+- Security: settings are no longer read from files in the working directory (GHSA-cx4w-xx82-f6f6).
+
 **2.2.0** &mdash; **Works beside you.** ([full changelog](CHANGELOG.md))
 - On Windows and macOS it never types or moves the mouse while you are using the computer: it waits until you stop.
 - Three screen states: an amber outline around the agent's window in background work, an amber glow on the whole screen when it uses the mouse and keyboard, a blue glow when it needs you for a step.
@@ -393,7 +400,7 @@ Restart the host afterwards so it starts the new server. `clawdcursor versions` 
 
 Earlier releases are in the [changelog](CHANGELOG.md).
 
-**2.2.** Clawd Cursor now works beside you: see [What's new](#whats-new) and [What protects you](#what-protects-you). The standard benchmark across app types, OSes and models is the release gate, and the numbers are in [Proof](#proof).
+**2.3.** Clawd Cursor works beside you, and you keep your computer: see [What's new](#whats-new) and [What protects you](#what-protects-you). The standard benchmark across app types, OSes and models is the release gate, and the numbers are in [Proof](#proof).
 
 ---
 

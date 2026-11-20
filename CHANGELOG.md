@@ -7,10 +7,16 @@ All notable changes to Clawd Cursor will be documented in this file.
 ### Security
 - **Settings in the working directory could start a program and turn off clawdcursor's safeguards (GHSA-cx4w-xx82-f6f6,
   high).** A `.env` or `.clawdcursor-config.json` in the folder clawdcursor started in could name a program for the pill to
-  start, record consent, hide the on-screen indicator, or turn guards off. Settings now come only from the environment,
-  command-line flags and `~/.clawdcursor`. Affects 2.2.0 and earlier.
+  start, record consent, hide the on-screen indicator, or turn guards off. Files in the working directory are no longer
+  read. Affects 2.2.0 and earlier.
+
+### Added
+- **App guides are back.** 32 guides for desktop and web apps ship in the package. When an app opens, the agent gets its
+  essential keys in one line; `system shortcuts_list` with `context` (and `query`) reads the whole guide.
 
 ### Changed
+- **Confirm mode (`CLAWD_CONFIRM=1`) holds left clicks only.** A right or middle click opens a menu or a tab and is no
+  longer held; on Linux a middle click can paste the selection. On macOS it also holds `mod+backspace` (Move to Trash).
 - **`window list` shows open apps, not every window title.** It lists each app's process name and pid, with a window count
   when an app has several windows; the title, bounds and size appear only for windows clawdcursor opened or worked in, and for one app's windows when the
   call names it (`processName` or `processId`). A
@@ -30,8 +36,8 @@ All notable changes to Clawd Cursor will be documented in this file.
   that could take the foreground and not give it back.
 - **`smart_click` presses the only element that contains the name.** With exactly one element named like "What's New"
   for "New", it presses that one and says so; with several, it lists them as before.
-- **Settings come only from the environment, command-line flags and `~/.clawdcursor`.** A `.env` file and a
-  `.clawdcursor-config.json` in the working directory are no longer read, and `CLAWD_DISABLE_VISION` now takes
+- **Settings are no longer read from the working directory.** A `.env` file and a
+  `.clawdcursor-config.json` there are ignored: use environment variables, flags or `~/.clawdcursor`. `CLAWD_DISABLE_VISION` now takes
   precedence over the config files.
 
 ### Fixed
@@ -67,7 +73,6 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **Unticking "Allow clawdcursor to control this computer" in the Claude Desktop extension now withdraws consent.** The host
   sends `CLAWDCURSOR_CONSENT=false` (or `0`), which removes the recorded consent for that copy; an unset variable changes
   nothing.
-- **A dialog the agent's own action opened is no longer refused as a window switch.** After an action such as "Attach files" opens the app's own Open dialog, input goes to that dialog and the outline follows it; a different app in front is still refused.
 - **A dialog the agent's own action opened is no longer refused as a window switch.** After an action such as "Attach files" opens the app's own Open dialog, input goes to that dialog and the outline follows it, also when the app draws the dialog in another of its processes (Edge) and you have not touched the mouse or keyboard since; a different app in front is still refused.
 - **A takeover no longer says "paused by the user" when they did not press Pause.** While the user is using the computer, a step that needs the keyboard, the mouse or its window in front replies "the user is using the computer" (code `USER_ACTIVE`). The pill's Pause keeps `PAUSED`, and a pause card waiting for an answer is now `PAUSE_PENDING`.
 - **While the agent works in the background, you can use your computer and it keeps working.** A step that needs the keyboard, the mouse or its window in front is not sent while you use them; it answers at once, and the agent goes on by name in the background and tries that step again once you have been idle for 1 s. No wait, no "Paused — your turn" and no Resume click. Only the pill's Pause holds the agent until Resume. Your own click on Resume (the pill, a pause card, after a Stop) never counts as using the computer.
