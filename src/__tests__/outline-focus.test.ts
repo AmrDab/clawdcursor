@@ -67,7 +67,7 @@ describe('the outline follows the agent\'s own focus and launches', () => {
     await d.focusWindow({ title: 'RC1527 Test' });
     expect(workingWindow()).toEqual({ processId: 300, handle: 0x7b2 });
     expect(workingIn()?.processName).toBe('firefox');
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300 1440 100']);
+    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300']);
     expect(d.sent).toEqual(['key a']);
   });
 
@@ -75,7 +75,7 @@ describe('the outline follows the agent\'s own focus and launches', () => {
     const d = fakeDesktop({ onFocus: () => { setTimeout(() => { fg = TEST; }, 150); return true; } });
     await d.keyPress('a');
     await d.focusWindow({ title: 'RC1527 Test' });
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300 1440 100']);
+    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300']);
   });
 
   it('open_app: the outline goes to the launched window, by its pid or title', async () => {
@@ -84,19 +84,19 @@ describe('the outline follows the agent\'s own focus and launches', () => {
     await d.launchApp('Calculator');
     expect(workingWindow()).toEqual({ processId: 400, handle: 0x9c4 });
     expect(workingIn()?.processName).toBe('Calculator');
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 2500 400 1440 100']);
+    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 2500 400']);
   });
 
   it('open_app that reports no window: the outline goes to a window of the app it launched, and to no other', async () => {
     const d = fakeDesktop({ onOpen: () => { fg = CALC; return {}; } });
     await d.keyPress('a');
     await d.launchApp('Calculator');
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 2500 400 1440 100']);
+    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 2500 400']);
     // Another app in front after the launch is not the one the agent opened: no window, so no outline.
     fg = EDGE;
     await fakeDesktop().launchApp('Calculator');
     expect(workingWindow()).toBeUndefined();
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 2500 400 1440 100', 'TARGET']);
+    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 2500 400', 'TARGET']);
   });
 
   it('a read after a switch does not move it, whatever is in front by then', async () => {
@@ -109,7 +109,7 @@ describe('the outline follows the agent\'s own focus and launches', () => {
     await d.getUiTree();
     await d.invokeElement({ name: 'Total', action: 'get-value' });
     expect(workingWindow()).toEqual({ processId: 300, handle: 0x7b2 });
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300 1440 100']);
+    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300']);
   });
 
   it('a failed focus does not move it', async () => {
@@ -139,7 +139,7 @@ describe('the outline follows the agent\'s own focus and launches', () => {
     fg = TEST;
     await d.keyPress('c');
     expect(d.sent).toEqual(['key a', 'key c']);
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300 1440 100']);
+    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300']);
   });
 });
 

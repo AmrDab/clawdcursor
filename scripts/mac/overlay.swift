@@ -453,6 +453,11 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var runDot: NSView?
     var userMoved = false   // the user dragged the pill: layoutRunning keeps it where it was dropped
     var runActivity: NSTextField?
+    var runTrack: NSView?               // the activity's window: as wide as "running in background", the text runs through it
+    var marqueeWidth: CGFloat = 0
+    var marqueeLoop: CGFloat = 0        // points from one copy of the text to the next; 0: it fits and stands still
+    var marqueeStill = Date()           // a new text stands still a moment before it runs
+    var marqueeTimer: Timer?
     var runClock: NSTextField?
     var runBrand: NSTextField?
     var runStop: NSButton?
@@ -461,12 +466,13 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     /// Lays the row out left to right, sizes the pill to it and puts it back at the top centre.
     func layoutRunning() {
-        guard let panel = pillPanel, let dot = runDot, let brand = runBrand, let act = runActivity,
+        guard let panel = pillPanel, let dot = runDot, let brand = runBrand, let act = runActivity, let track = runTrack,
               let clock = runClock, let hold = runHold, let stop = runStop else { return }
         let rowH: CGFloat = 38
-        func place(_ l: NSTextField, _ x: CGFloat, _ maxWidth: CGFloat) -> CGFloat {
+        // `fixed`: always that width (owner, 2026-11-19: the pill must not grow and shrink as its text changes).
+        func place(_ l: NSTextField, _ x: CGFloat, _ maxWidth: CGFloat, fixed: Bool = false) -> CGFloat {
             l.sizeToFit()
-            let w = min(ceil(l.frame.width), maxWidth)
+            let w = fixed ? maxWidth : min(ceil(l.frame.width), maxWidth)
             let h = ceil(l.frame.height)
             l.frame = NSRect(x: x, y: floor((rowH - h) / 2), width: w, height: h)
             return w
@@ -475,8 +481,10 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         dot.frame = NSRect(x: x - 2, y: (rowH - dot.frame.height) / 2, width: dot.frame.width, height: dot.frame.height)
         x += dot.frame.width + 2
         x += place(brand, x, 200) + 6
-        x += place(act, x, 360) + 8
-        x += place(clock, x, 100) + 12
+        let actH = ceil(act.frame.height)
+        track.frame = NSRect(x: x, y: floor((rowH - actH) / 2), width: marqueeWidth, height: actH)
+        x += marqueeWidth + 8
+        x += place(clock, x, 40, fixed: true) + 12
         hold.frame = NSRect(x: x, y: 7, width: 60, height: 24)
         x += 60 + 6
         stop.frame = NSRect(x: x, y: 7, width: 52, height: 24)
@@ -493,10 +501,30 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         }
     }
 
+    /// The pill keeps one small size (owner, 2026-11-19: never growing with its text, and "small like it was before"):
+    /// text that does not fit runs through the activity's window like an LED marquee sign, round and round.
     func setActivity(_ text: String) {
         guard let act = runActivity else { return }
         act.stringValue = text
+        act.sizeToFit()
+        let one = act.frame.width
+        if one <= marqueeWidth {
+            marqueeLoop = 0
+        } else {
+            act.stringValue = text + "      " + text
+            act.sizeToFit()
+            marqueeLoop = act.frame.width - one
+        }
+        act.setFrameOrigin(NSPoint(x: 0, y: 0))
+        marqueeStill = Date()
         layoutRunning()
+    }
+
+    func stepMarquee() {
+        guard marqueeLoop > 0, let act = runActivity, Date().timeIntervalSince(marqueeStill) >= 1.2 else { return }
+        var x = act.frame.origin.x - 1
+        if x <= -marqueeLoop { x += marqueeLoop }
+        act.setFrameOrigin(NSPoint(x: x, y: act.frame.origin.y))
     }
 
     /// "HELD ON": the user holds the agent, so the button offers Resume (blue); "HELD OFF": Pause again.
@@ -804,7 +832,14 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             let brand = label("ClawdCursor", size: 11, color: muted, semibold: true)
             let initial = ProcessInfo.processInfo.environment["CLAWD_BANNER_ACTIVITY"] ?? ""
             let activity = label(initial.isEmpty ? "Working" : initial, size: 12, color: .white, semibold: true)
-            activity.lineBreakMode = .byTruncatingTail
+            activity.lineBreakMode = .byClipping
+            let probe = label("running in background", size: 12, color: .white, semibold: true)
+            probe.sizeToFit()
+            marqueeWidth = ceil(probe.frame.width)
+            let track = NSView()
+            track.wantsLayer = true
+            track.layer?.masksToBounds = true
+            track.addSubview(activity)
             let clock = label("0:00", size: 11, color: muted)
             clock.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
             let stop = makeButton("Stop", "BANNER_STOP", frame: NSRect(x: 0, y: 7, width: 52, height: 24),
@@ -815,11 +850,13 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             hold.action = #selector(holdClicked(_:))
             runHold = hold
             let orb = makeOrb()
-            let rowViews: [NSView] = [orb, brand, activity, clock, hold, stop]
+            let rowViews: [NSView] = [orb, brand, track, clock, hold, stop]
             rowViews.forEach { content.addSubview($0) }
             runDot = orb
             runBrand = brand
             runActivity = activity
+            runTrack = track
+            setActivity(initial.isEmpty ? "Working" : initial)
             runClock = clock
             runStop = stop
             runStart = Date()
@@ -828,18 +865,10 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 NSApp.terminate(nil)
             }
             content.onDragged = { [weak self] in self?.userMoved = true }
-            // The amber outline when the pill appears: solid for 3 s, then fading out over 1 s into the usual one.
-            let amber = (245.0, 158.0, 11.0), rest = (58.0, 62.0, 72.0)
-            content.layer?.borderColor = hexColor("#f59e0b").cgColor
-            content.layer?.borderWidth = 2
-            let appeared = Date()
-            Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { t in
-                let e = Date().timeIntervalSince(appeared)
-                let k = e < 3 ? 1.0 : max(0.0, 1 - (e - 3))
-                content.layer?.borderColor = rgb(CGFloat(rest.0 + (amber.0 - rest.0) * k), CGFloat(rest.1 + (amber.1 - rest.1) * k),
-                                                 CGFloat(rest.2 + (amber.2 - rest.2) * k)).cgColor
-                if k == 0 { content.layer?.borderWidth = 1; t.invalidate() }
-            }
+            // No amber ring when the pill appears (owner, 2026-11-19: an amber ring round the pill read as the agent
+            // outlining it): the usual thin outline from the start.
+            content.layer?.borderColor = rgb(58, 62, 72).cgColor
+            content.layer?.borderWidth = 1
         }
 
         let screen = NSScreen.screens.first ?? NSScreen.main!
@@ -879,6 +908,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         // The running pill's clock; the card's orb moves by itself.
         if !paused {
             timer = Timer.scheduledTimer(withTimeInterval: 0.7, repeats: true) { [weak self] _ in self?.updateClock() }
+            marqueeTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.stepMarquee() }
         }
     }
 

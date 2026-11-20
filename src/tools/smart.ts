@@ -11,7 +11,7 @@
  * Key design: NO coordinate conversion needed by the caller.
  */
 
-import type { ToolDefinition } from './types';
+import type { ToolDefinition, ToolContext } from './types';
 import { ocrEngine } from '../platform/ocr-engine';
 import { screenLockedMessage } from '../platform/mac-ax';
 import { getBrowserProcessNames } from '../platform/browser-config';
@@ -42,6 +42,38 @@ const KEY_NAME_ALIASES: Record<string, string[]> = {
   '=': ['Equals'], '.': ['Decimal separator', 'Decimal'], ',': ['Decimal separator', 'Decimal'],
   '%': ['Percent'],
 };
+
+/**
+ * An act by name, on the platform's own route where there is one: a window message first, then the element's pattern with
+ * the user's window put back (windows.ts invokeElement). Only with no platform does it fall to the legacy accessibility
+ * bridge, which has neither. The reply is in the shape the callers read: `clickPoint` for an element that refused the act,
+ * the miss's reason and list, and the element acted on, at the top level.
+ */
+type ByNameQuery = { name?: string; processId?: number; action: 'click' | 'focus'; within?: string };
+type ByNameResult = { success: boolean; clickPoint?: { x: number; y: number }; target?: unknown } & Record<string, unknown>;
+async function invokeByName(ctx: ToolContext, query: ByNameQuery): Promise<ByNameResult> {
+  if (!ctx.platform?.invokeElement) return ctx.a11y.invokeElement(query);
+  const res = await ctx.platform.invokeElement(query);
+  const b = res.bounds;
+  return {
+    success: res.success,
+    ...(res.data ? { data: res.data } : {}),
+    ...(typeof res.data?.error === 'string' ? { error: res.data.error } : {}),
+    ...structuredMissFields(res.data),
+    ...(res.data?.target ? { target: res.data.target } : {}),
+    ...(!res.success && b ? { clickPoint: { x: b.x + Math.floor(b.width / 2), y: b.y + Math.floor(b.height / 2) } } : {}),
+  };
+}
+
+/** The one element that only CONTAINS the name asked for ("What's New" for "New"), when the reply lists exactly one. */
+function soleInexactName(r: Record<string, unknown>): string | undefined {
+  const miss = structuredMissFields(r);
+  const list = miss.candidates as Array<{ name?: string }> | undefined;
+  if (miss.reason !== 'ambiguous' || miss.inexact !== true || miss.minimized === true || list?.length !== 1) return undefined;
+  const name = list[0].name;
+  // A name cut at the list's bound is not the whole name: asking for it would name another element.
+  return name && name.length < 80 ? name : undefined;
+}
 
 /**
  * The page's name when the focus is on a web page itself, not in the field `target` names; null otherwise. A page named
@@ -557,13 +589,13 @@ export function getSmartTools(): ToolDefinition[] {
             const aliases = KEY_NAME_ALIASES[target.trim().toLowerCase()] ?? [];
             // The Windows bridge THROWS on "not found" (others return a miss):
             // with key-name aliases to try, treat that as a miss, not the end.
-            let result = await ctx.a11y.invokeElement({
+            let result = await invokeByName(ctx, {
               name: target,
               processId: processId || activeWin?.processId,
               action: 'click',
               within,
             }).catch((err: unknown) => {
-              if (aliases.length && /not found/i.test(err instanceof Error ? err.message : String(err))) return { success: false } as { success: boolean; clickPoint?: { x: number; y: number } };
+              if (aliases.length && /not found/i.test(err instanceof Error ? err.message : String(err))) return { success: false } as ByNameResult;
               throw err;
             });
             // Calculator keys are named in words ("One", "Multiply by", AX
@@ -571,12 +603,25 @@ export function getSmartTools(): ToolDefinition[] {
             // a button: try the spoken names before giving up.
             for (const alias of aliases) {
               if (result.success || result.clickPoint) break;
-              result = await ctx.a11y.invokeElement({ name: alias, processId: processId || activeWin?.processId, action: 'click', within })
+              result = await invokeByName(ctx, { name: alias, processId: processId || activeWin?.processId, action: 'click', within })
+                .catch(() => result);
+            }
+            // Exactly one element only contains the name ("What's New" for "New"): press it by its full name and say so in
+            // the reply. Several stay AMBIGUOUS below, and a value is never set on a partial match (smart_type is strict).
+            const sole = result.success || result.clickPoint ? undefined : soleInexactName(result);
+            if (sole) {
+              result = await invokeByName(ctx, { name: sole, processId: processId || activeWin?.processId, action: 'click', within })
                 .catch(() => result);
             }
             if (result.success) {
               const data = (result as any).data;
-              return { method: 'invoke', pending: data?.pending === true, lateInvokeError: typeof data?.lateInvokeError === 'string' ? data.lateInvokeError : undefined, target: (result as { target?: unknown }).target };
+              const pressed = targetOf(result.target);
+              const how = sole && sole.toLowerCase().startsWith(target.trim().toLowerCase()) ? 'prefix' : 'substring';
+              return {
+                method: 'invoke', pending: data?.pending === true,
+                lateInvokeError: typeof data?.lateInvokeError === 'string' ? data.lateInvokeError : undefined,
+                target: sole ? { ...(pressed ?? { name: sole, controlType: '' }), match: how } : result.target,
+              };
             }
             if (result.clickPoint) return { method: 'bounds', clickPoint: result.clickPoint };
             const miss = structuredMissFields(result);
@@ -865,13 +910,13 @@ export function getSmartTools(): ToolDefinition[] {
               // The Windows bridge throws on "not found" — e.g. when the name
               // matched only a label that can't take focus. Treat it as a miss
               // so the editable-element fallback below still runs.
-              const result = await ctx.a11y.invokeElement({
+              const result = await invokeByName(ctx, {
                 name: target,
                 processId: processId || activeWin?.processId,
                 action: 'focus',
               }).catch((err: unknown) => {
                 if (isGuardRefusal(err)) throw err;   // refused, not missed: the call says so
-                return { success: false } as { success: boolean; clickPoint?: { x: number; y: number } };
+                return { success: false } as ByNameResult;
               });
               if (result.success) {
                 focused = true;

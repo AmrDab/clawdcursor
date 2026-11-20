@@ -4,7 +4,7 @@
  * pill, or named on the pill without being guarded.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { guardInputMethods, setInputGuard } from '../platform/pointer-guard';
+import { guardInputMethods, setInputGuard, GUARDED_METHODS, isForegroundInput, setOnAgentWait } from '../platform/pointer-guard';
 import { activityLabel } from '../core/banner';
 
 const METHODS = [
@@ -67,5 +67,40 @@ describe('guarded methods', () => {
       getUiTree         - | -
       "
     `);
+  });
+});
+
+describe('the two modes of the table', () => {
+  it('real keyboard and mouse input is foreground; by element, by window handle and page acts are background', () => {
+    const kind = (m: string) => GUARDED_METHODS[m].kind;
+    for (const m of ['mouseClick', 'mouseDrag', 'mouseScroll', 'typeText', 'keyPress', 'keyDown']) expect(kind(m)).toBe('foreground');
+    for (const m of ['invokeElement', 'deliverToWindow', 'navigate', 'typeInField', 'evaluate', 'writeClipboard']) expect(kind(m)).toBe('background');
+    expect(kind('launchApp')).toBe('launch');
+    expect(Object.values(GUARDED_METHODS).map(g => g.kind).sort().filter((k, i, a) => a.indexOf(k) === i)).toEqual(['background', 'foreground', 'launch']);
+  });
+
+  it('the indicator shows foreground for real input and for a pointer move (it moves the real cursor), not for a background act', () => {
+    for (const m of ['mouseClick', 'keyPress', 'mouseMove', 'mouseMoveRelative']) expect(isForegroundInput(m)).toBe(true);
+    for (const m of ['invokeElement', 'deliverToWindow', 'navigate', 'click', 'writeClipboard', 'launchApp']) expect(isForegroundInput(m)).toBe(false);
+  });
+});
+
+describe('a launch tells the pill it waits for the app', () => {
+  it('"waiting for <app> to load" while the launch runs, and cleared after, a failed one too', async () => {
+    const seen: Array<string | null> = [];
+    setOnAgentWait(w => seen.push(w));
+    setInputGuard({ stopCheck: () => {}, before: async () => {}, done: () => {}, focused: async () => {}, launched: async () => {}, byName: async () => {} });
+    let during: Array<string | null> = [];
+    const layer = guardInputMethods({
+      async launchApp(_n: string) { during = [...seen]; return { pid: 1 }; },
+    });
+    await layer.launchApp('Notepad');
+    expect(during).toEqual(['waiting for Notepad to load']);
+    expect(seen).toEqual(['waiting for Notepad to load', null]);
+    seen.length = 0;
+    const failing = guardInputMethods({ async launchApp(_n: string): Promise<{ pid: number }> { throw new Error('no such app'); } });
+    await expect(failing.launchApp('Nope')).rejects.toThrow('no such app');
+    expect(seen).toEqual(['waiting for Nope to load', null]);
+    setOnAgentWait(null);
   });
 });

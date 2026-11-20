@@ -52,6 +52,22 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **`clawdcursor resume` clears a hold**, not only a stop.
 - **A pause card is withdrawn when the session that asked for it ends.** A card shown by another clawdcursor process now blocks input and window changes only; reading the screen still works.
 - The server instructions say what a waiting reply means: call the same step again, and do not retry a Stop.
+### Changed
+- **The pill says which mode the agent is in.** `running in background` (the amber outline round its window) or `requires
+  foreground` (the full-screen amber glow while it uses the mouse and keyboard), then what it is doing: `requires
+  foreground · Clicking in Paint`. In the code the two modes are now named `foreground` and `background`.
+- **The pill keeps one small size, and its text is readable on Windows.** Text longer than "running in background" runs
+  through it like a marquee; the "·" and "—" no longer show as box-drawing characters. While the agent waits (a wait, or an
+  app it started that is still loading) the pill says "waiting" or "waiting for <app> to load". After foreground work it
+  says "running in background" without the last foreground act. The pill no longer flashes an amber ring when it appears.
+- **Only the window the agent works in now is outlined.** Its earlier windows no longer keep an outline each.
+- **The agent's drawn pointer shows only for background work.** When it uses the real mouse, your own cursor moves and
+  no second pointer follows it.
+- **`smart_click` and `smart_type` find an element by name in the background first**, the way `invoke` does (a window
+  message, then the element's own action with your window put back), instead of through the older accessibility path
+  that could take the foreground and not give it back.
+- **`smart_click` presses the only element that contains the name.** With exactly one element named like "What's New"
+  for "New", it presses that one and says so; with several, it lists them as before.
 
 ## [2.2.0] - 2026-11-18
 

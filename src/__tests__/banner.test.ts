@@ -14,7 +14,7 @@ import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import { controlBanner, outlineFlags, glowFlags, glowColorFlags, outlineWindowNumber } from '../core/banner';
 import { stopControl, __setControlDirForTests, __setForegroundReaderForTests, isHeld, releaseHold } from '../core/control';
-import { guardInputMethods, setOwnUiPids } from '../platform/pointer-guard';
+import { guardInputMethods, setOwnUiPids, agentWaiting } from '../platform/pointer-guard';
 import { withForegroundBurst } from '../platform/foreground-burst';
 import type { ChildProcess } from 'child_process';
 import { readFileSync } from 'fs';
@@ -293,7 +293,7 @@ describe('no overlay outlives its parent', () => {
   const read = (...p: string[]) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', ...p), 'utf8');
   it('every drawer exits on stdin EOF, the pill included', () => {
     for (const ps of [read('banner.ps1'), read('window-outline.ps1')]) {
-      expect(ps).toMatch(/while \(\(line = Console\.In\.ReadLine\(\)\) != null\) \{[\s\S]*?\n {16}\}\n {16}Environment\.Exit\(0\);/);
+      expect(ps).toMatch(/while \(\(line = (?:stdin|Console\.In)\.ReadLine\(\)\) != null\) \{[\s\S]*?\n {16}\}\n {16}Environment\.Exit\(0\);/);
     }
     expect(read('mac', 'overlay.swift')).toMatch(/if data\.isEmpty \{[^}]*NSApp\.terminate\(nil\)/);
     expect(read('linux', 'overlay.py').match(/if not chunk:\n\s+Gtk\.main_quit\(\)/g)).toHaveLength(2);
@@ -379,6 +379,73 @@ describe('the indicator has two modes', () => {
     expect(outlines[0].killed).toBe(false);   // the window frame is untouched throughout
   });
 
+  it('the pill says the mode first: background by default, foreground with the glow, background again after the tail', async () => {
+    controlBanner.pin();
+    const lines = () => spawned[0].written.filter(l => l.startsWith('ACTIVITY '));
+    const d = guardInputMethods({
+      async invokeElement(_q: unknown) { return { success: true }; }, async typeText(_t: string) {},
+    });
+    await d.invokeElement({ name: 'Save' });
+    expect(lines()).toEqual(['ACTIVITY running in background · Clicking']);
+    await d.typeText('a');
+    expect(lines().at(-1)).toMatch(/^ACTIVITY requires foreground · Typing/);
+    vi.advanceTimersByTime(TAIL + 1);
+    // The glow went down, so did the mode, and what the foreground act did is not shown next to "background".
+    expect(lines().at(-1)).toBe('ACTIVITY running in background');
+    expect(lines().join(' ')).not.toMatch(/clawdcursor/i);                      // a host's own pill shows these lines too
+  });
+
+  it('a background act keeps its activity when the glow tail ends', async () => {
+    controlBanner.pin();
+    const lines = () => spawned[0].written.filter(l => l.startsWith('ACTIVITY '));
+    const d = guardInputMethods({
+      async invokeElement(_q: unknown) { return { success: true }; }, async typeText(_t: string) {},
+    });
+    await d.typeText('a');
+    await d.invokeElement({ name: 'Save' });   // inside the tail: still "requires foreground"
+    vi.advanceTimersByTime(TAIL + 1);
+    expect(lines().at(-1)).toBe('ACTIVITY running in background · Clicking');
+  });
+
+  it('while the agent waits the pill says so, not a mode; the next act ends it', async () => {
+    controlBanner.pin();
+    const lines = () => spawned[0].written.filter(l => l.startsWith('ACTIVITY '));
+    agentWaiting('waiting for Designcenter to load');
+    expect(lines().at(-1)).toBe('ACTIVITY waiting for Designcenter to load');
+    agentWaiting(null);
+    expect(lines().at(-1)).toBe('ACTIVITY running in background');
+    agentWaiting('waiting');
+    const d = guardInputMethods({ async invokeElement(_q: unknown) { return { success: true }; } });
+    await d.invokeElement({ name: 'Save' });
+    expect(lines().at(-1)).toBe('ACTIVITY running in background · Clicking');
+  });
+
+  it('the Windows pill reads stdin as UTF-8, keeps one small size and runs long text like a marquee', () => {
+    const ps = readFileSync(join(__dirname, '..', '..', 'scripts', 'banner.ps1'), 'utf8');
+    expect(ps).toContain('new System.Text.UTF8Encoding(false)');   // "·" and "—" came out as box-drawing characters
+    expect(ps).toContain("MeasureText('running in background', $activity.Font)");
+    expect(ps).toContain('$x += $track.Width + 6');                 // never the text's width
+    expect(ps).toContain('if ($x -le -$script:loop) { $x += $script:loop }');
+    expect(ps).toContain('$form.add_ActivityChanged([Action[string]]{ param($t) Set-Activity $t; Update-Layout })');
+  });
+
+  it('no pill appears with an amber ring (it read as the agent outlining its own pill)', () => {
+    for (const f of [['banner.ps1'], ['mac', 'overlay.swift']]) {
+      const src = readFileSync(join(__dirname, '..', '..', 'scripts', ...f), 'utf8');
+      expect(src).not.toMatch(/Start-Pulse|CLAWD_BANNER_RING|let appeared = Date\(\)/);
+    }
+  });
+
+  it('does not send the same line twice while the mode holds', async () => {
+    controlBanner.pin();
+    const d = guardInputMethods({ async typeText(_t: string) {} });
+    await d.typeText('a');
+    await d.typeText('b');   // the glow is already up and the activity is the same
+    vi.advanceTimersByTime(TAIL - 100);
+    await d.typeText('c');
+    expect(spawned[0].written.filter(l => l.startsWith('ACTIVITY '))).toEqual(['ACTIVITY requires foreground', expect.stringMatching(/^ACTIVITY requires foreground · Typing/)]);   // the mode first, then the activity; nothing after
+  });
+
   it('an R2 burst keeps it up for the whole burst, then the tail', async () => {
     controlBanner.pin();
     const w = { processId: 42, handle: 900 };
@@ -415,7 +482,7 @@ describe('the indicator has two modes', () => {
     expect(spawned[0].written).toContain('ACTIVITY Paused — your turn');
     controlBanner.burstEvent('resume');
     expect(states(glows[0])).toEqual(['ON', 'OFF', 'ON']);
-    expect(spawned[0].written.slice(-2)).toEqual(['ACTIVITY Typing in Edge', 'ORB working']);   // the orb works again
+    expect(spawned[0].written.slice(-3)).toEqual(['ACTIVITY running in background · Typing in Edge', 'ORB working', 'ACTIVITY requires foreground · Typing in Edge']);   // the orb works again, the mode follows the glow
     vi.advanceTimersByTime(10 * TAIL);
     expect(states(glows[0])).toEqual(['ON', 'OFF', 'ON']);   // up for the rest of the burst
     controlBanner.burstEvent('pause');
@@ -498,7 +565,7 @@ describe('the pill\'s Pause and Resume', () => {
     expect(spawned[0].killed).toBe(false);            // its Resume is the way back: never hidden while held
     await fromPill(spawned[0], 'BANNER_RESUME');
     expect(isHeld()).toBe(false);
-    expect(spawned[0].written.slice(-3)).toEqual(['ACTIVITY Clicking in Edge', 'ORB working', 'HELD OFF']);
+    expect(spawned[0].written.slice(-3)).toEqual(['ACTIVITY running in background · Clicking in Edge', 'ORB working', 'HELD OFF']);
     vi.advanceTimersByTime(31_000);
     expect(spawned[0].killed).toBe(true);             // back to the agent: the idle hide counts again
   });
@@ -552,7 +619,7 @@ describe('the pill\'s Pause and Resume', () => {
     expect(spawned[0].written.slice(-2)).toEqual(['ACTIVITY Paused — your turn', 'ORB paused']);
     expect(spawned[0].written).not.toContain('HELD ON');   // no Resume button: it goes on by itself if they stop
     controlBanner.holdEvent('resumed');
-    expect(spawned[0].written.slice(-2)).toEqual(['ACTIVITY Typing in Edge', 'ORB working']);
+    expect(spawned[0].written.slice(-2)).toEqual(['ACTIVITY running in background · Typing in Edge', 'ORB working']);
   });
 });
 
@@ -623,13 +690,10 @@ describe('the full-screen glow is the foreground-mode drawer only', () => {
     expect((ps.match(/\$form\.KeepOnTop\(\)/g) ?? []).length).toBe(2);   // the running and the paused timer
     // Dragging: by hand with the mouse, on the body only; the position is kept, on screen, instead of top-centre.
     expect(ps).toContain('function Enable-Drag(');
-    expect(ps).toContain('foreach ($c in @($form, $dot, $brand, $activity, $elapsed)) { Enable-Drag $c }');
+    expect(ps).toContain('foreach ($c in @($form, $dot, $brand, $track, $activity, $elapsed)) { Enable-Drag $c }');
     expect(ps).toContain('foreach ($c in @($form, $dot, $title, $msg)) { Enable-Drag $c }');
     expect(ps).not.toMatch(/Enable-Drag \$(stop|yes|no|send|reply)/);
     expect(ps).toContain('if ($script:userPos) { $at = Get-OnScreen $script:userPos $f }');
-    // Appearing: solid amber outline for 3 s, then a fade: not a loop.
-    expect(ps).toContain('function Start-Pulse');
-    expect(ps).toContain('if ($k -le 0) { $script:pulse.Stop() }');
   });
 
   it('the Windows outline is click-through, never activates, and stays out of captures', () => {
@@ -680,7 +744,7 @@ describe('the full-screen glow is the foreground-mode drawer only', () => {
     expect(ps).not.toContain('new IntPtr(-1)');
   });
 
-  it('with several agent windows the outline is sent them all, the working one first (Windows)', async () => {
+  it('with several agent windows only the one it works in now is outlined (Windows)', async () => {
     const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
     Object.defineProperty(process, 'platform', { value: 'win32' });
     let fg: { processId: number; processName: string; handle: number } = { processId: 100, processName: 'msedge', handle: 0x5a0 };
@@ -691,7 +755,7 @@ describe('the full-screen glow is the foreground-mode drawer only', () => {
       await d.keyPress('a');
       await d.focusWindow({ processId: 300 });
       await d.keyPress('b');
-      expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300 1440 100']);
+      expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300']);   // not "1970 300 1440 100" (owner, 2026-11-19)
     } finally {
       Object.defineProperty(process, 'platform', platform);
       __setForegroundReaderForTests(null);
@@ -710,5 +774,14 @@ describe('the window frame never goes round clawdcursor\'s own windows', () => {
     } finally {
       setOwnUiPids(() => [...controlBanner.overlayPids()]);
     }
+  });
+
+  it('the pill\'s own window is never outlined, even named as the working window', () => {
+    controlBanner.__setSpawnerForTests(() => { const c = Object.assign(new FakeChild(), { pid: 4242 }); spawned.push(c); return c as unknown as ChildProcess; });
+    controlBanner.pin();
+    expect(controlBanner.overlayPids()).toContain(4242);
+    controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
+    controlBanner.setWorkingWindow({ processId: 4242, handle: 0x9f0 });   // the pill's process
+    expect(outlines[0].written).toEqual(['TARGET 1440 100']);
   });
 });

@@ -74,13 +74,13 @@ describe('the outline follows by-name acts', () => {
       await d.invokeElement({ name: 'Field', action, processId: action === 'toggle' ? fg.processId : undefined });
       expect(workingWindow()).toEqual({ processId: fg.processId, handle: fg.handle });
     }
-    expect(outlines[0].written).toEqual(['TARGET', 'TARGET 1970 300', 'TARGET 1440 100', 'TARGET 1970 300 1440 100', 'TARGET 1440 100']);
+    expect(outlines[0].written).toEqual(['TARGET', 'TARGET 1970 300', 'TARGET 1440 100', 'TARGET 1970 300', 'TARGET 1440 100']);
   });
 
   // Background mode (owner, 2026-11-17): the frame goes round the agent's own window even when it is not in front. Each
   // border sits just above its window (fb3d037b), so the user's window in front still covers it. Before, an agent that
   // never touched the window in front got no frame at all (macOS run 2026-11-18).
-  it('a by-name act on a process that is not in front frames that window, and it stays framed after an act in front', async () => {
+  it('a by-name act on a process that is not in front frames that window; an act in front then moves the frame there', async () => {
     __setWindowsReaderForTests(async () => [NOTEPAD]);
     try {
       const d = fakeDesktop();
@@ -90,7 +90,7 @@ describe('the outline follows by-name acts', () => {
       expect(outlines[0].written).toEqual(['TARGET 1970 300']);
       await d.invokeElement({ name: 'Save' });
       expect(workingWindow()).toEqual({ processId: 100, handle: 0x5a0 });
-      expect(outlines[0].written).toEqual(['TARGET 1970 300', 'TARGET 1440 100 1970 300']);
+      expect(outlines[0].written).toEqual(['TARGET 1970 300', 'TARGET 1440 100']);   // only the window it works in now
     } finally { __setWindowsReaderForTests(async () => []); }
   });
 

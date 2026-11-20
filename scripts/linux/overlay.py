@@ -67,6 +67,7 @@ BLUE = (59 / 255, 130 / 255, 246 / 255)
 BLUE_DIM = (25 / 255, 55 / 255, 110 / 255)
 BG = (22 / 255, 24 / 255, 29 / 255)
 EDGE = (58 / 255, 62 / 255, 72 / 255)  # the 1px outline; blue on the paused card
+MARQUEE_CHARS = 22  # the running pill's activity window: "running in background"
 
 
 def emit(line):
@@ -394,7 +395,11 @@ def run_pill():
         activity_label = Gtk.Label(label=os.environ.get('CLAWD_BANNER_ACTIVITY') or 'Working')
         activity_label.get_style_context().add_class('activity')
         activity_label.set_ellipsize(Pango.EllipsizeMode.END)
-        activity_label.set_max_width_chars(60)
+        # One small size (owner, 2026-11-19: never growing with its text, and "small like it was before"): as wide as
+        # "running in background"; longer text runs through it like an LED marquee sign (run_marquee below).
+        activity_label.set_width_chars(MARQUEE_CHARS)
+        activity_label.set_max_width_chars(MARQUEE_CHARS)
+        activity_label.set_xalign(0)
         clock = Gtk.Label(label='0:00')
         clock.get_style_context().add_class('clock')
         stop = Gtk.Button(label='Stop')
@@ -446,6 +451,29 @@ def run_pill():
 
     GLib.timeout_add(900 if paused else 700, blink)
 
+    # The running pill's activity: text longer than its window moves through it a character at a time, round and round,
+    # after standing still a moment.
+    marquee = {'text': '', 'at': 0, 'still': 0}
+
+    def set_activity(text):
+        marquee.update(text=text, at=0, still=8)
+        activity_label.set_text(text[:MARQUEE_CHARS])
+
+    def run_marquee():
+        text = marquee['text']
+        if len(text) > MARQUEE_CHARS:
+            if marquee['still'] > 0:
+                marquee['still'] -= 1
+            else:
+                loop = text + '      '
+                marquee['at'] = (marquee['at'] + 1) % len(loop)
+                activity_label.set_text((loop + loop)[marquee['at']:marquee['at'] + MARQUEE_CHARS])
+        return True
+
+    if activity_label is not None:
+        set_activity(activity_label.get_text())
+        GLib.timeout_add(150, run_marquee)
+
     # stdin carries "HIDE <ms>" from the parent just before an agent's click: the pill steps aside so the click reaches
     # the app under it (it sits where browsers keep their tab strip and address bar), then comes back on its own.
     # "ACTIVITY <text>" replaces what the running pill says the agent is doing.
@@ -468,7 +496,7 @@ def run_pill():
         elif line.startswith('ACTIVITY ') and activity_label is not None:
             text = line[9:].strip()
             if text:
-                activity_label.set_text(text)
+                set_activity(text)
                 layout()
 
     def on_stdin(fd, condition):

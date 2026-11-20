@@ -62,7 +62,7 @@ The command gets clawdcursor's whole environment, plus:
 
 | Variable | Form | Value |
 | --- | --- | --- |
-| `CLAWD_BANNER_ACTIVITY` | running | What the agent is doing when the pill appears, e.g. `Typing in Edge`. Empty: show a neutral word such as "Working". |
+| `CLAWD_BANNER_ACTIVITY` | running | What the agent is doing when the pill appears, e.g. `running in background · Typing in Edge` or `requires foreground · Clicking in Paint`; the mode alone (`running in background`) before there is an activity. Empty: show a neutral word such as "Working". |
 | `CLAWD_BANNER_APP` | paused | The app the agent was working in, e.g. `Edge`, for the card's title. May be empty. |
 | `CLAWD_BANNER_MODE` | paused | `paused`. |
 | `CLAWD_BANNER_MESSAGE` | paused | The instruction to show: `The agent says: ` followed by the agent's message (one line, at most 300 characters). Show it as it is: the prefix tells the user the text was written by the agent. |

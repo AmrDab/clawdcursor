@@ -49,9 +49,9 @@ describe('macOS overlay: pill, outline, glow', () => {
     expect(swift.slice(swift.indexOf('func showGhost'), swift.indexOf('func updateGhost'))).toContain('CursorView(cell: 2)');
   });
 
-  it('banner.ts spawns the glow, and sends the ghost and the multi-target line, on darwin too', () => {
+  it('banner.ts spawns the glow, and sends the ghost and the one-window line, on darwin too', () => {
     expect(banner).toMatch(/platform === 'darwin'\) return spawn\(macOverlayBinary\.cached\(macScript\(\)\)!, \['glow', \.\.\.color\]/);   // blue at a pause
-    expect(banner).toMatch(/const others = w\s*\n\s*\? agentWindows\(\)/);   // the multi-window line is cross-platform now
+    expect(banner).toContain("const line = w ? `TARGET ${outlineWindowNumber(w.handle, w.processId)} ${w.processId}` : 'TARGET';");   // one window, every OS
     expect(banner).toContain("if (process.platform === 'win32' || process.platform === 'darwin') send(this.outlineChild, `GHOST");
   });
 });

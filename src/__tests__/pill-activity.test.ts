@@ -77,25 +77,25 @@ describe('the pill line', () => {
     controlBanner.setActivity('Typing in Edge');
     controlBanner.setActivity('Clicking in Edge');
     await flush();
-    expect(last().child.written).toEqual(['ACTIVITY Typing in Edge', 'ACTIVITY Clicking in Edge']);
+    expect(last().child.written).toEqual(['ACTIVITY running in background · Typing in Edge', 'ACTIVITY running in background · Clicking in Edge']);
   });
 
   it('keeps a label on one line', async () => {
     controlBanner.touch();
     controlBanner.setActivity('a\r\nHIDE 9999');
     await flush();
-    expect(last().child.written).toEqual(['ACTIVITY a HIDE 9999']);
+    expect(last().child.written).toEqual(['ACTIVITY running in background · a HIDE 9999']);
   });
 
   it('a new pill starts with the current label; the next session starts blank', () => {
     controlBanner.setActivity('Typing in Edge');
     controlBanner.touch();
-    expect(last().mode.activity).toBe('Typing in Edge');
-    expect(overlayEnv(last().mode).CLAWD_BANNER_ACTIVITY).toBe('Typing in Edge');
+    expect(last().mode.activity).toBe('running in background · Typing in Edge');
+    expect(overlayEnv(last().mode).CLAWD_BANNER_ACTIVITY).toBe('running in background · Typing in Edge');
     controlBanner.pin(); controlBanner.unpin(); // the session ends: hidden
     controlBanner.touch();
-    expect(last().mode.activity).toBeUndefined();
-    expect(overlayEnv(last().mode).CLAWD_BANNER_ACTIVITY).toBe('');
+    expect(last().mode.activity).toBe('running in background');   // the start value is the mode alone, never "Working"
+    expect(overlayEnv(last().mode).CLAWD_BANNER_ACTIVITY).toBe('running in background');
   });
 
   it('writes nothing to the paused card', async () => {
@@ -111,7 +111,7 @@ describe('the pill line', () => {
     controlBanner.touch();
     controlBanner.showPaused({ id: 1, message: 'Sign in', since: 0 }, () => {});
     controlBanner.showRunning();
-    expect(last().mode.activity).toBeUndefined();
+    expect(last().mode.activity).toBe('running in background');
   });
 });
 
@@ -161,7 +161,11 @@ describe('quick takeovers (R2 bursts) on the pill', () => {
     await burst();
     controlBanner.setActivity('Typing in Edge');
     await flush();
-    expect(last().child.written).toEqual(['ACTIVITY Typing in Edge', 'ACTIVITY Typing in Edge · 1 quick takeover', 'ACTIVITY Typing in Edge · 2 quick takeovers']);
+    expect(last().child.written).toEqual([
+      'ACTIVITY running in background · Typing in Edge',
+      'ACTIVITY requires foreground · Typing in Edge · 1 quick takeover',
+      'ACTIVITY requires foreground · Typing in Edge · 2 quick takeovers',
+    ]);
   });
 
   it('the next session starts at 0', async () => {

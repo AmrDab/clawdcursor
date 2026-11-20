@@ -174,15 +174,65 @@ describe('the reply names the element acted on, and a partial match is listed, n
     } finally { Object.defineProperty(process, 'platform', realPlatform); }
   });
 
-  it('smart_click: an inexact a11y answer is the answer; the OCR text is not clicked in its place', async () => {
+  it('smart_click: several inexact matches stay AMBIGUOUS; the OCR text is not clicked in their place', async () => {
     const realPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
     Object.defineProperty(process, 'platform', { ...realPlatform, value: 'win32' });
     try {
-      const { ctx, mouseClick } = ctxFor(async () => INEXACT);
+      const two = { ...INEXACT, candidates: [...INEXACT.candidates, { name: 'New tab', controlType: 'ControlType.Button' }] };
+      const { ctx, mouseClick, a11y } = ctxFor(async () => two);
       const r = await smartClick.handler({ target: 'New', timeout: 1500 }, ctx);
       expect(r.isError).toBe(true);
       expect(mouseClick).not.toHaveBeenCalled();
+      expect(a11y.invokeElement).toHaveBeenCalledTimes(1);   // nothing was pressed, not even a second try
       expect(r.text).toMatch(/no element is named exactly that/);
+    } finally { Object.defineProperty(process, 'platform', realPlatform); }
+  });
+
+  it('smart_click: exactly one partial match is pressed by its full name, and the reply names it', async () => {
+    const realPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...realPlatform, value: 'win32' });
+    try {
+      const { ctx, mouseClick, a11y } = ctxFor(async () => INEXACT);
+      a11y.invokeElement.mockImplementation(async (q: { name?: string }) => q.name === "What's New"
+        ? { success: true, action: 'click', target: { name: "What's New", controlType: 'ControlType.Hyperlink', match: 'exact' } }
+        : INEXACT);
+      const r = await smartClick.handler({ target: 'New', timeout: 1500 }, ctx);
+      expect(a11y.invokeElement).toHaveBeenLastCalledWith(expect.objectContaining({ name: "What's New", action: 'click' }));
+      expect(r.isError).toBeFalsy();
+      expect(r.text).toMatch(/^Clicked \[Hyperlink\] "What's New" \(its name contains "New"\) via UI Automation/);
+      expect(mouseClick).not.toHaveBeenCalled();
+    } finally { Object.defineProperty(process, 'platform', realPlatform); }
+  });
+
+  it('smart_click: with a platform, the by-name act goes through platform.invokeElement and not the legacy bridge', async () => {
+    const realPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...realPlatform, value: 'win32' });
+    try {
+      const { ctx, a11y } = ctxFor(async () => ({ success: true }));
+      const invokeElement = vi.fn(async () => ({ success: true, data: { target: { name: 'Save', controlType: 'Button', match: 'exact' } } }));
+      (ctx as unknown as { platform: unknown }).platform = { getActiveWindow: async () => null, invokeElement };
+      const r = await smartClick.handler({ target: 'Save', timeout: 1500 }, ctx);
+      expect(invokeElement).toHaveBeenCalledWith(expect.objectContaining({ name: 'Save', action: 'click', processId: 3648 }));
+      expect(a11y.invokeElement).not.toHaveBeenCalled();
+      expect(r.text).toMatch(/^Clicked \[Button\] "Save" via UI Automation/);
+    } finally { Object.defineProperty(process, 'platform', realPlatform); }
+  });
+
+  it('smart_click: a platform miss with ambiguous candidates is still the list; a refused element is clicked by position and says so', async () => {
+    const realPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...realPlatform, value: 'win32' });
+    try {
+      const { ctx, mouseClick } = ctxFor(async () => ({ success: true }));
+      const platform = ctx as unknown as { platform: { invokeElement: unknown; getActiveWindow: unknown } };
+      platform.platform = { getActiveWindow: async () => null, invokeElement: vi.fn(async () => ({ success: false, data: { reason: 'ambiguous', candidates: CANDIDATES } })) };
+      const listed = await smartClick.handler({ target: 'New', timeout: 1500 }, ctx);
+      expect(listed.isError).toBe(true);
+      expect(listed.text).toMatch(/2 elements on screen match that name/);
+      expect(mouseClick).not.toHaveBeenCalled();
+      platform.platform.invokeElement = vi.fn(async () => ({ success: false, bounds: { x: 100, y: 200, width: 40, height: 20 } }));
+      const byPosition = await smartClick.handler({ target: 'Save', timeout: 1500 }, ctx);
+      expect(mouseClick).toHaveBeenCalledWith(120, 210);
+      expect(byPosition.text).toMatch(/^Clicked "Save" via a11y bounds \(coordinate fallback at 120,210\)/);
     } finally { Object.defineProperty(process, 'platform', realPlatform); }
   });
 
