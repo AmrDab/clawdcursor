@@ -14,9 +14,9 @@ import { DEFAULT_CONFIG } from '../types';
 import { getPackageRoot } from '../paths';
 import { hasConsent } from './onboarding';
 import { checkPermissionsQuick, requestPermissions, screenRecordingGranted, nativeBuildHint, isMacOS } from '../platform/native-helper';
-import { findInstalledCopies, describeCopies, compareVersions, fetchLatestRelease } from './installed-copies';
+import { findInstalledCopies, describeCopies, compareVersions } from './installed-copies';
 import { VERSION } from '../version';
-import { installMethod, howToUpdate } from './update';
+import { installMethod, howToUpdate, latestPublished } from './update';
 
 interface DiagResult {
   name: string;
@@ -239,43 +239,33 @@ function checkInstalledCopies(results: DiagResult[], latest: string | undefined)
 }
 
 /**
- * Check for newer versions on GitHub releases. Returns the latest released
+ * Check for newer versions on the npm registry, as `clawdcursor update` does. Returns the latest published
  * version when the check succeeded.
  */
-async function checkForUpdates(results: DiagResult[]): Promise<string | undefined> {
+export async function checkForUpdates(results: DiagResult[]): Promise<string | undefined> {
   try {
     const currentVersion = VERSION;
     console.log(`   Current: v${currentVersion}`);
 
-    // The same release `versions` flags copies against (installed-copies.ts latestRelease).
-    const res = await fetchLatestRelease();
+    const latestTag = await latestPublished();
 
-    if (res.ok) {
-      const data = await res.json() as any;
-      const latestTag = (data.tag_name || '').replace(/^v/, '');
-
-      if (latestTag && latestTag !== currentVersion && compareVersions(latestTag, currentVersion) > 0) {
-        console.log(`   ⬆️  Update available: v${latestTag} (you have v${currentVersion})`);
-        const method = installMethod(getPackageRoot());
-        console.log(`   ${method === 'npm-global' ? 'Run: clawdcursor update' : howToUpdate(method)}`);
-        results.push({
-          name: 'Version',
-          ok: false,
-          detail: `Update available: v${latestTag} (current: v${currentVersion})`,
-        });
-      } else {
-        console.log(`   ✅ Up to date (v${currentVersion})`);
-        results.push({ name: 'Version', ok: true, detail: `v${currentVersion} (latest)` });
-      }
-      return latestTag || undefined;
+    if (compareVersions(latestTag, currentVersion) > 0) {
+      console.log(`   ⬆️  Update available: v${latestTag} (you have v${currentVersion})`);
+      const method = installMethod(getPackageRoot());
+      console.log(`   ${method === 'npm-global' ? 'Run: clawdcursor update' : howToUpdate(method)}`);
+      results.push({
+        name: 'Version',
+        ok: false,
+        detail: `Update available: v${latestTag} (current: v${currentVersion})`,
+      });
     } else {
-      // GitHub API rate limit or error — skip gracefully
-      console.log(`   ✅ v${currentVersion} (update check skipped — GitHub API returned ${res.status})`);
-      results.push({ name: 'Version', ok: true, detail: `v${currentVersion} (update check skipped)` });
+      console.log(`   ✅ Up to date (v${currentVersion})`);
+      results.push({ name: 'Version', ok: true, detail: `v${currentVersion} (latest)` });
     }
+    return latestTag;
   } catch (err: any) {
-    if (err.name === 'AbortError') {
-      console.log(`   ⚠️  Update check timed out (5s) — skipping`);
+    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+      console.log(`   ⚠️  Update check timed out (10s) — skipping`);
     } else {
       console.log(`   ⚠️  Update check failed — skipping`);
     }

@@ -118,13 +118,23 @@ export async function ensureInFront(platform: Pick<PlatformAdapter, 'getActiveWi
 
 /**
  * Why a plain `select name:"X"` (no value) failed when X is no item: names the roles that matched and how to pick an
- * option inside a dropdown. undefined when X is a selectable item or nothing by that name was found.
+ * option inside a dropdown. When nothing by that name was found but the window has a dropdown, X may be one of its
+ * options (#445): the reason gives the call that works. undefined when X is a selectable item or no dropdown is there.
  */
 export async function notSelectableReason(
   platform: Pick<PlatformAdapter, 'findElements'>,
   q: { name: string; controlType?: string; processId?: number },
 ): Promise<string | undefined> {
   const { named } = await findControls(platform, 'select', q);
-  if (!named.length || named.some(h => isSelectableItem(h.controlType))) return undefined;
+  if (named.some(h => isSelectableItem(h.controlType))) return undefined;
+  if (!named.length) {
+    const combos = await platform.findElements({ controlType: 'ComboBox', processId: q.processId }).catch(() => []);
+    const names = [...new Set((Array.isArray(combos) ? combos : []).map(c => String(c.name ?? '').trim()).filter(Boolean))].slice(0, 5);
+    if (!names.length) return undefined;
+    const call = (dropdown: string) => `call accessibility {action:"select", name:${dropdown}, value:${JSON.stringify(q.name)}}`;
+    return names.length === 1
+      ? `no list item or tab has that name; if it is an option of a dropdown, ${call(JSON.stringify(names[0]))}`
+      : `no list item or tab has that name; if it is an option of one of the dropdowns ${names.map(n => JSON.stringify(n)).join(', ')}, ${call('"<that dropdown>"')}`;
+  }
   return `${quoteScreenText(q.name)} is not a list item or tab to select (it is a ${[...new Set(named.map(h => h.controlType))].join(', ')}); to pick an option inside a dropdown, pass value`;
 }

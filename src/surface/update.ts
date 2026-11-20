@@ -48,7 +48,8 @@ export function npmCliPath(packageRoot: string, env: NodeJS.ProcessEnv = process
 /** It becomes an npm package spec: a plain version only, never a URL, a git ref, an alias or an extra argument. */
 export const isPlainVersion = (v: unknown): v is string => typeof v === 'string' && /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(v);
 
-async function latestPublished(): Promise<string> {
+/** The latest version on the npm registry: what `clawdcursor update` installs, and what `doctor` compares against. */
+export async function latestPublished(): Promise<string> {
   const res = await fetch('https://registry.npmjs.org/clawdcursor/latest', { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });
   if (!res.ok) throw new Error(`the npm registry answered ${res.status}`);
   const { version } = await res.json() as { version?: string };

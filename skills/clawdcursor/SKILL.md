@@ -81,7 +81,7 @@ metadata:
 ## When you need step-level control - 6 compound tools
 
 The compact surface collapses every primitive into five action-discriminated
-compound tools plus `batch`, mirroring Anthropic's `computer_20250124` pattern:
+compound tools plus `batch`:
 
 ```
 computer(action, ...)       Direct mouse / keyboard / screenshot / wait
