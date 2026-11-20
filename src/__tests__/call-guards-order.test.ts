@@ -19,7 +19,7 @@ vi.mock('../core/banner', () => ({
   controlBanner: { touch: vi.fn(), hold: vi.fn(() => () => {}), pin: vi.fn(), unpin: vi.fn(), isVisible: vi.fn(), overlayPids: vi.fn(() => []) },
 }));
 const pause = vi.hoisted(() => ({ pending: null as null | { message: string } }));
-vi.mock('../core/pause-gate', () => ({ pauseGate: { current: () => pause.pending } }));
+vi.mock('../core/pause-gate', () => ({ pauseGate: { current: () => pause.pending, withdrawFor: () => {} }, asPauseOwner: (_owner: string, fn: () => unknown) => fn() }));
 
 type Handler = (params: Record<string, unknown>) => Promise<{ content: Array<{ type: string; text?: string }>; isError?: boolean }>;
 const handlers = vi.hoisted(() => new Map<string, Handler>());

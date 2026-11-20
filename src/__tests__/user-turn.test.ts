@@ -1,7 +1,7 @@
 /**
- * The user's turn (owner, 2026-11-18; control.ts): real input waits for the user to be idle; when they take over, after
- * 5 s the agent goes on if they are idle, and if they are still working it is held until they click Resume on the pill.
- * The pill's Pause holds every act, background ones included. A held call returns a waiting reply the agent calls again.
+ * The user's turn (control.ts): real input while the user is using the computer is refused at once, nothing held and the
+ * pill not told (owner, 2026-11-20), so the agent keeps working in the background; acts by name and reads go on. The
+ * pill's Pause holds every act, background ones included. A held call returns a waiting reply the agent calls again.
  * Real timers with the turn's times shortened, and a fake idle clock that, like the OS, counts the agent's input too.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -10,7 +10,7 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   __setControlDirForTests, __setForegroundReaderForTests, __setIdleReaderForTests, turnTiming, holdControl, releaseHold,
-  isHeld, setOnHold, stopControl, isGuardRefusal, STOPPED_TEXT, withTurnBudget, type HoldEvent,
+  isHeld, setOnHold, giveControlBack, stopControl, resumeControl, isGuardRefusal, STOPPED_TEXT, withTurnBudget, type HoldEvent,
 } from '../core/control';
 import { guardInputMethods, ownInputAt, _resetHeldKeys } from '../platform/pointer-guard';
 import { withForegroundBurst } from '../platform/foreground-burst';
@@ -49,7 +49,7 @@ beforeEach(async () => {
   __setControlDirForTests(dir);
   __setForegroundReaderForTests(async () => EDGE);
   // waitMs long enough that a loaded machine never ends a wait before the test clicks Resume; one test shortens it.
-  Object.assign(turnTiming, { idleMs: 40, takeoverMs: 80, waitMs: 2000, pollMs: 5, graceMs: 30 });
+  Object.assign(turnTiming, { idleMs: 40, waitMs: 2000, pollMs: 5, graceMs: 30 });
   typing = false;
   userAt = 0;
   // The OS's idle time counts every process's input, the agent's own too (GetLastInputInfo).
@@ -71,52 +71,57 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-describe('real input waits for the user', () => {
-  it('a click while the user is at the keyboard is not sent; idle at the takeover mark, it goes on by itself', async () => {
+describe('real input while the user is using the computer', () => {
+  const BUSY = /^the user is using the computer, and nothing was sent/;
+
+  it('is refused at once: nothing sent, nothing held, the pill not told; once they are idle the same step goes through', async () => {
     const d = fakeDesktop();
     typing = true;
     const t0 = Date.now();
-    const click = d.mouseClick(1, 1);
-    await sleep(30);
+    const err = await refused(d.mouseClick(1, 1));
+    expect(Date.now() - t0).toBeLessThan(500);   // no wait for them (it was up to waitMs, 2000 here)
+    expect(err.message).toMatch(BUSY);
     expect(d.sent).toEqual([]);
-    expect(events).toEqual(['takeover']);   // the pill: "Paused — your turn", the glow down
-    typing = false;                         // they stop
-    await click;
-    expect(d.sent).toEqual(['click 1,1']);
-    expect(Date.now() - t0).toBeGreaterThanOrEqual(turnTiming.takeoverMs - 5);
-    expect(events).toEqual(['takeover', 'resumed']);
+    expect(events).toEqual([]);                  // the pill keeps "running in background": no "Paused — your turn"
     expect(isHeld()).toBe(false);
-  });
-
-  it('still working at the takeover mark: held (the pill offers Resume), and the pill\'s Resume sends it', async () => {
-    const d = fakeDesktop();
-    typing = true;
-    const click = d.mouseClick(1, 1);
-    await sleep(turnTiming.takeoverMs + 40);
-    expect(isHeld()).toBe(true);
-    expect(events).toEqual(['takeover', 'held']);
-    await sleep(60);
-    expect(d.sent).toEqual([]);             // no auto-resume once held, however long they work
+    expect(fs.existsSync(path.join(dir, 'held.json'))).toBe(false);
     typing = false;
-    userAt = Date.now();                    // the click on Resume is input too: not a takeover
-    releaseHold('pill');
-    await click;
+    await sleep(60);                             // idle for longer than idleMs
+    await d.mouseClick(1, 1);
     expect(d.sent).toEqual(['click 1,1']);
-    expect(events).toEqual(['takeover', 'held', 'resumed']);
   });
 
-  it('Stop during a takeover: refused as stopped, and the pill is not left saying "your turn"', async () => {
+  it('says what it is: the user at work, not their Pause; keep working by name meanwhile', async () => {
     const d = fakeDesktop();
     typing = true;
-    const click = refused(d.mouseClick(1, 1));
-    await sleep(20);
-    stopControl('pill');
-    expect((await click).message).toBe(STOPPED_TEXT);
-    expect(events).toEqual(['takeover', 'resumed']);
-    expect(isHeld()).toBe(false);
+    const err = await refused(d.keyPress('a'));
+    expect(err.message).toMatch(/Keep working in the background meanwhile: read and act by name/);
+    expect(err.message).not.toMatch(/paused by the user|Resume/);
+    expect(isGuardRefusal(err)).toBe(true);
+    const c = classifyResult(`Error: ${err.message}`, true, true);
+    expect(c).toMatchObject({ outcome: 'refused', code: 'USER_ACTIVE' });
+    expect(c?.hint).toMatch(/Keep working by name/);
+    expect(d.sent).toEqual([]);
   });
 
-  it('the agent\'s own input is not the user\'s: back-to-back inputs do not wait', async () => {
+  it('bringing a window to the front is refused at once: the user\'s window stays in front', async () => {
+    const calls: string[] = [];
+    const d = guardInputMethods({ async focusWindow(_q: unknown) { calls.push('focus'); return true; } });
+    typing = true;
+    expect((await refused(d.focusWindow({ title: 'Settings' }))).message).toMatch(BUSY);
+    expect(calls).toEqual([]);
+  });
+
+  it('acts by name and reads go on while the user works', async () => {
+    const d = fakeDesktop();
+    typing = true;
+    await d.invokeElement({ name: 'OK', processId: 300 });
+    await d.getUiTree();
+    expect(d.sent).toEqual(['invoke OK', 'read']);
+    expect(events).toEqual([]);
+  });
+
+  it('the agent\'s own input is not the user\'s: back-to-back inputs go through', async () => {
     const d = fakeDesktop();
     await d.mouseClick(1, 1);
     await d.keyPress('a');
@@ -125,35 +130,27 @@ describe('real input waits for the user', () => {
     expect(events).toEqual([]);
   });
 
-  it('a move waits for the user like a click; a release never does', async () => {
+  it('a move is refused like a click; a release never is', async () => {
     const d = fakeDesktop();
     typing = true;
-    const move = d.mouseMove(5, 5);
+    expect((await refused(d.mouseMove(5, 5))).message).toMatch(BUSY);
     await d.mouseUp();
     expect(d.sent).toEqual(['up']);
-    typing = false;
-    await move;
-    expect(d.sent).toEqual(['up', 'move 5,5']);
   });
 
-  it('a drag in progress is finished, never left pressed while the user works: only its start waited for them', async () => {
+  it('a drag in progress is finished, never left pressed while the user works: only its start was checked', async () => {
     const d = fakeDesktop();
     await d.mouseDown();
     typing = true;                 // the user grabs their mouse mid-drag
-    await d.mouseMove(5, 5);       // goes on: waiting here would leave the button down under their hand
+    await d.mouseMove(5, 5);       // goes on: stopping here would leave the button down under their hand
     await d.mouseUp();
     expect(d.sent).toEqual(['down', 'move 5,5', 'up']);
-    expect(events).toEqual([]);
-    await sleep(10);                  // their next mouse event
-    const next = d.mouseMove(6, 6);   // the gesture is over: the next one waits for them
-    await sleep(30);
-    expect(events).toEqual(['takeover']);
-    typing = false;
-    await next;
-    expect(d.sent.at(-1)).toBe('move 6,6');
+    await sleep(10);
+    expect((await refused(d.mouseMove(6, 6))).message).toMatch(BUSY);   // the gesture is over
+    expect(d.sent).toEqual(['down', 'move 5,5', 'up']);
   });
 
-  it('another call running while a burst runs still waits for the user: the burst only lets its own call through', async () => {
+  it('another call while a burst runs is still refused when the user works: the burst only lets its own call through', async () => {
     const d = fakeDesktop();
     let fg = { processId: 10, handle: 500 };
     let finish = () => {};
@@ -168,37 +165,68 @@ describe('real input waits for the user', () => {
     const burst = withForegroundBurst(platform, { processId: 42 }, async b => b.act(() => new Promise<void>(r => { finish = r; })));
     await sleep(20);               // the burst is in its act
     typing = true;
-    const click = d.mouseClick(1, 1);
-    await sleep(30);
+    expect((await refused(d.mouseClick(1, 1))).message).toMatch(BUSY);
     expect(d.sent).toEqual([]);
-    expect(events).toEqual(['takeover']);
     typing = false;
     finish();
-    await Promise.all([burst, click]);
-    expect(d.sent).toEqual(['click 1,1']);
+    await burst;
   });
 
-  it('a quick run of the agent’s inputs does not hide a user who starts working in the middle of it', async () => {
+  it('a quick run of the agent\u2019s inputs does not hide a user who starts working in the middle of it', async () => {
     const d = fakeDesktop();
     await d.keyPress('a');
     typing = true;                    // milliseconds later, the user is at the keyboard
     await sleep(5);
-    const next = d.keyPress('b');     // a time window after the agent's own input would have let this through
-    await sleep(20);
+    expect((await refused(d.keyPress('b'))).message).toMatch(BUSY);
     expect(d.sent).toEqual(['key a']);
-    expect(events).toEqual(['takeover']);
-    typing = false;
-    await next;
-    expect(d.sent).toEqual(['key a', 'key b']);
   });
 
-  it('where idle time cannot be read (Linux), nothing waits', async () => {
+  it("the user's Resume click on a pause card is not them using the computer, with nothing held or after a Stop", async () => {
+    const d = fakeDesktop();
+    userAt = Date.now();               // their click on the card's Resume (nothing was held)
+    releaseHold('pause_resume');
+    await d.mouseClick(1, 1);
+    stopControl('pill');
+    userAt = Date.now();               // their click on Resume after a Stop
+    resumeControl('pause_resume');
+    await d.mouseClick(2, 2);
+    expect(d.sent).toEqual(['click 1,1', 'click 2,2']);
+  });
+
+  it('where idle time cannot be read (Linux), nothing is refused', async () => {
     __setIdleReaderForTests(async () => null);
     const d = fakeDesktop();
     typing = true;
     await d.mouseClick(1, 1);
     expect(d.sent).toEqual(['click 1,1']);
     expect(events).toEqual([]);
+  });
+});
+
+describe('holds', () => {
+  it('the Pause button keeps its words and its own code; a pause card has a third', () => {
+    expect(classifyResult('paused by the user — they have the desktop, and nothing was sent.', true, true)?.code).toBe('PAUSED');
+    expect(classifyResult('paused — a pause is waiting for the user on screen, and nothing runs', true, true)?.code).toBe('PAUSE_PENDING');
+  });
+
+  it('a hold whose writing process is gone is stale: not held, and the file is removed', () => {
+    const file = path.join(dir, 'held.json');
+    fs.writeFileSync(file, JSON.stringify({ by: 'takeover', pid: 2 ** 30, at: Date.now() }));   // no such process
+    expect(isHeld()).toBe(false);
+    expect(fs.existsSync(file)).toBe(false);
+  });
+
+  it('a hold whose writer is alive still holds', () => {
+    fs.writeFileSync(path.join(dir, 'held.json'), JSON.stringify({ by: 'pill', pid: process.pid, at: Date.now() }));
+    expect(isHeld()).toBe(true);
+  });
+
+  it('resume clears a hold with no Stop set', () => {
+    holdControl('pill');
+    expect(isHeld()).toBe(true);
+    expect(giveControlBack('cli')).toBe(true);
+    expect(isHeld()).toBe(false);
+    expect(giveControlBack('cli')).toBe(false);   // nothing left to give back
   });
 });
 
@@ -286,7 +314,7 @@ describe('the pill\'s Pause', () => {
   it('a Pause from another clawdcursor process holds this one too, and this pill offers Resume; its Resume lets it go', async () => {
     const d = fakeDesktop();
     const file = path.join(dir, 'held.json');
-    fs.writeFileSync(file, JSON.stringify({ by: 'pill', pid: 1, at: Date.now() }));   // as another process's Pause writes it
+    fs.writeFileSync(file, JSON.stringify({ by: 'pill', pid: process.pid, at: Date.now() }));   // as another process's Pause writes it
     expect(isHeld()).toBe(true);
     const click = d.mouseClick(1, 1);
     await sleep(40);

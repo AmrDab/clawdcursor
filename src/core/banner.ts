@@ -69,7 +69,7 @@ const DODGE_SETTLE_MS = 90;
 const PAUSED_OUTLINE = '#3b82f6'; // blue — "your turn"
 /** What the pill says while it is the user's turn: an R2 burst paused for them, or a takeover waiting to see if they are done. */
 const PAUSED_LABEL = 'Paused — your turn';
-/** ...and while they hold it (the pill's Pause, or they kept working): Resume on the pill continues. */
+/** ...and while they hold it (the pill's Pause): Resume on the pill continues. */
 const HELD_LABEL = 'Paused';
 
 /** How long the full-screen glow stays up after the last foreground input, or after a foreground burst ends. */

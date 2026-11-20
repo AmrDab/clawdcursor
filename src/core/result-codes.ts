@@ -86,12 +86,16 @@ const RULES: Rule[] = [
     hint: 'high-security mode: no screenshot goes to the model; read the screen without one', next: REREAD },
   { code: 'OWN_UI', outcome: 'refused', test: /is clawdcursor's own on-screen control/i,
     hint: 'that is the user\'s pill; target the app instead', next: REREAD },
-  { code: 'PAUSED', outcome: 'refused', test: /a pause is waiting for the user on screen/i,
-    hint: 'the user has not answered the pause yet; wait, do not act' },
-  // The user's hold (control.ts): the pill's Pause, or a takeover they kept working through. A waiting reply, not a refusal.
+  // A pause card (pause_for_user, confirm mode) is on screen: only the user's answer ends it, so the agent waits and does not act.
+  { code: 'PAUSE_PENDING', outcome: 'refused', test: /a pause is waiting for the user on screen/i,
+    hint: 'the user has not answered the pause card yet; wait for the answer, do not act' },
+  // The pill's Pause (control.ts). A waiting reply, not a refusal: the same step again.
   { code: 'PAUSED', outcome: 'refused', test: /paused by the user — they have the desktop/i,
     hint: 'the user paused clawdcursor; call the same step again to keep waiting: it runs once they click Resume on the pill. Do not give up or act some other way' },
-  // Confirm mode (confirm-mode.ts): the user did not let a held act through. A held act still waiting is PAUSED above.
+  // The user is using the computer (control.ts); they did not press Pause, so this is not PAUSED.
+  { code: 'USER_ACTIVE', outcome: 'refused', test: /the user is using the computer/i,
+    hint: "the user is using the computer, which they may while you work in the background; nothing was sent. Keep working by name meanwhile (pass the app's processId), and call this step again in a few seconds" },
+  // Confirm mode (confirm-mode.ts): the user did not let a held act through. A held act still waiting is PAUSE_PENDING above.
   { code: 'NOT_CONFIRMED', outcome: 'refused', test: /not confirmed: confirm mode/i,
     hint: 'confirm mode held this act and the user did not let it through; nothing was sent, do not retry it' },
   { code: 'STOPPED', outcome: 'refused', test: /stopped by the user — they took control back/i,

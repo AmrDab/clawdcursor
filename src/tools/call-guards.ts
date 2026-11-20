@@ -24,6 +24,8 @@ export interface GuardedCall {
   /** Allowed while a pause waits / while the user has stopped clawdcursor (own-ui-guard.ts). */
   pauseSafe: boolean;
   stopSafe: boolean;
+  /** Sends input or changes a window: another process's pause card holds these, and only these (own-ui-guard.ts). */
+  acts: boolean;
 }
 
 /**
@@ -35,6 +37,7 @@ export function guardedCall(tool: string, action: string | undefined, args: Reco
   return {
     tool, action, args,
     pauseSafe: !precondition && isPauseSafeCall(c.tool, c.action), stopSafe: !precondition && isStopSafeCall(c.tool, c.action),
+    acts: isActingAction(c.tool, c.action),
   };
 }
 
@@ -46,7 +49,7 @@ export async function refusalBefore(c: GuardedCall, ctx: ToolContext, passedStop
     const why = await imagePointerRefusal(ctx, c.args);
     if (why) return { guard: 'screen_binding', why };
   }
-  const ownUi = ownUiRefusal(c.args, c.pauseSafe, c.stopSafe);
+  const ownUi = ownUiRefusal(c.args, c.pauseSafe, c.stopSafe, c.acts);
   return ownUi ? { guard: 'own_ui', why: ownUi } : null;
 }
 

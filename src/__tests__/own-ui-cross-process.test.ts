@@ -8,6 +8,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { publishOverlayState, foreignOverlayState, __setOverlayStateDirForTests } from '../core/overlay-state';
 import { ownUiRefusal } from '../core/own-ui-guard';
+import { guardedCall, refusalBefore } from '../tools/call-guards';
+import type { ToolContext } from '../tools/types';
 import { promptSatisfies } from '../core/pause-text';
 import { checkAssertions } from '../core/verify/assertions';
 import { setOwnUiPids } from '../platform/pointer-guard';
@@ -56,6 +58,19 @@ describe('overlay state across processes', () => {
     expect(ownUiRefusal({ assertions: [{ type: 'element_exists', name: 'Saved' }] }, true)).toMatch(/a pause is waiting/);
     expect(ownUiRefusal({ processId: 5555 }, true)).toMatch(/is clawdcursor's own on-screen control/);
     expect(ownUiRefusal({}, true)).toBeNull();
+  });
+
+  it('a pause card from another process holds real input only: reads still run, its pill is still never a target', async () => {
+    writeForeign(process.ppid, { pids: [5555], paused: true });
+    const ctx = {} as ToolContext;
+    const why = (tool: string, action: string, args: Record<string, unknown> = {}) => refusalBefore(guardedCall(tool, action, args), ctx);
+    for (const [tool, action] of [['accessibility', 'read_tree'], ['system', 'ocr'], ['system', 'copy_all_text'], ['window', 'list']] as const) {
+      expect(await why(tool, action), tool + ' ' + action).toBeNull();
+    }
+    for (const [tool, action] of [['computer', 'click'], ['computer', 'type'], ['accessibility', 'invoke'], ['window', 'focus']] as const) {
+      expect(await why(tool, action), tool + ' ' + action).toMatchObject({ guard: 'own_ui', why: expect.stringMatching(/a pause is waiting for the user on screen [(]shown by clawdcursor process/) });
+    }
+    expect(await why('accessibility', 'read_tree', { processId: 5555 })).toMatchObject({ guard: 'own_ui', why: expect.stringMatching(/own on-screen control/) });
   });
 });
 

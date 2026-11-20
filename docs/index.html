@@ -117,8 +117,9 @@
     user keeps using the computer), an amber glow covers the whole screen when it
     uses the mouse and keyboard, and a blue glow covers the whole screen when it
     needs the user for a step. On Windows and macOS it never types or moves the
-    mouse while the user is using the computer: it waits until the user has been
-    idle 1 s. The pill has Pause and Resume.
+    mouse while the user is using the computer: it keeps working by name in the
+    background, and a step that needs the mouse or keyboard runs once the user has
+    been idle 1 s. The pill has Pause and Resume.
 
     ── PLATFORMS ───────────────────────────────────────────────────────────────
     Windows 10/11 (x64 + ARM64), macOS 12+ (Intel + Apple Silicon),
@@ -766,7 +767,7 @@
       </div>
     </div>
     <p style="color:var(--text2);font-size:0.88rem;margin-top:18px;line-height:1.65;">
-      <strong style="color:var(--text);">It waits while you use the computer</strong> (Windows, macOS). It never types or moves the mouse while your hands are on it: it waits until you have been idle for 1 s. If you take over mid-action, nothing more is sent; after 5 s it carries on if you are idle, otherwise it waits for Resume on the pill.
+      <strong style="color:var(--text);">It waits while you use the computer</strong> (Windows, macOS). It never types or moves the mouse while your hands are on it: it waits until you have been idle for 1 s. If you take over mid-action, nothing more is sent, and it carries on by itself once you are idle again: no Resume click needed.
     </p>
     <p style="color:var(--text2);font-size:0.88rem;margin-top:12px;line-height:1.65;">
       <strong style="color:var(--text);">No built-in policy engine.</strong> clawdcursor does not decide what your AI may do: your AI and your MCP host's approval prompts do. If your host approves every tool call on its own, nothing asks before your AI sends, deletes or pays, unless you turn on confirm mode (from 2.1,

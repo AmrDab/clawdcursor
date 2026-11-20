@@ -46,7 +46,7 @@ describe('ownUiRefusal', () => {
     for (const args of [{ name: 'Resume' }, {}]) {
       const why = ownUiRefusal(args, false);
       expect(why).toMatch(/a pause is waiting for the user on screen/);
-      expect(classifyResult(why!, true, true)?.code).toBe('PAUSED');
+      expect(classifyResult(why!, true, true)?.code).toBe('PAUSE_PENDING');
     }
     expect(ownUiRefusal({}, true)).toBeNull();
   });

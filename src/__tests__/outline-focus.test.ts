@@ -9,7 +9,7 @@ import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import type { ChildProcess } from 'child_process';
 import { controlBanner } from '../core/banner';
-import { __setForegroundReaderForTests, workingWindow, workingIn } from '../core/control';
+import { __setForegroundReaderForTests, __setIdleReaderForTests, workingWindow, workingIn } from '../core/control';
 import { guardInputMethods } from '../platform/pointer-guard';
 
 class FakeChild extends EventEmitter {
@@ -140,5 +140,68 @@ describe('the outline follows the agent\'s own focus and launches', () => {
     await d.keyPress('c');
     expect(d.sent).toEqual(['key a', 'key c']);
     expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300 1440 100']);
+  });
+});
+
+describe('a dialog the agents own act opened', () => {
+  const OPEN_DIALOG: Win = { processId: 100, processName: 'msedge', title: 'Open', handle: 0x6c1 };
+  const OTHER: Win = { processId: 500, processName: 'notepad', title: 'Untitled', handle: 0x8d3 };
+
+  it('a window of the same app in front after the agent opened its window is not refused, and becomes the working window', async () => {
+    const d = fakeDesktop({ onOpen: () => ({ title: 'Inbox - Edge' }) });
+    await d.launchApp('Edge');                 // pending: the Edge window, which is in front
+    fg = OPEN_DIALOG;                          // "Attach files" opened Edge's Open box before the next input
+    await d.keyPress('a');
+    expect(d.sent).toEqual(['key a']);
+    expect(workingWindow()).toEqual({ processId: 100, handle: 0x6c1 });
+  });
+
+  it('another app in front is still refused', async () => {
+    const d = fakeDesktop({ onOpen: () => ({ title: 'Inbox - Edge' }) });
+    await d.launchApp('Edge');
+    fg = OTHER;
+    await expect(d.keyPress('a')).rejects.toThrow(/foreground changed: you opened "Inbox - Edge", but "notepad" \(pid 500\) is in front/);
+    expect(d.sent).toEqual([]);
+  });
+
+  it('a focus that never came to the front is still refused, even with the same app in front', async () => {
+    const d = fakeDesktop();
+    await d.keyPress('a');
+    await d.focusWindow({ title: 'RC1527 Test' });
+    fg = OPEN_DIALOG;
+    await expect(d.keyPress('b')).rejects.toThrow(/foreground changed: you focused "RC1527 Test"/);
+  });
+});
+
+describe('a window of the same app the agent was working in, in another process (Edge draws its Open dialog in one)', () => {
+  const EDGE_OPEN: Win = { processId: 200, processName: 'msedge', title: 'Open', handle: 0x6c2 };
+  const OTHER: Win = { processId: 500, processName: 'notepad', title: 'Untitled', handle: 0x8d3 };
+  let tick: number;
+  beforeEach(() => { tick = 1000; __setIdleReaderForTests(async () => ({ tick, idleMs: 5000 })); });
+  afterEach(() => __setIdleReaderForTests(null));
+
+  it('with no input from the user since the agent\'s: not refused, and it becomes the working window', async () => {
+    const d = fakeDesktop();
+    await d.keyPress('ctrl+o');   // in Edge: its Open dialog comes up, drawn by another Edge process
+    fg = EDGE_OPEN;
+    await d.keyPress('a');
+    expect(d.sent).toEqual(['key ctrl+o', 'key a']);
+    expect(workingWindow()).toEqual({ processId: 200, handle: 0x6c2 });
+  });
+
+  it('after input from the user it is refused: they may have switched to it', async () => {
+    const d = fakeDesktop();
+    await d.keyPress('ctrl+o');
+    tick = 2000;                  // the user clicked or typed since (and is idle again)
+    fg = EDGE_OPEN;
+    await expect(d.keyPress('a')).rejects.toThrow(/foreground changed: you were working in "msedge"/);
+    expect(d.sent).toEqual(['key ctrl+o']);
+  });
+
+  it('another app in front is still refused', async () => {
+    const d = fakeDesktop();
+    await d.keyPress('ctrl+o');
+    fg = OTHER;
+    await expect(d.keyPress('a')).rejects.toThrow(/foreground changed: you were working in "msedge"/);
   });
 });

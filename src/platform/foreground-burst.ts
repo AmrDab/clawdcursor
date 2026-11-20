@@ -2,8 +2,8 @@
  * Rung R2 of the own-window ladder: a short foreground burst, only when R0 and R1 cannot do the step. Waits until the user
  * is idle, saves their foreground window and cursor, focuses the target, runs the acts, puts both back. The user always
  * wins: input of theirs mid-burst PAUSES it (their window and cursor come back at once, the step stops) and it is their
- * turn (core/control.ts takeover): idle again after 5 s, the step is run again from the start with the target re-focused;
- * still working, it is held until they click Resume on the pill. Never fought for the foreground.
+ * turn (core/control.ts takeover): once they are idle again, the step is run again from the start with the target
+ * re-focused; no Resume click is needed. Never fought for the foreground.
  */
 import { AsyncLocalStorage } from 'async_hooks';
 import type { WindowInfo } from './types';
@@ -22,7 +22,7 @@ export type BurstTarget = { processId?: number; handle?: number; processName?: s
 
 /**
  * The user's turn, one rule for every input (core/control.ts, which registers it): `idle` — is the user idle now (their
- * input, not ours); `takeover` — they took over: resolves when the step may go on, throws (held until their Resume, or
+ * input, not ours); `takeover` — they took over: resolves when the step may go on, throws (still busy when the call's budget ends, held by the pill's Pause, or
  * stopped) when it may not. With none registered, nothing waits.
  */
 export interface UserTurns { idle(): Promise<boolean>; takeover(): Promise<void> }
@@ -132,7 +132,7 @@ async function burstRun<T>(p: BurstPlatform, target: BurstTarget, fn: (b: Burst)
     },
   };
   /**
-   * Paused: the user's turn (takeover: after 5 s, idle → go on; still working → held until their Resume, which throws the
+   * Paused: the user's turn (takeover: once they are idle → go on; still working when the call's budget ends → it throws the
    * waiting reply meanwhile), then re-focus the same target. Null: resumed; else why not.
    */
   const settle = async (): Promise<'target-changed' | null> => {

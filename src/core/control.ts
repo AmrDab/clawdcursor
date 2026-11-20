@@ -75,6 +75,13 @@ export function resumeControl(by: string): void {
   releaseHold(by);
 }
 
+/** `clawdcursor resume`: ends a stop and a hold, whichever is set. False when there was neither. */
+export function giveControlBack(by: string): boolean {
+  if (!isStopped() && !isHeld()) return false;
+  resumeControl(by);
+  return true;
+}
+
 // The tool's own name, not one surface's call syntax: tool text is renamed per surface (compact.ts toCompactNames), and a
 // literal `system {"action":"pause_for_user"}` came out mangled inside a batch step on the real Mac. The exact call is in the
 // result line's `next` (result-codes.ts STOPPED).
@@ -99,17 +106,15 @@ export async function sleepUnlessStopped(ms: number): Promise<boolean> {
 // Real input (a key, a click, a drag, a move, a focus, a launch: anything that takes the user's mouse, keyboard or front
 // window) waits until the user is idle: the agent never moves the mouse or types while their hands are on it. When they
 // take over (busy when the agent wants to start, or their input in the middle of a foreground burst), nothing more is
-// sent; after `takeoverMs` it carries on by itself if they are idle, and if they are still working clawdcursor is HELD
-// until they click Resume on the pill (or Stop). The pill's Pause holds it too. While held every act waits, background
-// ones included, `waitMs` per call; then the call returns the HELD waiting reply and the agent calls the same step again.
-// Reads are not held.
+// sent, and nothing is held (owner, 2026-11-19): the call waits until they are idle and then goes on by itself. Only the
+// pill's Pause holds clawdcursor, until they click Resume (or Stop). Every wait is bounded per call (`waitMs`); then the
+// call returns the waiting reply and the agent calls the same step again. Reads never wait.
 
 /**
- * idleMs: no input for this long is idle; takeoverMs: how long a takeover waits before it looks again; waitMs: how long
- * one call waits while held (some hosts time a tool call out at 60 s); graceMs: input this soon after the pill's Resume
- * is the user's hand leaving it. Tests shorten them.
+ * idleMs: no input for this long is idle; waitMs: how long one call waits for the user (some hosts time a tool call out at
+ * 60 s); graceMs: input this soon after the pill's Resume is the user's hand leaving it. Tests shorten them.
  */
-export const turnTiming = { idleMs: 1000, takeoverMs: 5000, waitMs: 50_000, pollMs: 200, graceMs: 1500 };
+export const turnTiming = { idleMs: 1000, waitMs: 50_000, pollMs: 200, graceMs: 1500 };
 /** Only where the input clock could not be read after the agent's input: its own input ends a moment before its clock reads it. */
 const OWN_SLACK_MS = 100;
 /** Two reads of the same last input: equal on Windows (GetLastInputInfo's tick), within a ms or two on macOS. */
@@ -127,12 +132,13 @@ let ownBase: Promise<number | null> = Promise.resolve(null);
  */
 const holdFile = () => (dir ? path.join(dir, 'held.json') : null);
 let heldHere: { by: string; since: number } | null = null;
+const aliveProcess = (pid: number) => { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; } };
 /** When the user last clicked Resume on the pill, or this process saw a hold end. */
 let resumedAt = 0;
 /** This process's pill was told 'held' (it offers Resume): it is told 'resumed' when the hold ends, wherever it ended. */
 let pillHeld = false;
 
-/** takeover: the user's turn, waiting `takeoverMs`; held: until their Resume; resumed: the agent's turn again. */
+/** takeover: the user's turn, until they are idle; held: the pill's Pause, until their Resume; resumed: the agent's turn again. */
 export type HoldEvent = 'takeover' | 'held' | 'resumed';
 let onHold: ((e: HoldEvent) => void) | null = null;
 /** The indicator (banner.ts): the pill says "Paused", shows Resume while held, and the glow is down. */
@@ -142,14 +148,20 @@ const tell = (e: HoldEvent) => {
   try { onHold?.(e); } catch { /* cosmetic */ }
 };
 
-/** The hold now, read fresh: another process's Pause or Resume must reach this one at once. */
+/**
+ * The hold now, read fresh: another process's Pause or Resume must reach this one at once. A hold whose writer process is
+ * gone has no pill left to Resume it: it is removed here, so a new session never inherits it.
+ */
 function holdInfo(): { by: string; since: number } | null {
   if (heldHere) return heldHere;
   const file = holdFile();
   if (!file) return null;
   let raw: string;
   try { raw = fs.readFileSync(file, 'utf8'); } catch { return null; }   // no file: not held
-  try { const h = JSON.parse(raw); return { by: String(h?.by ?? ''), since: Number(h?.at) || Date.now() }; } catch { return { by: '', since: Date.now() }; }
+  let h: { by?: unknown; at?: unknown; pid?: unknown };
+  try { h = JSON.parse(raw); } catch { return { by: '', since: Date.now() }; }
+  if (typeof h?.pid === 'number' && !aliveProcess(h.pid)) { try { fs.rmSync(file, { force: true }); } catch { /* gone */ } return null; }
+  return { by: String(h?.by ?? ''), since: Number(h?.at) || Date.now() };
 }
 
 export function isHeld(): boolean { return holdInfo() !== null; }
@@ -179,18 +191,26 @@ export function holdControl(by: string): void {
 
 /** The user's Resume on the pill: the waiting acts go on (in every process), and their click on it is not a takeover. */
 export function releaseHold(by: string): void {
+  // Every Resume (the pill, a pause card, the one after a Stop) is the user's click: not them using the computer, even
+  // with nothing held (live 2026-11-20: the click on a pause card's Resume got the agent's next step refused).
+  resumedAt = Date.now();
   if (!isHeld()) { if (pillHeld) tell('resumed'); return; }
   dropHold();
-  resumedAt = Date.now();
   logger.info('control.release', { by, pid: process.pid });
   tell('resumed');
 }
 
 // Not a guard refusal's "Do not retry": the agent must call the same step again, as with pause_for_user's waiting reply.
+// The Pause button says "paused by the user"; a takeover is the user at work, not a Pause they pressed, and says so.
+const waitedFor = (since: number) => `(waitedSec: ${Math.round((Date.now() - since) / 1000)}).`;
+const NO_GIVING_UP = 'Do not end the task, give up or act some other way meanwhile ';
 const heldText = (since: number) =>
   'paused by the user — they have the desktop, and nothing was sent. Waiting is normal: call the same step again to keep ' +
-  'waiting; it runs the moment they click Resume on the pill. Do not end the task, give up or act some other way meanwhile ' +
-  `(waitedSec: ${Math.round((Date.now() - since) / 1000)}).`;
+  `waiting; it runs the moment they click Resume on the pill. ${NO_GIVING_UP}${waitedFor(since)}`;
+// A takeover holds nothing: the call only waits for the user to be idle.
+const activeText = (since: number) =>
+  'the user is using the computer — clawdcursor is waiting for them, and nothing was sent. Waiting is normal: call the same step again ' +
+  `to keep waiting; it runs once they are idle. ${NO_GIVING_UP}${waitedFor(since)}`;
 
 type Idle = { tick: number; idleMs: number } | null;
 // Off under the test runner unless a test sets a reader. Null: this OS cannot tell (Linux), and then nothing waits.
@@ -217,16 +237,29 @@ async function userIsIdle(): Promise<boolean> {
   return last <= ownInputAt() + OWN_SLACK_MS;
 }
 
+/** No input from the user since the agent's own last input: the OS's last-input tick is still the one that input left. */
+async function untouchedSinceOwnInput(): Promise<boolean> {
+  const [i, base] = await Promise.all([readIdle().catch(() => null), ownBase]);
+  return !!i && base !== null && Math.abs(i.tick - base) <= TICK_SLACK_MS;
+}
+
+// Real input while the user is using the computer (turn below). Starts like activeText: a guard refusal (isGuardRefusal).
+const BUSY_TEXT =
+  'the user is using the computer, and nothing was sent: this step needs the keyboard, the mouse or its window in front, ' +
+  'and while clawdcursor works in the background the user is free to use them. Keep working in the background meanwhile: ' +
+  "read and act by name with the app's processId (accessibility read_tree, invoke, set_value). A step that has no way by " +
+  'name: call it again in a few seconds.';
+
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 /**
  * One tool call's share of waiting for the user (mcp-server.ts runs every call in it): all its waits together, a burst's
- * takeover at the start and another after an interruption included, end by takeoverMs + waitMs from the call's start, so
+ * takeover at the start and another after an interruption included, end by waitMs from the call's start, so
  * the call returns its waiting reply before a host's 60 s limit, never acting later for a call the host gave up on.
  */
 const callBudget = new AsyncLocalStorage<{ until: number }>();
 export function withTurnBudget<R>(fn: () => R): R {
-  return callBudget.run({ until: Date.now() + turnTiming.takeoverMs + turnTiming.waitMs }, fn);
+  return callBudget.run({ until: Date.now() + turnTiming.waitMs }, fn);
 }
 const byDeadline = (until: number) => Math.min(until, callBudget.getStore()?.until ?? Infinity);
 
@@ -249,23 +282,32 @@ async function waitWhileHeld(): Promise<void> {
   stopCheck();
 }
 
+/** Wait, up to the call's budget, until the user is idle (true) or the pill's Pause holds (false). Throws the waiting reply, or STOPPED. */
+async function waitUntilIdle(since: number): Promise<boolean> {
+  const until = byDeadline(Date.now() + turnTiming.waitMs);
+  for (;;) {
+    stopCheck();
+    if (isHeld()) return false;
+    if (await userIsIdle()) return true;
+    if (Date.now() >= until) throw new Error(activeText(since));
+    await sleep(turnTiming.pollMs);
+  }
+}
+
 /**
- * The user took over: busy when the agent wanted to start, or their input in the middle of a burst (whose window and
- * cursor are already theirs again). Nothing is sent. After takeoverMs: idle → resolves, the step goes on; still working
- * → held until their Resume. Throws the waiting reply, or STOPPED.
+ * The user took over a foreground burst (foreground-burst.ts): busy when it wanted to start, or their input in the middle
+ * of it (whose window and cursor are already theirs again). Other real input does not wait for them (turn below). Nothing is sent and nothing is held: the call waits until they are idle, then the step
+ * goes on by itself (owner, 2026-11-19: no Resume click needed). Still working when the call's budget ends: the waiting
+ * reply, and the agent calls the same step again. The pill's Pause meanwhile turns it into a hold. Throws the waiting
+ * reply, or STOPPED.
  */
 export async function takeover(): Promise<void> {
   if (!isHeld()) {
+    const started = Date.now();
     tell('takeover');
     try {
       movedAt = 0;   // a window that comes up meanwhile is the user's doing, not the agent's
-      for (const until = byDeadline(Date.now() + turnTiming.takeoverMs); !isHeld() && Date.now() < until;) {
-        stopCheck();
-        await sleep(Math.min(turnTiming.pollMs, Math.max(0, until - Date.now())));
-      }
-      stopCheck();
-      if (!isHeld() && await userIsIdle()) return;
-      holdControl('takeover');
+      if (await waitUntilIdle(started)) return;
     } finally {
       // Not held (idle again, or stopped): the agent's turn again as far as the pill goes, never "your turn" left up.
       if (!isHeld()) tell('resumed');
@@ -275,15 +317,19 @@ export async function takeover(): Promise<void> {
 }
 
 /**
- * Before an act: wait while held; before real input also wait for the user to be idle (a takeover when they are not).
- * Not for this call's own acts inside a foreground burst, which keeps the same rule itself (foreground-burst.ts). Not in the
- * middle of a gesture of the agent's (a button or a key it holds down): it is finished, never left pressed while the user
- * works; its start (mouseDown, keyDown) waited for them.
+ * Before an act: wait while held. Real input while the user is using the computer is refused at once, nothing held and the
+ * pill not told (owner, 2026-11-20: "running in background" means they may use the computer, and the agent must not stall
+ * waiting for them): it goes on in the background by name and calls the step again later. Not for this call's own acts
+ * inside a foreground burst, which keeps its own rule (foreground-burst.ts). Not in the middle of a gesture of the agent's
+ * (a button or a key it holds down): it is finished, never left pressed while the user works; its start was checked.
  */
 async function turn(real: boolean): Promise<void> {
   if (inForegroundBurst() || gestureInProgress()) return;
   if (isHeld()) await waitWhileHeld();
-  if (real && !(await userIsIdle())) await takeover();
+  if (real && !(await userIsIdle())) {
+    movedAt = 0;   // a window that comes up meanwhile is the user's doing, not the agent's
+    throw new Error(BUSY_TEXT);
+  }
 }
 
 // A hold counts as busy: the burst then waits in takeover() for the Resume, and never starts under the pill's Pause.
@@ -307,6 +353,8 @@ interface Foreground { processId: number; processName: string; appName?: string;
 let lease: Foreground | undefined;
 /** A window the agent focused or opened: bound when it is in front (activation can lag the call). */
 let pending: (WindowQuery & { opened?: boolean }) | null = null;
+/** The window that came to the front for `pending`: a later window of the same app is then the agent's own (its dialog). */
+let pendingArrived: Foreground | undefined;
 /** The window in front was brought up by the agent (window focus, open_app): it may be an AI-assistant app. */
 let leaseExplicit = false;
 /** The name of an app the agent launched that surfaced no window: only a window of that app is the agent's doing. */
@@ -351,7 +399,7 @@ const OWN_MOVE_MS = 5_000;
 /** How long the next input waits for a window the agent just focused to come to the front. */
 const FOCUS_ARRIVAL_MS = 1_000;
 
-function resetBinding(): void { lease = undefined; acted = undefined; working = undefined; pending = null; movedAt = 0; leaseExplicit = false; openedName = null; agentSet.length = 0; }
+function resetBinding(): void { lease = undefined; acted = undefined; working = undefined; pending = null; pendingArrived = undefined; movedAt = 0; leaseExplicit = false; openedName = null; agentSet.length = 0; }
 
 const platformForeground = async (): Promise<Foreground | null> => {
   const { getPlatform } = await import('../platform');
@@ -461,12 +509,18 @@ async function before(): Promise<void> {
   let explicit = false;
   if (pending) {
     // Waited for it above: if it is still not in front, the focus did not take (or the user switched), whatever the clock says.
-    if (!matches(pending, now)) {
+    // A dialog the agent's own act opened in that app (an Open box after "Attach files") is the agent's, not the user's switch.
+    const ownDialog = !matches(pending, now) && !!pendingArrived && sameTarget(pendingArrived, now);
+    if (!matches(pending, now) && !ownDialog) {
       throw new Error(`foreground changed: you ${pending.opened ? 'opened' : 'focused'} ${quoteScreenText(pending.processName ?? pending.title ?? (pending.processId !== undefined ? `pid ${pending.processId}` : `window ${pending.handle}`))}, but ${name(now)} is in front — nothing was sent. Focus it again.`);
     }
     pending = null;
-    explicit = true;
-  } else if (lease && !sameTarget(lease, now) && !ownMove && !agentSet.some(w => sameTarget(w, now))) {
+    pendingArrived = undefined;
+    explicit = !ownDialog;
+  } else if (lease && !sameTarget(lease, now) && !ownMove && !agentSet.some(w => sameTarget(w, now))
+    // A window of the same app with no input from the user since the agent's own: its act opened it (Edge draws its Open
+    // dialog in another of its processes, live 2026-11-19), not a switch of the user's.
+    && !(lower(lease.processName) === lower(now.processName) && await untouchedSinceOwnInput())) {
     throw new Error(
       `foreground changed: you were working in ${name(lease)}, but ${name(now)} is in front now — the user may have switched. ` +
       'Nothing was sent. If you meant to work there, focus it with window {"action":"focus"} first; otherwise focus your own window again.');
@@ -493,7 +547,7 @@ const AI_HOST_REFUSAL = (n: string, kind: 'list' | 'ancestor') =>
  */
 export function isGuardRefusal(err: unknown): boolean {
   const m = err instanceof Error ? err.message : String(err);
-  return m.startsWith('stopped by the user') || m.startsWith('paused by the user') || m.startsWith('foreground changed: ') || isFenceRefusal(err)
+  return m.startsWith('stopped by the user') || m.startsWith('paused by the user') || m.startsWith('the user is using the computer') || m.startsWith('foreground changed: ') || isFenceRefusal(err)
     || / is clawdcursor's own on-screen control — /.test(m)
     || m.startsWith('held: confirm mode') || m.startsWith('not confirmed: confirm mode')
     || /^the window in front is .+ — nothing was sent. Focus your target window first/.test(m);
@@ -605,7 +659,7 @@ async function arrived(): Promise<void> {
   for (let tries = FOCUS_ARRIVAL_MS / 100; ; tries--) {
     const now = await readForeground().catch(() => null);
     if (!now) return;
-    if (mine(now) && !isOwnUiPid(now.processId)) { working = now; remember(now); return; }
+    if (mine(now) && !isOwnUiPid(now.processId)) { working = now; remember(now); if (q) pendingArrived = now; return; }
     if (tries <= 0 || pending !== q) return;
     await new Promise(r => setTimeout(r, 100));
   }
@@ -614,6 +668,7 @@ async function arrived(): Promise<void> {
 /** The agent focused a window: the next input binds to it, not to whatever else is in front. */
 async function focused(q: WindowQuery): Promise<void> {
   pending = q;
+  pendingArrived = undefined;
   movedAt = Date.now();
   await arrived();
 }
@@ -626,6 +681,7 @@ async function focused(q: WindowQuery): Promise<void> {
  */
 async function launched(r?: { pid?: number; title?: string }, appName?: string): Promise<void> {
   movedAt = Date.now();
+  pendingArrived = undefined;
   if (r?.pid || r?.title) pending = { processId: r.pid || undefined, title: r.title || undefined, opened: true };
   else {
     lease = undefined;

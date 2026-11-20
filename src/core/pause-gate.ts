@@ -36,6 +36,7 @@
  * CLAWD_NO_PAUSE=1 restores the old fail-fast behaviour (CI / unattended runs).
  */
 
+import { AsyncLocalStorage } from 'async_hooks';
 import { controlBanner } from './banner';
 import { foreignOverlayState, untilNoForeignPause } from './overlay-state';
 import { isStopped, releaseHold, resumeControl } from './control';
@@ -92,6 +93,8 @@ export interface PauseInfo {
 interface Pending {
   info: PauseInfo;
   key?: string;
+  /** The MCP session that asked (asOwner): its card is withdrawn when that session ends. */
+  owner?: string;
   promise: Promise<PauseResult>;
   settle: (r: PauseResult) => void;
 }
@@ -114,6 +117,10 @@ const defaultFocusTracker: FocusTracker = {
     await (await getPlatform()).focusWindow(t);
   },
 };
+
+/** Which MCP session a request comes from: set around each tool call (mcp-server.ts), read when the card is raised. */
+const requester = new AsyncLocalStorage<string>();
+export function asPauseOwner<R>(owner: string, fn: () => R): R { return requester.run(owner, fn); }
 
 const MAX_MESSAGE = 300;
 /** How often `doneWhen` is checked while a pause is up. */
@@ -278,7 +285,7 @@ class PauseGate {
     };
     let settle!: (r: PauseResult) => void;
     const promise = new Promise<PauseResult>(resolve => { settle = resolve; });
-    const entry: Pending = { info, key: req.key, promise, settle };
+    const entry: Pending = { info, key: req.key, owner: requester.getStore(), promise, settle };
     this.pending = entry;
     logger.info('pause.start');   // never the message: the agent wrote it, and it can quote the screen
 
@@ -341,6 +348,14 @@ class PauseGate {
     };
     const t = setTimeout(() => { void tick(); }, pollMs);
     t.unref?.();
+  }
+
+  /**
+   * The session that asked is gone: nobody will ever read the answer, so its card comes down instead of staying up (and
+   * keeping every other agent out) until the timeout. A card another session asked for stays.
+   */
+  withdrawFor(owner: string): void {
+    if (this.pending?.owner === owner) this.finish(this.pending, { outcome: 'ended' });
   }
 
   /** A keyed caller was answered "waiting": hand its outcome over on its next call. */
