@@ -69,10 +69,10 @@ metadata:
 > - MCP stdio (editor host): add `"args": ["mcp", "--compact"]` to your config.
 > - MCP over HTTP (daemon mode): start the daemon with `--compact` (or set
 >   `CLAWD_MCP_COMPACT=1`) so `/mcp` serves the 6 compound tools (incl. `batch`). The surface is
->   fixed at startup — a daemon serves EITHER the compact tools OR the 89
+>   fixed at startup — a daemon serves EITHER the compact tools OR the 90
 >   granular ones, not both. Default (no flag) is granular.
 >
-> Granular mode's 89 tools are kept for back-compat. Compact's tools are much smaller and reduce mis-tool-selection. Use granular only if your runtime MUST have every primitive as its own top-level schema.
+> Granular mode's 90 tools are kept for back-compat. Compact's tools are much smaller and reduce mis-tool-selection. Use granular only if your runtime MUST have every primitive as its own top-level schema.
 
 **You drive the tools yourself. clawdcursor never runs a model.**
 
@@ -167,8 +167,8 @@ clawdcursor exposes one protocol (**MCP**) over two transports. It never runs a 
 
 | Mode | Command | Transport | Brain | Tools available |
 |------|---------|-----------|-------|-----------------|
-| `mcp` | `clawdcursor mcp [--compact]` | stdio | **You** (editor host) | 89 granular (default) or compact surface (`--compact`) |
-| `agent` | `clawdcursor agent [--compact]` | HTTP `/mcp` | **You** (HTTP client) | 89 granular (default) **or** compact surface — pass `--compact` (or `CLAWD_MCP_COMPACT=1`). One surface per daemon, chosen at startup — NOT both at once |
+| `mcp` | `clawdcursor mcp [--compact]` | stdio | **You** (editor host) | 90 granular (default) or compact surface (`--compact`) |
+| `agent` | `clawdcursor agent [--compact]` | HTTP `/mcp` | **You** (HTTP client) | 90 granular (default) **or** compact surface — pass `--compact` (or `CLAWD_MCP_COMPACT=1`). One surface per daemon, chosen at startup — NOT both at once |
 
 ---
 
@@ -188,7 +188,7 @@ clawdcursor exposes one protocol (**MCP**) over two transports. It never runs a 
 }
 ```
 
-**Granular - 89 individual tools (power-user, back-compat, larger prompt budget):**
+**Granular - 90 individual tools (power-user, back-compat, larger prompt budget):**
 ```json
 {
   "mcpServers": {
@@ -255,7 +255,7 @@ Every GUI task follows the same shape regardless of surface:
 4. REPEAT   until done
 ```
 
-**Use this OS's keys.** The server instructions name the OS and its shortcut modifier (cmd on macOS, ctrl on Windows and Linux); `mod` always means that modifier (`mod+s`). Never send another OS's shortcut (no `alt+f4` or `win+r` on a Mac, no `cmd+q` on Windows); `system {"action":"shortcuts_list"}` lists this OS's chords. `ctrl+…` on macOS is sent as the real Ctrl key (right in a terminal, wrong for copy/paste).
+**Use this OS's keys.** The server instructions name the OS and its shortcut modifier (cmd on macOS, ctrl on Windows and Linux); `mod` always means that modifier (`mod+s`). Never send another OS's shortcut (no `alt+f4` or `win+r` on a Mac, no `cmd+q` on Windows); `system {"action":"shortcuts_list"}` lists this OS's chords. `ctrl+…` on macOS is sent as the real Ctrl key (right in a terminal, wrong for copy/paste). When a result shows keys from a guide, press them instead of hunting with the mouse; the rest of that guide is system {"action":"shortcuts_list","context":"<app>"}.
 
 **Keystrokes always go to whatever has focus.** If focus is wrong (terminal instead of Excel), your `mod+s` - `Ctrl+S` on Windows/Linux, `Cmd+S` on macOS - saves your terminal session, not the spreadsheet. So: **focus first, act, verify.**
 
@@ -498,6 +498,6 @@ Hit a clawdcursor bug (a tool throws/crashes or behaves contrary to this doc —
 
 ## Full documentation
 
-- **Tool catalog (89 granular or compact):** `tools/list` JSON-RPC over stdio MCP or HTTP `/mcp`
+- **Tool catalog (90 granular or compact):** `tools/list` JSON-RPC over stdio MCP or HTTP `/mcp`
 - **Architecture detail:** README.md in the repo
 - **Changelog:** CHANGELOG.md

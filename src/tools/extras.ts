@@ -19,6 +19,7 @@ import { screenJson, quoteScreenText } from '../core/untrusted-screen-content';
 import { toMouse } from './types';
 import { SPACE_PARAM } from './desktop';
 import { openFilePath } from './open-file';
+import { withGuideHint } from '../core/guides/hint';
 
 function needPlatform(tool: string): { text: string; isError: true } {
   return {
@@ -268,7 +269,7 @@ export function getExtraTools(): ToolDefinition[] {
             const exe = await resolveSchemeHandlerExecutable('https').catch(() => null);
             await ctx.platform.launchApp(exe ?? 'explorer.exe', { url: u });
           }
-          return { text: `Opened URL: ${u}` };
+          return { text: withGuideHint(`Opened URL: ${u}`, { url: u }) };
         } catch (err) {
           return {
             text: `open_url failed: ${err instanceof Error ? err.message : String(err)}`,

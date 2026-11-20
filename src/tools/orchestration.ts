@@ -4,6 +4,7 @@
 
 import { execFile } from 'child_process';
 import { quoteScreenText } from '../core/untrusted-screen-content';
+import { withGuideHint } from '../core/guides/hint';
 import { promisify } from 'util';
 import type { ToolDefinition } from './types';
 import { agentBrowserConnectOptions } from '../platform/browser-config';
@@ -72,11 +73,12 @@ export function getOrchestrationTools(): ToolDefinition[] {
             });
             ctx.a11y.invalidateCache();
             const via = startMenuNote(res ?? {});
-            if (res?.title) return { text: `Opened "${rawName}" (pid=${res.pid}, window=${quoteScreenText(res.title)})${via}` };
+            const probe = { names: [rawName, ...(alias?.processNames ?? [])], title: res?.title };
+            if (res?.title) return { text: withGuideHint(`Opened "${rawName}" (pid=${res.pid}, window=${quoteScreenText(res.title)})${via}`, probe) };
             // Running but no window yet: a slow app still loading (Outlook, IDEs).
             // Not an error — an error invites a second launch.
             if (res?.pid) {
-              return { text: startedNoWindowText(`"${rawName}"`, res) + via };
+              return { text: withGuideHint(startedNoWindowText(`"${rawName}"`, res) + via, probe) };
             }
             // No process and no window is not a launch: say so instead of "Launched".
             return { text: notConfirmedText(`"${rawName}"`, rawName) + via, isError: true };
@@ -145,7 +147,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
         const where = mode === 'attached'
           ? ' — in the agent\'s own tab of the EXISTING browser (likely the user\'s session; their tabs were not touched)'
           : mode === 'dedicated' ? ' — dedicated agent-owned browser' : '';
-        return { text: `Navigated to: ${quoteScreenText(String(title ?? ''))} at ${quoteScreenText(String(r.value ?? url))}${where}. Next: cdp_page_context to see the page, cdp_click / cdp_type to interact.` };
+        return { text: withGuideHint(`Navigated to: ${quoteScreenText(String(title ?? ''))} at ${quoteScreenText(String(r.value ?? url))}${where}. Next: cdp_page_context to see the page, cdp_click / cdp_type to interact.`, { url: String(r.value ?? url) }) };
       },
     },
 

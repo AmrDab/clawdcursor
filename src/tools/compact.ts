@@ -203,13 +203,13 @@ function compactNameIndex(): Map<string, Array<{ compound: string; action: strin
  * Rewrite granular tool names in free text to the compact spelling, in the one call notation the result line uses
  * (`cdp_connect` → `browser {"action":"connect"}`). Arguments written after the name join the same braces
  * (`smart_click {"target":"Save"}` → `accessibility {"action":"smart_click","target":"Save"}`). Only multi-word names are
- * touched so plain English (`wait`) is never rewritten; a name already inside `{"action":"…"}` is left alone.
+ * touched so plain English (`wait`) is never rewritten; a name already inside `{"action":"…"}`, or written as prose "action <name>", is left alone.
  */
 export function toCompactNames(text: string, preferCompound: string): string {
   const index = compactNameIndex();
   const names = [...index.keys()].filter(n => n.includes('_')).sort((a, b) => b.length - a.length);
   if (!names.length) return text;
-  return text.replace(new RegExp(`(?<!"action"\\s*:\\s*")\\b(${names.join('|')})\\b(?:\\s*\\{(\\s*"[^{}]*|\\s*)\\})?`, 'g'), (_m, name: string, args?: string) => {
+  return text.replace(new RegExp(`(?<!"action"\\s*:\\s*"|\\baction )\\b(${names.join('|')})\\b(?:\\s*\\{(\\s*"[^{}]*|\\s*)\\})?`, 'g'), (_m, name: string, args?: string) => {
     const routes = index.get(name)!;
     const r = routes.find(x => x.compound === preferCompound) ?? routes[0];
     return `${r.compound} {"action":"${r.action}"${args?.trim() ? `,${args.trim()}` : ''}}`;
@@ -446,6 +446,7 @@ export function getCompactTools(): ToolDefinition[] {
         timeout: 'pause_for_user: max seconds to wait for the user before returning {status:"waiting"} (default 45, clamped 1–50); the prompt stays up, re-call with the same message.',
         text: 'clipboard_write: the text to put on the clipboard (it overwrites the user\'s clipboard).',
         processId: 'ocr: read only this process\'s window, drawn by itself: even where other windows cover it, and without focusing it (Windows, macOS).',
+        query: 'shortcuts_list: only the shortcuts whose name or keys contain these words (e.g. "bold", "next tab"). build_uri: a JSON object of query parameters, e.g. {"subject":"hi","body":"hello"}; each value is URL-encoded.',
       }),
       category: 'orchestration',
       safetyTier: 1,

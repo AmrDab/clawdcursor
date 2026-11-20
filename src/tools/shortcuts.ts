@@ -2,7 +2,7 @@
  * Shortcut tools — expose the keyboard shortcuts database to MCP clients.
  *
  * Two tools:
- *   shortcuts_list    — query available shortcuts by category/context
+ *   shortcuts_list    — query available shortcuts by category/context; an app or site with an app guide gets the guide
  *   shortcuts_execute — run a shortcut by intent (fuzzy-matched)
  *
  * The shortcuts database is src/shortcuts.ts; these tools let MCP clients use it
@@ -18,6 +18,8 @@ import {
   type ShortcutDefinition,
 } from '../shortcuts';
 import type { ToolDefinition } from './types';
+import { findGuide, termsOf } from '../core/guides/store';
+import { renderGuide } from '../core/guides/render';
 
 const VALID_CATEGORIES: ShortcutCategory[] = [
   'navigation', 'browser', 'editing', 'social', 'window', 'file', 'view', 'quick',
@@ -53,15 +55,28 @@ export function getShortcutTools(): ToolDefinition[] {
         },
         context: {
           type: 'string',
-          description: 'Filter by app context (e.g. "reddit", "outlook", "x.com"). Shows context-specific shortcuts that match.',
+          description: 'Filter by app context (e.g. "reddit", "outlook", "x.com"). Shows context-specific shortcuts that match. An app or site with an app guide (an app id, its name, a process name or a site) returns the guide: its shortcuts for this OS (* = hard to undo), workflows and tips.',
+          required: false,
+        },
+        query: {
+          type: 'string',
+          description: 'Only the shortcuts whose name or keys contain these words (e.g. "bold", "next tab"). Use it on a big guide.',
           required: false,
         },
       },
       category: 'keyboard',
       safetyTier: 0,
-      handler: async ({ category, context }) => {
+      handler: async ({ category, context, query }) => {
         const platform = os.platform();
+        if (context) {
+          const guide = findGuide(termsOf(String(context)), undefined, platform);
+          if (guide) return { text: renderGuide(guide, platform, typeof query === 'string' ? query : undefined) };
+        }
         let filtered = shortcutsFor(platform);   // this OS's shortcuts only
+        if (query) {
+          const words = String(query).toLowerCase().split(/\s+/).filter(Boolean);
+          filtered = filtered.filter(s => words.every(w => `${s.id} ${s.description} ${s.canonicalIntent}`.toLowerCase().includes(w)));
+        }
 
         if (category) {
           filtered = filtered.filter(s => s.category === category);

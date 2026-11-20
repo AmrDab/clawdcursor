@@ -32,6 +32,7 @@ import { SessionLog, outcomeOf } from './session-log';
 import { withSteps, watchChildProcesses } from '../core/observability/steps';
 import { inMcpSession } from '../core/verify/assertions';
 import { allowNames, setHost } from '../core/observability/telemetry';
+import { setGuideSurface } from '../core/guides/hint';
 import { classifyResult, renderResultLine, isJsonText, isActingAction, isUnverifiableAction } from '../core/result-codes';
 import { quoteScreenText } from '../core/untrusted-screen-content';
 import { refusalBefore, afterCall, forgetScreenIfActed, guardedCall } from '../tools/call-guards';
@@ -193,7 +194,9 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       `${pauseTool} with message, choices (a list, when there are options) and input (placeholder, multiline). Before an irreversible action the user did not ask for (sending, deleting, paying, closing unsaved work), ask there first and follow the answer {status:"replied", choice | reply}: clawdcursor does not judge what you do, so that decision is yours. ` +
       'Drive UI symbolically: compile_ui / find_button / find_field return a stable ' +
       '{element_id, snapshot_id} you pass to invoke/set_value — it survives layout shifts, so ' +
-      'prefer it over pixel coordinates. Pass `expect` on consequential actions so a failed one ' +
+      'prefer it over pixel coordinates. ' +
+      `When a result shows keys from a guide, press them instead of hunting with the mouse; the rest of that guide is ${compact ? 'the system tool, action shortcuts_list' : 'the shortcuts_list tool'}, with context. ` +
+      'Pass `expect` on consequential actions so a failed one ' +
       'reports a DEVIATION instead of a hollow success. Each action result and error ends with one line: ' +
       '[confirmed | unverified | refused · CODE · hint · next | failed · CODE · hint · next] — follow its next call instead of guessing. ' +
       'PAUSED (the user paused clawdcursor) means nothing was sent: call the same step again until it runs, and do not give up or act another way meanwhile. USER_ACTIVE (the user is using the computer, which they may while you work in the background) means nothing was sent: keep working by name meanwhile, and call that step again in a few seconds. A STOPPED reply is different: do not retry it. ' +
@@ -202,6 +205,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'https://clawdcursor.com/llms.txt.';
 
   const server = new McpServer({ name: 'clawdcursor', version: VERSION }, { instructions });
+  setGuideSurface(compact);   // the app-guide hint names the tool as this surface spells it
 
   // Local record of this session (tool / action / blind-vs-vision / ok — no
   // content). Feeds `clawdcursor report` and the vision-streak nudge below.
