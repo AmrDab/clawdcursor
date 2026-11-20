@@ -888,7 +888,7 @@
               },
               "maxSteps": {
                 "type": "number",
-                "description": "Hard cap on executed steps (default 12)."
+                "description": "Most steps one batch may hold; a longer one is refused before step 1 (default 12)."
               }
             },
             "required": [
@@ -1581,7 +1581,7 @@
               },
               "maxSteps": {
                 "type": "number",
-                "description": "Hard cap on executed steps (default 12)."
+                "description": "Most steps one batch may hold; a longer one is refused before step 1 (default 12)."
               }
             },
             "required": [

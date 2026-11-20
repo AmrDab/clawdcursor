@@ -28,6 +28,8 @@ import { logger } from '../core/observability/logger';
 import { clipScreenText, quoteScreenText } from '../core/untrusted-screen-content';
 import { actedIn, actRecord } from '../core/control';
 import { effectLine } from '../core/effect';
+import { compactCall } from './compact-routes';
+import { classifyResult, renderResultLine, isActingAction } from '../core/result-codes';
 
 /** Resolve a step's tool by name from EITHER surface — a granular tool
  *  (`mouse_click`, `open_app`, …) or a compound tool (`computer`, `window`, …)
@@ -69,7 +71,7 @@ export interface BatchStep {
   label?: string;
 }
 
-type StepStatus = 'ok' | 'guard_failed' | 'blocked' | 'error' | 'unknown_tool' | 'skipped';
+type StepStatus = 'ok' | 'guard_failed' | 'blocked' | 'error' | 'unknown_tool';
 
 export interface StepOutcome { i: number; label: string; status: StepStatus; text: string; pressedKeys?: boolean;
   /** What THIS step acted on, verified when it was sent: not the batch's last target. */
@@ -88,6 +90,12 @@ export interface BatchResult {
 }
 
 const DEFAULT_MAX_STEPS = 12;
+
+/** A halting step's text whole, ending with the `[failed · CODE · hint · next]` line the same call made directly would have. */
+function withResultLine(text: string, isError: boolean, acting: boolean): string {
+  const c = classifyResult(text, isError, acting, 'mcp', acting);
+  return c ? `${text}\n${renderResultLine(c)}` : text;
+}
 
 function stepArgs(step: BatchStep): Record<string, unknown> {
   return step.arguments ?? step.args ?? {};
@@ -135,9 +143,7 @@ async function checkGuard(guard: BatchGuard, ctx: ToolContext): Promise<{ ok: bo
 export async function executeBatch(
   steps: BatchStep[],
   ctx: ToolContext,
-  opts: { maxSteps?: number } = {},
 ): Promise<BatchResult> {
-  const cap = opts.maxSteps ?? DEFAULT_MAX_STEPS;
   const outcomes: StepOutcome[] = [];
   let completed = 0;
   // "Act N times, then look once" in one call: the last image a step returned goes back with the trace.
@@ -148,18 +154,14 @@ export async function executeBatch(
   const block = (i: number, label: string, c: GuardedCall, r: Refusal): BatchResult => {
     logger.warn('safety.refused', { tool: c.tool, action: c.action, guard: r.guard, reason: r.why, batchStep: i });
     // The Stop and pause texts whole: they say what to do next.
-    outcomes.push({ i, label, status: 'blocked', text: r.guard === 'stopped' || r.guard === 'own_ui' ? r.why : r.why.slice(0, 200) });
+    // The step that halts the batch comes back whole, with the result line a direct call would end with.
+    outcomes.push({ i, label, status: 'blocked', text: withResultLine(r.why, true, false) });
     return halt(i, `step ${i + 1} (${label}): ${r.why}`);
   };
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
     const label = labelFor(step);
-
-    if (i >= cap) {
-      outcomes.push({ i, label, status: 'skipped', text: `not run — batch capped at ${cap} steps` });
-      return halt(i, `batch capped at ${cap} steps; submit the remainder as a new batch`);
-    }
 
     const tool: ToolDefinition | undefined = resolveAnyTool(step.name);
     if (!tool) {
@@ -188,6 +190,9 @@ export async function executeBatch(
 
     let res: ToolResult;
     const before = actedIn();
+    const route = compactCall(tool.name, stepAction);
+    // A read comes back whole; only an act's text is cut to a short summary.
+    const acts = isActingAction(route.tool, route.action);
     try {
       res = await tool.handler(args, ctx);
     } catch (e) {
@@ -197,7 +202,7 @@ export async function executeBatch(
     const target = actRecord(before);
     if (res.isError) {
       forgetScreenIfActed(call);   // the halt skips afterCall
-      outcomes.push({ i, label, status: 'error', text: clipScreenText(res.text || '', 200), pressedKeys: res.pressedKeys, ...target });
+      outcomes.push({ i, label, status: 'error', text: withResultLine(res.text || '', true, acts), pressedKeys: res.pressedKeys, ...target });
       return halt(i, `step ${i + 1} (${label}) errored`);
     }
 
@@ -205,7 +210,7 @@ export async function executeBatch(
     if ('guard' in after) return block(i, label, call, after);
     // A screenshot step names its id first, so it survives the step text's truncation.
     const shotNote = after.screenshotNote ? `${after.screenshotNote.split(' — ')[0]} · ` : '';
-    outcomes.push({ i, label, status: 'ok', text: `${shotNote}${clipScreenText(res.text || '', 160)}`, pressedKeys: res.pressedKeys, ...target });
+    outcomes.push({ i, label, status: 'ok', text: `${shotNote}${acts ? clipScreenText(res.text || '', 160) : res.text || ''}`, pressedKeys: res.pressedKeys, ...target });
     if (res.image) shot = { image: res.image, imageStep: i };
     completed++;
   }
@@ -254,7 +259,7 @@ export function getBatchTools(): ToolDefinition[] {
             required: ['name'],
           },
         },
-        maxSteps: { type: 'number', description: `Hard cap on executed steps (default ${DEFAULT_MAX_STEPS}).`, required: false },
+        maxSteps: { type: 'number', description: `Most steps one batch may hold; a longer one is refused before step 1 (default ${DEFAULT_MAX_STEPS}).`, required: false },
       },
       category: 'orchestration',
       safetyTier: 0, // the batch itself is inert; the pill shows when a STEP acts (batchActs).
@@ -281,10 +286,13 @@ export function getBatchTools(): ToolDefinition[] {
 
         // Once per batch: what the window in front did across all its steps (#357), by identity, never by title.
         const window = () => ctx.platform?.getActiveWindow().catch(() => null) ?? Promise.resolve(null);
+        // Refused before step 1, not after twelve steps have run.
+        const cap = typeof params.maxSteps === 'number' ? params.maxSteps : DEFAULT_MAX_STEPS;
+        if (steps.length > cap) {
+          return { text: `batch: ${steps.length} steps is over the cap of ${cap} steps per batch, so none ran. Split it into batches of at most ${cap} steps.`, isError: true };
+        }
         const w0 = await window();
-        const result = await executeBatch(steps, ctx, {
-          maxSteps: typeof params.maxSteps === 'number' ? params.maxSteps : undefined,
-        });
+        const result = await executeBatch(steps, ctx);
         const effect = effectLine(w0, await window());
         return {
           text: renderResult(result) + (effect ? `\n${effect.replace(/^effect:/, 'effect (whole batch):')}` : ''),

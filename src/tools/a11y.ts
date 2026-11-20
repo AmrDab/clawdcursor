@@ -327,7 +327,7 @@ export function getA11yTools(): ToolDefinition[] {
           // A search the platform cut returned only part of the list.
           const cut = ctx.platform?.lastFindError === 'partial' ? `\n(${ctx.platform.lastFindNote ?? 'The search was cut; the list is incomplete.'})` : '';
           const found = foundLines(page);
-          return { text: `${SCREEN_COORDS_NOTE}\n${wrapUntrustedScreenContent(found.lines)}${more}${cut}${found.cut}` };
+          return { text: `${wrapUntrustedScreenContent(found.lines)}${more}${cut}${found.cut}\n${SCREEN_COORDS_NOTE}` };
         }
         // A timeout is not "nothing there" — say so, or the agent concludes
         // a11y is useless and switches to screenshots for the rest of the session.
