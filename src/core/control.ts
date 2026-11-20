@@ -235,6 +235,12 @@ async function userIsIdle(): Promise<boolean> {
   return last <= ownInputAt() + OWN_SLACK_MS;
 }
 
+/** No input from the user since the agent's own last input: the OS's last-input tick is still the one that input left. */
+async function untouchedSinceOwnInput(): Promise<boolean> {
+  const [i, base] = await Promise.all([readIdle().catch(() => null), ownBase]);
+  return !!i && base !== null && Math.abs(i.tick - base) <= TICK_SLACK_MS;
+}
+
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 /**
@@ -498,7 +504,10 @@ async function before(): Promise<void> {
     pending = null;
     pendingArrived = undefined;
     explicit = !ownDialog;
-  } else if (lease && !sameTarget(lease, now) && !ownMove && !agentSet.some(w => sameTarget(w, now))) {
+  } else if (lease && !sameTarget(lease, now) && !ownMove && !agentSet.some(w => sameTarget(w, now))
+    // A window of the same app with no input from the user since the agent's own: its act opened it (Edge draws its Open
+    // dialog in another of its processes, live 2026-11-19), not a switch of the user's.
+    && !(lower(lease.processName) === lower(now.processName) && await untouchedSinceOwnInput())) {
     throw new Error(
       `foreground changed: you were working in ${name(lease)}, but ${name(now)} is in front now — the user may have switched. ` +
       'Nothing was sent. If you meant to work there, focus it with window {"action":"focus"} first; otherwise focus your own window again.');

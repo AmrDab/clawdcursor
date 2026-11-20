@@ -9,7 +9,7 @@ import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import type { ChildProcess } from 'child_process';
 import { controlBanner } from '../core/banner';
-import { __setForegroundReaderForTests, workingWindow, workingIn } from '../core/control';
+import { __setForegroundReaderForTests, __setIdleReaderForTests, workingWindow, workingIn } from '../core/control';
 import { guardInputMethods } from '../platform/pointer-guard';
 
 class FakeChild extends EventEmitter {
@@ -170,5 +170,38 @@ describe('a dialog the agents own act opened', () => {
     await d.focusWindow({ title: 'RC1527 Test' });
     fg = OPEN_DIALOG;
     await expect(d.keyPress('b')).rejects.toThrow(/foreground changed: you focused "RC1527 Test"/);
+  });
+});
+
+describe('a window of the same app the agent was working in, in another process (Edge draws its Open dialog in one)', () => {
+  const EDGE_OPEN: Win = { processId: 200, processName: 'msedge', title: 'Open', handle: 0x6c2 };
+  const OTHER: Win = { processId: 500, processName: 'notepad', title: 'Untitled', handle: 0x8d3 };
+  let tick: number;
+  beforeEach(() => { tick = 1000; __setIdleReaderForTests(async () => ({ tick, idleMs: 5000 })); });
+  afterEach(() => __setIdleReaderForTests(null));
+
+  it('with no input from the user since the agent\'s: not refused, and it becomes the working window', async () => {
+    const d = fakeDesktop();
+    await d.keyPress('ctrl+o');   // in Edge: its Open dialog comes up, drawn by another Edge process
+    fg = EDGE_OPEN;
+    await d.keyPress('a');
+    expect(d.sent).toEqual(['key ctrl+o', 'key a']);
+    expect(workingWindow()).toEqual({ processId: 200, handle: 0x6c2 });
+  });
+
+  it('after input from the user it is refused: they may have switched to it', async () => {
+    const d = fakeDesktop();
+    await d.keyPress('ctrl+o');
+    tick = 2000;                  // the user clicked or typed since (and is idle again)
+    fg = EDGE_OPEN;
+    await expect(d.keyPress('a')).rejects.toThrow(/foreground changed: you were working in "msedge"/);
+    expect(d.sent).toEqual(['key ctrl+o']);
+  });
+
+  it('another app in front is still refused', async () => {
+    const d = fakeDesktop();
+    await d.keyPress('ctrl+o');
+    fg = OTHER;
+    await expect(d.keyPress('a')).rejects.toThrow(/foreground changed: you were working in "msedge"/);
   });
 });
