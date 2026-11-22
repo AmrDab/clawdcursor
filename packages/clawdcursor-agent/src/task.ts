@@ -200,7 +200,7 @@ export function reasonOf(r: { interrupted: boolean; claimed: 'PASS' | 'FAIL' | n
   const lastLine = (t: string) => t.split('\n').map(l => l.trim()).filter(Boolean).pop()?.slice(0, 300) ?? '';
   const error = r.finalError ? lastLine(r.finalText) : lastLine(r.lastError);
   if (error) {
-    const login = /\b401\b|authenticat|unauthori[sz]ed/i.test(error)
+    const login = /\b401\b|authenticat|unauthori[sz]ed|api key|not logged in|\/login/i.test(error)
       ? r.runner === 'claude' ? ' (sign in again: run `claude`, then /login)' : r.runner === 'codex' ? ' (sign in again: `codex login`)' : ''
       : '';
     return `${r.runner} ended with an error: ${error}${login}`;

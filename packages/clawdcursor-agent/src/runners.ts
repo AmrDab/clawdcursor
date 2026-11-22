@@ -29,13 +29,19 @@ export function streamJsonUser(text: string): string {
   return `${JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] } })}\n`;
 }
 
+/** Variables that would make Claude Code bill an API key instead of the owner's own sign-in. */
+export const SUBSCRIPTION_ONLY_UNSET = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'];
+
 /**
  * claude -p, streaming JSON both ways, with clawdcursor as its only MCP server and only tools, none of the owner's
  * settings, and the task on stdin. `model` unset = the owner's default model.
  */
 export function claudeTaskCommand(o: { exe: string; model?: string; mcpConfigPath: string; task: string }): CliCommand {
   return {
-    unsetEnv: hostSessionEnv(),
+    // The owner's Claude Code sign-in (their subscription), never an API key from the environment: Claude Code prefers
+    // ANTHROPIC_API_KEY over its own login, so a stale key in the user's variables failed every run ("Invalid API key",
+    // 2026-11-22). An API key is `--with anthropic`.
+    unsetEnv: [...new Set([...hostSessionEnv(), ...SUBSCRIPTION_ONLY_UNSET])],
     // claude -p starts the model without waiting for a server slower than its connect window: init says "pending",
     // the agent has no tools and may invent a PASS (a clawdcursor cold start on macOS, 2026-11-15). Wait for it, up to 60 s.
     env: { MCP_CONNECTION_NONBLOCKING: 'false', MCP_TIMEOUT: '60000' },
