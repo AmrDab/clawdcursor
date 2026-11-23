@@ -181,6 +181,48 @@ describe('temp files', () => {
   });
 });
 
+describe('GitHub workflows', () => {
+  // publish.yml set TAG="${{ github.event.inputs.tag || github.ref_name }}" inside a run script (security scan 2026-11):
+  // Actions pastes an expression into the shell source before the shell runs, so a workflow_dispatch input could run
+  // commands in the job that holds the npm publish (OIDC) and release permissions. A value goes in through `env:` and is
+  // read as "$NAME".
+  const WORKFLOWS = path.join(ROOT, '.github', 'workflows');
+  const files = fs.readdirSync(WORKFLOWS).filter(f => /\.ya?ml$/.test(f));
+
+  /** The lines of every `run:` script: an inline value, or the block under `run: |` / `run: >`. */
+  function runScripts(yml: string): { n: number; text: string }[] {
+    const lines = yml.split('\n');
+    const out: { n: number; text: string }[] = [];
+    lines.forEach((line, i) => {
+      const m = /^(\s*)(?:-\s+)?run:\s*(.*)$/.exec(line);
+      if (!m) return;
+      if (!/^[|>]/.test(m[2])) { out.push({ n: i + 1, text: m[2] }); return; }
+      for (let j = i + 1; j < lines.length; j++) {
+        if (lines[j].trim() === '') continue;
+        if (lines[j].length - lines[j].trimStart().length <= m[1].length) break;
+        out.push({ n: j + 1, text: lines[j] });
+      }
+    });
+    return out;
+  }
+
+  it('finds the workflows and their run scripts', () => {
+    expect(files).toContain('publish.yml');
+    expect(runScripts(fs.readFileSync(path.join(WORKFLOWS, 'publish.yml'), 'utf8')).length).toBeGreaterThan(10);
+  });
+
+  it('no run script has a ${{ }} expression in it', () => {
+    const bad = files.flatMap(f => runScripts(fs.readFileSync(path.join(WORKFLOWS, f), 'utf8'))
+      .filter(x => x.text.includes('${{')).map(x => `${f}:${x.n} ${x.text.trim()}`));
+    expect(bad, 'Pass the value through env: and read it as "$NAME" in the script').toEqual([]);
+  });
+
+  it('the scan sees an expression in a block script and in an inline one', () => {
+    const yml = ['      - name: a', '        run: |', '          echo ok', '          TAG="${{ github.event.inputs.tag }}"', '      - run: echo ${{ github.head_ref }}', '        env:', '          X: ${{ github.ref }}'].join('\n');
+    expect(runScripts(yml).filter(x => x.text.includes('${{')).map(x => x.n)).toEqual([4, 5]);
+  });
+});
+
 describe('scripts/** encoding', () => {
   // scripts/mac/find-element.jxa was committed as UTF-16LE, which osascript and git treat as binary. Line endings are
   // .gitattributes' job (eol=lf).

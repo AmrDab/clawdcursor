@@ -20,6 +20,10 @@ All notable changes to Clawd Cursor will be documented in this file.
   characters it typed (Windows and Linux X11), which ended up in the MCP host's log files and in `logs_recent`. It now
   logs only how many characters it typed. On macOS, a failed keystroke logs osascript's error number instead of its
   message, which could quote the text.
+- **The release workflow no longer pastes its tag input into a shell script (low).** `publish.yml` built a `run:`
+  script from the `workflow_dispatch` tag, so a crafted tag could run commands in the job that publishes to npm. The tag
+  now reaches the script as an environment variable, and a repo test fails on any `${{ }}` expression inside a `run:`
+  script.
 
 ## [2.3.0] - 2026-11-20
 

@@ -72,8 +72,11 @@ jobs:
       # whose name disagrees with package.json would publish a version nobody
       # asked for. Fail loudly instead.
       - name: Tag must match package.json version
+        # The tag comes in through env, never spliced into the script: a workflow_dispatch input is free text, and an
+        # expression inside `run:` is pasted into the shell source before it runs (script injection).
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
           PKG="v$(node -p "require('./package.json').version")"
           echo "tag=$TAG packageJson=$PKG"
           if [ "$TAG" != "$PKG" ]; then
