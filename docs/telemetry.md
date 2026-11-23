@@ -39,5 +39,7 @@ It is always off in CI and in test runs. The setting is kept in `~/.clawdcursor/
 ## Where it goes
 
 Reports go over HTTPS to a Cloudflare Worker run by the clawdcursor project. It checks every event against the same fixed
-lists and drops anything else. It does not read or store your IP address or request headers, and deletes events after 90 days.
+lists and drops anything else. It does not store your IP address or request headers: it reads the address only to limit
+how often one sender can post, as a hash kept in memory. It stores at most a fixed number of events a day, and deletes
+events after 90 days.
 Its code is in [`telemetry-worker/`](https://github.com/AmrDab/clawdcursor/tree/main/telemetry-worker).

@@ -24,6 +24,11 @@ All notable changes to Clawd Cursor will be documented in this file.
   script from the `workflow_dispatch` tag, so a crafted tag could run commands in the job that publishes to npm. The tag
   now reaches the script as an environment variable, and a repo test fails on any `${{ }}` expression inside a `run:`
   script.
+- **Anyone could flood the error-report endpoint (medium).** The Worker behind `telemetry.clawdcursor.com` had one rate
+  limit shared by every sender, so a single sender could use it up and keep everyone else's reports out, and fill the
+  database. Each sender now has its own limit, keyed on a hash of its address made in memory (the address is still never
+  stored), and the Worker stores at most a set number of events a day (`DAILY_EVENT_CAP`, 100,000 by default) and answers
+  429 above it. Deploying it needs `schema.sql` applied first (new `daily_counts` table). The client is unchanged.
 
 ## [2.3.0] - 2026-11-20
 

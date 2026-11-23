@@ -16,13 +16,20 @@ binding = "DB"
 database_name = "clawdcursor-telemetry"
 database_id = "12d7ee45-a1b5-4b65-93b8-148e6bd86be1"
 
-# One shared budget for the endpoint (the Worker never reads the sender's address): 600 requests a minute.
-# Real use is a few requests per install per day. The Worker runs without it when the binding is absent.
+# A budget per sender: 30 requests a minute for each address. The key is a SHA-256 of the address (CF-Connecting-IP) behind
+# a fixed prefix, made in memory and never stored (src/index.ts senderKey). It used to be one budget shared by everyone,
+# which one sender could spend for all. A client sends a few requests per install per day, and flushes at most every 5 s.
+# The Worker runs without it when the binding is absent.
 [[unsafe.bindings]]
 name = "LIMITER"
 type = "ratelimit"
 namespace_id = "1001"
-simple = { limit = 600, period = 60 }
+simple = { limit = 30, period = 60 }
+
+[vars]
+# Events stored per UTC day, all senders together (the daily_counts table in schema.sql); above it the Worker answers 429.
+# Set it well above a normal day: SELECT day, COUNT(*) FROM events GROUP BY day ORDER BY day DESC LIMIT 14;
+DAILY_EVENT_CAP = "100000"
 
 # Daily: delete events older than 90 days.
 [triggers]

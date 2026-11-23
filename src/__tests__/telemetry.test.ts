@@ -26,7 +26,8 @@ import { getPackageRoot } from '../paths';
 import { VERSION } from '../version';
 import { getAllTools, getCompactSurface } from '../tools/registry';
 import { withSteps, timeWait } from '../core/observability/steps';
-import worker, { validate, validEvent, MAX_EVENTS, MAX_BODY, type Env } from '../../telemetry-worker/src/index';
+import worker, { validate, validEvent, senderKey, MAX_EVENTS, MAX_BODY, DEFAULT_DAILY_EVENT_CAP, SENDER_KEY_PREFIX, type Env } from '../../telemetry-worker/src/index';
+import { createHash } from 'crypto';
 
 const tmpFile = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'clawd-telemetry-')), 'telemetry.json');
 
@@ -352,17 +353,106 @@ describe('the Worker', () => {
     expect([...NAMES].sort()).toEqual([...registered].sort());
   });
 
-  it('answers 429 when the rate limit is spent, before reading the body, and takes a request while it is not', async () => {
-    const arrayBuffer = vi.fn(async () => new Uint8Array(Buffer.from('[]')).buffer);
-    const req = { url: 'https://telemetry.clawdcursor.com/v1/events', method: 'POST', headers: new Headers(), arrayBuffer } as unknown as Request;
+  /** A POST to the endpoint from `ip` (no CF-Connecting-IP header when undefined). */
+  const post = (body: string, ip?: string) => {
+    const arrayBuffer = vi.fn(async () => new Uint8Array(Buffer.from(body)).buffer);
+    const headers = new Headers(ip === undefined ? {} : { 'cf-connecting-ip': ip });
+    return { req: { url: 'https://telemetry.clawdcursor.com/v1/events', method: 'POST', headers, arrayBuffer } as unknown as Request, arrayBuffer };
+  };
+
+  it('answers 429 when the sender\'s rate limit is spent, before reading the body, and takes a request while it is not', async () => {
+    const { req, arrayBuffer } = post('[]', '203.0.113.7');
     const limit = vi.fn(async () => ({ success: false }));
     expect((await worker.fetch(req, { LIMITER: { limit } } as unknown as Env)).status).toBe(429);
     expect(arrayBuffer).not.toHaveBeenCalled();
-    expect(limit).toHaveBeenCalledWith({ key: 'ingest' });
+    expect(limit).toHaveBeenCalledWith({ key: await senderKey(req) });
     expect((await worker.fetch(req, { LIMITER: { limit: async () => ({ success: true }) } } as unknown as Env)).status).toBe(204);
   });
 
-  it('retention deletes by the indexed day column, 90 days back', async () => {
+  // Security scan (2026-11): the limit was one key ('ingest') for every sender, so one sender could starve all the others.
+  it('limits each sender on its own: one that spent its budget does not stop another', async () => {
+    const used = new Map<string, number>();
+    const limit = vi.fn(async ({ key }: { key: string }) => { used.set(key, (used.get(key) ?? 0) + 1); return { success: used.get(key)! <= 3 }; });
+    const env = { LIMITER: { limit } } as unknown as Env;
+    for (let i = 0; i < 10; i++) await worker.fetch(post('[]', '198.51.100.1').req, env);
+    expect((await worker.fetch(post('[]', '198.51.100.1').req, env)).status).toBe(429);
+    expect((await worker.fetch(post('[]', '198.51.100.2').req, env)).status).toBe(204);
+    expect((await worker.fetch(post('[]', '2001:db8::1').req, env)).status).toBe(204);
+  });
+
+  it('the sender key is a SHA-256 of a fixed prefix and the address: never the address itself', async () => {
+    const key = await senderKey(post('[]', '203.0.113.7').req);
+    expect(key).toMatch(/^[0-9a-f]{64}$/);
+    expect(key).toBe(createHash('sha256').update(SENDER_KEY_PREFIX + '203.0.113.7').digest('hex'));
+    expect(key).not.toBe(createHash('sha256').update('203.0.113.7').digest('hex'));
+    expect(key).not.toContain('203.0.113.7');
+    expect(await senderKey(post('[]', '203.0.113.7').req)).toBe(key);
+    expect(await senderKey(post('[]', '203.0.113.8').req)).not.toBe(key);
+    expect(await senderKey(post('[]').req)).toMatch(/^[0-9a-f]{64}$/);   // no header (local dev): one shared key
+  });
+
+  describe('the daily cap', () => {
+    /** A D1 that answers the counter upsert with `total`, and records what was prepared, bound and stored. */
+    function db(total: number) {
+      const prepared: string[] = [];
+      const bound: unknown[][] = [];
+      const batch = vi.fn(async () => undefined);
+      const prepare = vi.fn((sql: string) => {
+        prepared.push(sql);
+        const stmt = {
+          bind: (...v: unknown[]) => { bound.push(v); return stmt; },
+          first: async () => (/^INSERT INTO daily_counts/.test(sql) ? { events: total } : null),
+          run: async () => undefined,
+        };
+        return stmt;
+      });
+      return { DB: { prepare, batch }, prepared, bound, batch };
+    }
+    const two = JSON.stringify([good, good]);
+
+    it('counts each batch on the day\'s counter row and stores it while the day is within the cap', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2030-06-30T12:00:00Z'));
+      try {
+        const d = db(DEFAULT_DAILY_EVENT_CAP);
+        expect((await worker.fetch(post(two, '203.0.113.7').req, { DB: d.DB } as unknown as Env)).status).toBe(204);
+        expect(d.prepared[0]).toMatch(/^INSERT INTO daily_counts \(day, events\) VALUES \(\?, \?\) ON CONFLICT \(day\) DO UPDATE SET events = events \+ excluded\.events RETURNING events$/);
+        expect(d.bound[0]).toEqual(['2030-06-30', 2]);
+        expect(d.batch).toHaveBeenCalledTimes(1);
+      } finally { vi.useRealTimers(); }
+    });
+
+    it('above the cap: 429, and nothing is stored', async () => {
+      const d = db(DEFAULT_DAILY_EVENT_CAP + 1);
+      expect((await worker.fetch(post(two, '203.0.113.7').req, { DB: d.DB } as unknown as Env)).status).toBe(429);
+      expect(d.batch).not.toHaveBeenCalled();
+    });
+
+    it('DAILY_EVENT_CAP (wrangler.toml [vars]) sets the cap; a value that is not a count falls back to the default', async () => {
+      expect((await worker.fetch(post(two).req, { DB: db(11).DB, DAILY_EVENT_CAP: '10' } as unknown as Env)).status).toBe(429);
+      expect((await worker.fetch(post(two).req, { DB: db(10).DB, DAILY_EVENT_CAP: '10' } as unknown as Env)).status).toBe(204);
+      for (const bad of ['', 'abc', '-5', '0', '1.5']) {
+        expect((await worker.fetch(post(two).req, { DB: db(DEFAULT_DAILY_EVENT_CAP).DB, DAILY_EVENT_CAP: bad } as unknown as Env)).status, bad).toBe(204);
+      }
+    });
+
+    it('a request with no valid event touches neither the counter nor the table', async () => {
+      const d = db(0);
+      expect((await worker.fetch(post(JSON.stringify([{ ...good, app: 'Outlook' }])).req, { DB: d.DB } as unknown as Env)).status).toBe(204);
+      expect(d.prepared).toEqual([]);
+    });
+
+    it('wrangler.toml sets the cap and a per-sender limit, and schema.sql creates the counter table', () => {
+      const root = path.join(getPackageRoot(), 'telemetry-worker');
+      const toml = fs.readFileSync(path.join(root, 'wrangler.toml'), 'utf8');
+      expect(toml).toMatch(/^DAILY_EVENT_CAP = "\d+"$/m);
+      expect(toml).toMatch(/^simple = \{ limit = (\d+), period = 60 \}$/m);
+      expect(Number(/^simple = \{ limit = (\d+)/m.exec(toml)![1])).toBeLessThanOrEqual(60);
+      expect(fs.readFileSync(path.join(root, 'schema.sql'), 'utf8')).toMatch(/CREATE TABLE IF NOT EXISTS daily_counts \(\s*day\s+TEXT\s+PRIMARY KEY/);
+    });
+  });
+
+  it('retention deletes by the indexed day column, 90 days back, and the day counters with it', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2030-06-30T03:17:00Z'));
     try {
@@ -370,7 +460,10 @@ describe('the Worker', () => {
       const prepare = vi.fn(() => ({ bind }));
       await worker.scheduled(null, { DB: { prepare, batch: async () => undefined } } as unknown as Env);
       expect(prepare).toHaveBeenCalledWith('DELETE FROM events WHERE day < ?');
-      expect(bind).toHaveBeenCalledWith('2030-04-01');
+      expect(prepare).toHaveBeenCalledWith('DELETE FROM daily_counts WHERE day < ?');
+      expect(bind).toHaveBeenCalledTimes(2);
+      expect(bind).toHaveBeenNthCalledWith(1, '2030-04-01');
+      expect(bind).toHaveBeenNthCalledWith(2, '2030-04-01');
     } finally { vi.useRealTimers(); }
   });
 

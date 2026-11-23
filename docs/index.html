@@ -802,7 +802,7 @@
       </div>
     </div>
     <p style="color:var(--text2);font-size:0.88rem;margin-top:18px;line-height:1.65;">
-      Reports go over HTTPS to <code>telemetry.clawdcursor.com</code>, a Cloudflare Worker run by the project. It checks every event against the same fixed lists and drops anything else, does not read or store your IP address or request headers, and deletes events after 90 days.
+      Reports go over HTTPS to <code>telemetry.clawdcursor.com</code>, a Cloudflare Worker run by the project. It checks every event against the same fixed lists and drops anything else, does not store your IP address or request headers (it hashes the address in memory to rate-limit each sender), and deletes events after 90 days.
       To turn them off, run <code>clawdcursor optout</code> (<code>clawdcursor optin</code> turns them back on), ask your AI to opt out for you (it can only turn them off), or set <code>CLAWD_TELEMETRY=0</code> or <code>DO_NOT_TRACK=1</code>. They are always off in CI and in test runs.
       From 2.1, <code>clawdcursor telemetry</code> prints the status and every field it sends.
     </p>
