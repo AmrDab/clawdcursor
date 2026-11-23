@@ -622,7 +622,9 @@ export class NativeDesktop {
         // The program (which contains the text) goes to osascript on stdin: argv is readable by every process on the Mac.
         await runAppleScript(`tell application "System Events" to keystroke "${escaped}"`, 10000);
       } catch (err: any) {
-        console.warn(`   ⌨️  macOS type failed: ${err.message?.substring(0, 100)}`);
+        // osascript's error number only: its message can quote the program, and the program holds the typed text.
+        const num = /\((-?\d+)\)\s*$/.exec(String(err?.message ?? '').trim())?.[1];
+        console.warn(`   ⌨️  macOS type failed (osascript error ${num ?? 'unknown'})`);
         // Fallback: try helper anyway. With no helper the text was not typed, and the caller must hear it (it reported done).
         if (!this.helper) throw err;
         await this.helper.type(text);
@@ -630,7 +632,8 @@ export class NativeDesktop {
       return;
     }
     await keyboard.type(text);
-    console.log(`   ⌨️  Typed: "${text.substring(0, 60)}${text.length > 60 ? '...' : ''}"`);
+    // The length only: this line reaches the MCP host's log file and GET /logs, and typed text can be a password.
+    console.log(`   ⌨️  Typed ${[...text].length} chars`);
   }
 
   async keyPress(keyCombo: string): Promise<void> {

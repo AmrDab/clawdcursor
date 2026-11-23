@@ -16,6 +16,10 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **macOS: screenshots were written to a predictable file in the shared `/tmp` (medium).** Another user of the Mac could
   read a capture of your screen there, or plant a file at its name first. The screenshot and the Screen Recording check
   now write to a random file name in a new folder only you can open, in your own temp folder, and remove it right after.
+- **Typed text was written to the log (low).** The keyboard behind `type_text` and `smart_type` logged the first 60
+  characters it typed (Windows and Linux X11), which ended up in the MCP host's log files and in `logs_recent`. It now
+  logs only how many characters it typed. On macOS, a failed keystroke logs osascript's error number instead of its
+  message, which could quote the text.
 
 ## [2.3.0] - 2026-11-20
 
