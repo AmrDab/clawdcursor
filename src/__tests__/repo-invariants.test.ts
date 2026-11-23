@@ -164,6 +164,21 @@ describe('temp files', () => {
       predictable.test(l) && !sanctioned.test(l) ? [`${rel(f)}:${i + 1}`] : []));
     expect(offenders, 'Predictable temp-file path(s) in the OS temp dir. Use fs.mkdtemp() or a crypto.randomUUID() filename instead').toEqual([]);
   });
+
+  // The macOS adapter wrote screen captures to `/tmp/.clawdcursor-shot-${process.pid}-${Date.now()}.png` (security scan
+  // 2026-11): the scan above looks for tmpdir() and never saw a literal path. /tmp is shared by every user of the machine;
+  // os.tmpdir() is per-user on macOS, and fs.mkdtemp() makes an owner-only directory on every OS.
+  it('no production .ts names the shared /tmp itself', () => {
+    const literal = /['"`]\/tmp(\/|['"`])/;
+    const offenders = CODE.filter(x => literal.test(x.l)).map(x => `${x.f}:${x.n} ${x.l.trim()}`);
+    expect(offenders, 'A literal /tmp path. Use fs.mkdtemp(path.join(os.tmpdir(), ...)) and a crypto.randomUUID() filename instead').toEqual([]);
+  });
+
+  it('the /tmp scan sees the forms it is meant to catch', () => {
+    const literal = /['"`]\/tmp(\/|['"`])/;
+    for (const l of ["const tmp = `/tmp/.clawdcursor-shot-${process.pid}.png`;", "path.join('/tmp', 'x')", 'open("/tmp/x.png")']) expect(literal.test(l), l).toBe(true);
+    for (const l of ["path.join(os.tmpdir(), 'x')", "const dir = '/var/tmp2'", "'./tmp/x'"]) expect(literal.test(l), l).toBe(false);
+  });
 });
 
 describe('scripts/** encoding', () => {

@@ -13,6 +13,9 @@ All notable changes to Clawd Cursor will be documented in this file.
   opening it sets the same httpOnly cookie and redirects to `/`. A plain `GET /` now sets no cookie and shows a page
   that says to run the command. The dashboard can no longer be framed by another site. Clients that send
   `Authorization: Bearer` are unaffected. Affects 2.3.0 and earlier.
+- **macOS: screenshots were written to a predictable file in the shared `/tmp` (medium).** Another user of the Mac could
+  read a capture of your screen there, or plant a file at its name first. The screenshot and the Screen Recording check
+  now write to a random file name in a new folder only you can open, in your own temp folder, and remove it right after.
 
 ## [2.3.0] - 2026-11-20
 

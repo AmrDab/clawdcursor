@@ -14,6 +14,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { execFile, spawn } from 'child_process';
+import { randomUUID } from 'crypto';
 import { promisify } from 'util';
 import sharp from 'sharp';
 import { mouse, Point, Button } from '@nut-tree-fork/nut-js';
@@ -61,6 +62,20 @@ const SCREENSHOT_TIMEOUT_MS = 10_000;
 /** How long open_app waits for a launched app to show a window before calling it "still loading". */
 const LAUNCH_CONFIRM_MS = 4_000;
 const LAUNCH_POLL_MS = 250;
+
+interface PrivateCaptureFile { file: string; remove: () => void }
+/**
+ * Where the screenshot helper writes a capture: a random name in a fresh mkdtemp directory (owner-only, unguessable)
+ * under the per-user temp dir, removed with its directory. Captures used to go to a predictable name in the shared /tmp,
+ * where another user of the Mac could read the screen, or plant a file or symlink at the name first (CWE-377).
+ */
+function privateCaptureFile(): PrivateCaptureFile {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdcursor-'));
+  return {
+    file: path.join(dir, `${randomUUID()}.png`),
+    remove: () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ } },
+  };
+}
 
 /** One line for the tools: which apps' windows a time-boxed window list is missing. */
 function partialWindowListNote(skipped: readonly SkippedApp[]): string {
@@ -140,20 +155,18 @@ export class MacOSAdapter implements PlatformAdapter {
   private async probeScreenRecording(): Promise<boolean> {
     // Use the Swift screenshot-helper as the probe — it's what ClawdCursor actually uses.
     if (!this.screenshotHelperPath || !fs.existsSync(this.screenshotHelperPath)) return false;
+    let capture: PrivateCaptureFile;
+    try { capture = privateCaptureFile(); } catch { return false; }
+    const { file: tmp, remove } = capture;
     return new Promise((resolve) => {
-      const tmp = `/tmp/.clawdcursor-probe-${process.pid}.png`;
       const proc = spawn(this.screenshotHelperPath!, ['--fullscreen', tmp]);
-      const timer = setTimeout(() => { proc.kill(); resolve(false); }, 5_000);
+      const timer = setTimeout(() => { proc.kill(); remove(); resolve(false); }, 5_000);
       proc.on('close', (code) => {
         clearTimeout(timer);
-        try {
-          if (code === 0 && fs.existsSync(tmp) && fs.statSync(tmp).size > 100) {
-            fs.unlinkSync(tmp);
-            return resolve(true);
-          }
-        } catch { /* fallthrough */ }
-        try { fs.unlinkSync(tmp); } catch { /* */ }
-        resolve(false);
+        let ok = false;
+        try { ok = code === 0 && fs.existsSync(tmp) && fs.statSync(tmp).size > 100; } catch { /* not captured */ }
+        remove();
+        resolve(ok);
       });
     });
   }
@@ -257,7 +270,7 @@ export class MacOSAdapter implements PlatformAdapter {
       );
     }
 
-    const tmp = `/tmp/.clawdcursor-shot-${process.pid}-${Date.now()}.png`;
+    const { file: tmp, remove } = privateCaptureFile();
     try {
       // The Swift helper always captures the full screen. For non-primary
       // display selection we crop post-hoc from listDisplays bounds.
@@ -265,7 +278,7 @@ export class MacOSAdapter implements PlatformAdapter {
         timeout: SCREENSHOT_TIMEOUT_MS,
       });
       let buffer: Buffer = fs.readFileSync(tmp);
-      try { fs.unlinkSync(tmp); } catch { /* */ }
+      remove();
 
       const meta = await sharp(buffer).metadata();
       let width = meta.width || 0;
@@ -307,7 +320,7 @@ export class MacOSAdapter implements PlatformAdapter {
 
       return { buffer, width, height, scaleFactor, ...(origin ? { origin } : {}) };
     } catch (err) {
-      try { fs.unlinkSync(tmp); } catch { /* */ }
+      remove();
       throw err;
     }
   }

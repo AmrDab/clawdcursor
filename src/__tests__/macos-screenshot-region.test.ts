@@ -14,19 +14,11 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
 }));
 vi.mock('child_process', async () => {
   const { promisify } = await import('util');
+  const fs = await import('fs');
   const execFile: any = (...a: unknown[]) => (a[a.length - 1] as (e: null, out: string, err: string) => void)(null, '', '');
-  // The screenshot helper writes its PNG to the path it is given; the test reads it back from `shot.png`.
-  execFile[promisify.custom] = async () => ({ stdout: '', stderr: '' });
+  // The screenshot helper writes its PNG to the path it is given (`--fullscreen <path>`): here, `shot.png`.
+  execFile[promisify.custom] = async (_file: string, args: string[]) => { fs.writeFileSync(args[1], shot.png); return { stdout: '', stderr: '' }; };
   return { execFile, spawn: vi.fn() };
-});
-vi.mock('fs', async () => {
-  const actual = await vi.importActual<typeof import('fs')>('fs');
-  return {
-    ...actual,
-    readFileSync: (p: unknown, ...rest: unknown[]) =>
-      String(p).includes('.clawdcursor-shot-') ? shot.png : (actual.readFileSync as (...x: unknown[]) => unknown)(p, ...rest),
-    unlinkSync: (p: unknown) => { if (!String(p).includes('.clawdcursor-shot-')) actual.unlinkSync(p as string); },
-  };
 });
 
 import { MacOSAdapter } from '../platform/macos';
