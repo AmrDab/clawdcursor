@@ -8,7 +8,7 @@ import request from 'supertest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { dashboardPage } from '../surface/dashboard';
+import { DASHBOARD_HTML } from '../surface/dashboard';
 import { createUtilityServer } from '../surface/http-utility';
 import { initServerToken } from '../surface/auth';
 import { captureConsole } from '../surface/log-buffer';
@@ -44,12 +44,8 @@ describe('GET /logs', () => {
 });
 
 describe('dashboard page', () => {
-  function page(): string {
-    let html = '';
-    const res = { cookie() {}, type() { return { send: (s: string) => { html = s; } }; } };
-    (dashboardPage() as unknown as (req: unknown, res: unknown) => void)({}, res);   // the handler takes (req, res) only
-    return html;
-  }
+  // Who is served it is dashboard-login.test.ts's subject.
+  const page = (): string => DASHBOARD_HTML;
 
   it('reads its logs from GET /logs and calls no MCP tool', () => {
     const html = page();

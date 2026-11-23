@@ -471,6 +471,7 @@ clawdcursor consent         Desktop-control consent (--accept / --revoke / --sta
 clawdcursor grant           Request macOS permissions (macOS only)
 clawdcursor mcp             stdio MCP server; your host starts this (--compact for the six tools)
 clawdcursor agent           HTTP MCP server on 127.0.0.1:3847, with the live log in a terminal (--port, --compact, --no-vision)
+clawdcursor dashboard       Open the daemon's dashboard (log, pause banner, Stop) through a one-time link (--no-open prints it)
 clawdcursor stop            Stop every running instance; agents stay stopped until resume
 clawdcursor resume          Continue the daemon's paused task or give control back after a stop (--end to end the task)
 clawdcursor doctor          Diagnose the install (version, consent, screen capture, accessibility, permissions)

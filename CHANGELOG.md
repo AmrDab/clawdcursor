@@ -2,6 +2,18 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Security
+- **The daemon's dashboard handed its full-control token to anyone on the machine (high).** `GET /` on
+  `clawdcursor agent` set the bearer token as a cookie for any caller, so any local process or other user of the computer
+  could read it with `curl -si http://127.0.0.1:3847/` and then drive the desktop through `/mcp`. Open the dashboard with
+  the new `clawdcursor dashboard` command: it asks the daemon for a one-time link with the token from
+  `~/.clawdcursor/token` and opens it in your browser (`--no-open` prints it). The link is good once and for 60 seconds;
+  opening it sets the same httpOnly cookie and redirects to `/`. A plain `GET /` now sets no cookie and shows a page
+  that says to run the command. The dashboard can no longer be framed by another site. Clients that send
+  `Authorization: Bearer` are unaffected. Affects 2.3.0 and earlier.
+
 ## [2.3.0] - 2026-11-20
 
 ### Security

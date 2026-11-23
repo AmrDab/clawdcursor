@@ -10,7 +10,7 @@ import { VERSION } from '../version';
 import { e } from './format';
 import { pauseGate, type PauseAnswer } from '../core/pause-gate';
 import { stopControl } from '../core/control';
-import { isLoopbackHost, localOnly, requireLocalHostHeader, requireToken, serverToken } from './auth';
+import { isLoopbackHost, localOnly, mintDashboardNonce, requireLocalHostHeader, requireToken, DASHBOARD_LINK_TTL_MS } from './auth';
 import { getLogBuffer } from './log-buffer';
 
 type Method = 'GET' | 'POST' | 'DELETE';
@@ -19,8 +19,11 @@ type RouteKey = `${Method} ${string}`;
 interface Route {
   method: Method;
   path: string;
-  /** 'token': the daemon's bearer token (header or the dashboard's cookie); 'token-or-disk': or the one on disk (auth.ts). */
-  auth: 'none' | 'token' | 'token-or-disk';
+  /**
+   * 'token': the daemon's bearer token (header or the dashboard's cookie); 'token-or-disk': or the one on disk (auth.ts);
+   * 'link': the token, or a one-time link from `clawdcursor dashboard` that sets the cookie (the handler checks, dashboard.ts).
+   */
+  auth: 'none' | 'token' | 'token-or-disk' | 'link';
   /** Refused off this machine, naming the route as here. */
   localOnly?: string;
   summary: string;
@@ -28,7 +31,9 @@ interface Route {
 
 /** Every route the daemon serves. Each also checks the Host header (auth.ts requireLocalHostHeader). */
 export const ROUTES: readonly Route[] = [
-  { method: 'GET', path: '/', auth: 'none', summary: 'Dashboard' },
+  { method: 'GET', path: '/', auth: 'link', summary: 'Dashboard: open it with `clawdcursor dashboard`' },
+  // The one-time link for the dashboard (auth.ts mintDashboardNonce). Only a token holder gets one.
+  { method: 'POST', path: '/dashboard-link', auth: 'token', localOnly: 'Dashboard link', summary: 'A one-time dashboard link (`clawdcursor dashboard`)' },
   { method: 'GET', path: '/health', auth: 'none', summary: 'Readiness probe' },
   // The dashboard's log panel. Not through MCP: a poll there was a recorded call every 2 s, refused while stopped.
   { method: 'GET', path: '/logs', auth: 'token', localOnly: 'Logs', summary: 'Recent console lines' },
@@ -44,15 +49,15 @@ export const ROUTES: readonly Route[] = [
 /** One line per route for the daemon's startup print. */
 export function describeRoutes(): string[] {
   return ROUTES.map(r => {
-    const gates = r.auth === 'none' ? 'no auth' : `auth${r.localOnly ? ', localhost only' : ''}`;
-    return `${r.method.padEnd(6)} ${r.path.padEnd(7)} — ${r.summary} (${gates})`;
+    const gates = r.auth === 'none' ? 'no auth' : r.auth === 'link' ? 'one-time link or auth' : `auth${r.localOnly ? ', localhost only' : ''}`;
+    return `${r.method.padEnd(6)} ${r.path.padEnd(15)} — ${r.summary} (${gates})`;
   });
 }
 
 export interface UtilityServerOptions {
   /** Called when /stop is invoked, before the process exits (graceful shutdown). */
   onStop?: () => void | Promise<void>;
-  /** Bind host. A non-loopback host disables the dashboard, which embeds the control token. */
+  /** Bind host. A non-loopback host disables the dashboard, which hands the control token to the browser. */
   host?: string;
   /** The MCP transport's handler for POST / GET / DELETE /mcp (startMcpHttp). Without it /mcp is a 404. */
   mcp?: express.RequestHandler;
@@ -98,16 +103,22 @@ export function createUtilityServer(options: UtilityServerOptions): express.Expr
     next(err);
   });
 
-  // SECURITY: the dashboard hands the bearer token (full desktop control) to the page. On a non-loopback bind it used
-  // to log a warning and serve it ANYWAY. The daemon binds loopback only (#293); this stays as a second line for any
-  // other caller: the dashboard is simply not served off-loopback.
+  // SECURITY: the dashboard hands the bearer token (full desktop control) to the browser as its cookie. On a non-loopback
+  // bind it used to log a warning and serve it ANYWAY. The daemon binds loopback only (#293); this stays as a second line
+  // for any other caller: the dashboard, and its one-time link, are simply not served off-loopback.
   const offLoopback = options.host !== undefined && !isLoopbackHost(options.host);
   if (offLoopback) {
-    console.warn(`${e('⚠️', '[WARN]')} Dashboard disabled: bound to ${options.host}, and the dashboard embeds the control token. It is only served on localhost.`);
+    console.warn(`${e('⚠️', '[WARN]')} Dashboard disabled: bound to ${options.host}, and the dashboard hands out the control token. It is only served on localhost.`);
   }
 
   const handlers: Partial<Record<RouteKey, express.RequestHandler>> = {
-    'GET /': offLoopback ? undefined : dashboardPage(serverToken),
+    'GET /': offLoopback ? undefined : dashboardPage(),
+    'POST /dashboard-link': offLoopback ? undefined : (req, res) => {
+      // The daemon binds 127.0.0.1 (serve.ts): the link names it, with the port this request came in on (--port).
+      const port = req.socket.localPort;
+      res.set('Cache-Control', 'no-store');
+      res.json({ url: `http://127.0.0.1:${port}/?k=${mintDashboardNonce()}`, expiresInMs: DASHBOARD_LINK_TTL_MS });
+    },
     'GET /health': (_req, res) => { res.json({ status: 'ok', version: VERSION }); },
     'GET /logs': (_req, res) => { res.json(getLogBuffer()); },
     'GET /resume': (_req, res) => {
@@ -151,7 +162,7 @@ export function createUtilityServer(options: UtilityServerOptions): express.Expr
     const handler = handlers[`${route.method} ${route.path}`];
     if (!handler) continue;
     const gates: express.RequestHandler[] = [];
-    if (route.auth !== 'none') gates.push(requireToken({ diskTokenOk: route.auth === 'token-or-disk' }));
+    if (route.auth === 'token' || route.auth === 'token-or-disk') gates.push(requireToken({ diskTokenOk: route.auth === 'token-or-disk' }));
     if (route.localOnly) gates.push(localOnly(route.localOnly));
     const verb = route.method === 'GET' ? 'get' : route.method === 'POST' ? 'post' : 'delete';
     app[verb](route.path, ...gates, handler);

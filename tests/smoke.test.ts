@@ -45,11 +45,17 @@ describe('utility server smoke tests', () => {
     expect(res.body.version).toBe(VERSION);
   });
 
-  it('serves the dashboard at GET /', async () => {
+  it('serves the dashboard at GET / to the token (its cookie), and only a pointer to `clawdcursor dashboard` without it', async () => {
     const app = makeUtilityApp();
-    const res = await request(app).get('/');
+    const res = await request(app).get('/').set('Cookie', `clawdcursor_token=${token}`);
     expect(res.status).toBe(200);
     expect(res.text).toContain('Clawd Cursor Dashboard');
+    expect(res.text).toContain('killSwitch');
+    const anon = await request(app).get('/');
+    expect(anon.status).toBe(401);
+    expect(anon.text).toContain('clawdcursor dashboard');
+    expect(anon.text).not.toContain('killSwitch');
+    expect(anon.headers['set-cookie']).toBeUndefined();
   });
 
   it('returns 401 on /stop without auth', async () => {

@@ -1,11 +1,12 @@
 /**
  * The token-bearing dashboard must never be served off-loopback.
  *
- * The dashboard injects the bearer token — full desktop control — into the
- * page's JS. On a non-loopback bind the server used to log a warning and then
+ * The dashboard hands the bearer token — full desktop control — to the
+ * browser. On a non-loopback bind the server used to log a warning and then
  * serve it ANYWAY, so anyone who could reach the port and load `/` got the
  * token. The daemon now binds loopback only (#293); this guard is the second
- * line for any other caller of createUtilityServer.
+ * line for any other caller of createUtilityServer. Off-loopback neither `/`
+ * nor the one-time link that signs a browser in (`POST /dashboard-link`) exists.
  *
  * Deliberately never calls initServerToken(): that would rewrite the real
  * token file and break a running daemon.
@@ -21,14 +22,18 @@ describe('dashboard is loopback-only', () => {
     'is NOT served when bound to %s', async (host) => {
       const res = await request(build(host)).get('/');
       expect(res.status).toBe(404);
+      expect((await request(build(host)).post('/dashboard-link')).status).toBe(404);
     },
   );
 
+  // Without the token or a one-time link: the page that says how to open it, and no cookie.
   it.each([undefined, '127.0.0.1', 'localhost', '::1', '127.0.0.2', 'LOCALHOST'])(
     'is served when bound to %s', async (host) => {
       const res = await request(build(host)).get('/');
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(401);
       expect(res.type).toMatch(/html/);
+      expect(res.text).toContain('clawdcursor dashboard');
+      expect(res.headers['set-cookie']).toBeUndefined();
     },
   );
 

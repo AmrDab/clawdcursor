@@ -272,6 +272,7 @@ async function serveHttp(opts: ServeOptions): Promise<void> {
     console.log(`\n${pc.green(`${e('🌐', '[NET]')} API server:`)} http://${BIND_HOST}:${resolved.port}`);
     console.log(`${pc.yellow(`${e('🔑', '[KEY]')} Auth token:`)} ${serverToken.slice(0, 8)}...`);
     console.log(pc.gray(`   (full token saved to ${TOKEN_PATH})`));
+    console.log(`${pc.cyan(`${e('📊', '[UI]')} Dashboard:`)} run ${pc.cyan('clawdcursor dashboard')} ${pc.gray('(opens a one-time link in your browser)')}`);
     console.log(`\nHTTP routes (agents use MCP at /mcp: the ${compact ? 'compact' : 'granular'} surface, ${toolCount} tools):`);
     for (const line of describeRoutes()) console.log(`  ${line}`);
     if (!compact) {

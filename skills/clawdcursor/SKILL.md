@@ -214,7 +214,7 @@ GET  /mcp        → SSE channel for server-initiated notifications (auth)
 GET  /health     → {"status":"ok","version":"<x.y.z>"}  (no auth, readiness probe)
 POST /resume     → answer a pause for the user: {"answer":"resume"|"end"} (auth, localhost-only; same as `clawdcursor resume`)
 POST /stop       → graceful shutdown (auth, localhost-only)
-GET  /           → minimal dashboard, calls /mcp via JSON-RPC under the hood
+GET  /           → the user's dashboard; they open it with `clawdcursor dashboard` (a one-time link: GET / alone signs nothing in)
 ```
 
 That's the entire HTTP surface. Calling a tool looks like:

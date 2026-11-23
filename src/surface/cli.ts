@@ -406,6 +406,46 @@ program
   });
 
 program
+  .command('dashboard')
+  .description('Open the running daemon\'s dashboard in your browser, through a one-time link (valid 60 s)')
+  .option('--port <port>', 'API server port (default: the running daemon\'s port, else 3847)')
+  .option('--no-open', 'Print the link instead of opening a browser')
+  .action(async (opts: { port?: string; open?: boolean }) => {
+    const port = clientPort(opts.port);
+    if (!(await isClawdInstance(port))) {
+      console.log(`${e('🐾', '>')} No running daemon on port ${port}. Start it with \`clawdcursor agent\`.`);
+      process.exitCode = 1;
+      return;
+    }
+    // The daemon mints the link for a caller with its token (POST /dashboard-link): a plain GET / no longer signs a browser in.
+    let url = '';
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/dashboard-link`, { method: 'POST', headers: authHeaders(), signal: AbortSignal.timeout(5000) });
+      const data = await res.json().catch(() => ({})) as { url?: unknown; error?: unknown };
+      if (!res.ok) {
+        console.error(`${e('❌', '[ERR]')} ${typeof data.error === 'string' ? data.error : res.statusText}`);
+        process.exitCode = 1;
+        return;
+      }
+      // Only a link to this daemon is printed or opened.
+      if (typeof data.url === 'string' && new RegExp(`^http://127\\.0\\.0\\.1:${port}/\\?k=[0-9a-f]{64}$`).test(data.url)) url = data.url;
+    } catch (err) {
+      console.error(`${e('❌', '[ERR]')} ${(err as Error).message}`);
+      process.exitCode = 1;
+      return;
+    }
+    if (!url) {
+      console.error(`${e('❌', '[ERR]')} The daemon on port ${port} did not return a dashboard link.`);
+      process.exitCode = 1;
+      return;
+    }
+    const { openInDefaultBrowser } = await import('../platform/open-browser');
+    const opened = opts.open !== false && openInDefaultBrowser(url);
+    console.log(`${e('🐾', '>')} ${opened ? 'Opening the dashboard. If no browser appears, open' : 'Open'} this one-time link (valid 60 s, good once):`);
+    console.log(`  ${url}`);
+  });
+
+program
   .command('uninstall')
   .description('Remove all Clawd Cursor config, data, and skill registrations')
   .action(async () => {
