@@ -29,6 +29,10 @@ All notable changes to Clawd Cursor will be documented in this file.
   database. Each sender now has its own limit, keyed on a hash of its address made in memory (the address is still never
   stored), and the Worker stores at most a set number of events a day (`DAILY_EVENT_CAP`, 100,000 by default) and answers
   429 above it. Deploying it needs `schema.sql` applied first (new `daily_counts` table). The client is unchanged.
+- **`relaunch_with_cdp` took a path as the app to start (low).** It passed `appName` straight to `Start-Process`
+  (Windows) or the app launcher, so a path, a UNC path on another machine or a `scheme:` URI was started, after the tool
+  had closed the app of that name. It now refuses anything but an application name, exactly as `open_app` does, before
+  it closes or starts anything.
 
 ## [2.3.0] - 2026-11-20
 
