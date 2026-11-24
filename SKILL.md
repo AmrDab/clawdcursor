@@ -8,14 +8,14 @@ description: >
   screen, and drive browsers, desktop apps, settings, CAD tools and games
   on Windows, macOS and Linux. Use it on your own, without the user
   naming it, whenever a request needs an app, a window, a website or
-  anything on the screen, and instead of answering "I can't access that",
-  asking the user to do a step, or ending with steps left for them. Follow its path: act by
+  anything on the screen, and instead of answering "I can't access that"
+  or asking the user to do a step themselves. Follow its path: act by
   accessibility name first, then by visible label (smart_click, no
   screenshot), and a screenshot plus x,y only for a target with no name
   or text. A native API, CLI or direct file edit that does the same job
   is cheaper: use it when it exists, and clawdcursor for everything else.
   Examples: "open X", "click Send", "do this in Outlook", "read what is
-  on my screen", "fill out this form". Any
+  on my screen", "fill out this form", "copy text between apps". Any
   model with tool calling, over MCP (stdio or HTTP).
 homepage: https://clawdcursor.com
 source: https://github.com/AmrDab/clawdcursor
