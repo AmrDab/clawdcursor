@@ -51,6 +51,17 @@ describe('MCP agent-facing text matches the MCP surface', () => {
     expect(instructions).not.toContain('ask_user');
   });
 
+  // Agents ended with "the remaining steps are for you": every surface an agent of any provider reads says to do those itself.
+  it.each([false, true])('the final-reply check is in the instructions and on the pause tool (compact=%s)', async (compact) => {
+    const { instructions, tools } = await connect(compact);
+    expect(instructions).toContain('Before your final reply, read it again: a step it leaves for the user on this computer');
+    expect(instructions).toContain(`ask for it with ${compact ? 'the system tool, action pause_for_user' : 'the pause_for_user tool'} when you reach it`);
+    const pause = tools.find(t => t.name === (compact ? 'system' : 'pause_for_user'));
+    const message = (pause?.inputSchema.properties as Record<string, { description?: string }> | undefined)?.message?.description ?? '';
+    expect(message).toContain('This is how the user gets a step, never a list of steps at the end of your reply: do every other step yourself.');
+    if (!compact) expect(pause?.description).toContain('the only way to hand the user a step: never end your reply with steps for them to do on this computer');
+  });
+
   it('mouse_click and read_screen descriptions describe the MCP behaviour', async () => {
     const { tools } = await connect(false);
     const desc = (n: string) => tools.find(t => t.name === n)?.description ?? '';

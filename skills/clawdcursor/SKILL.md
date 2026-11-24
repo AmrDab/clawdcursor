@@ -8,14 +8,14 @@ description: >
   screen, and drive browsers, desktop apps, settings, CAD tools and games
   on Windows, macOS and Linux. Use it on your own, without the user
   naming it, whenever a request needs an app, a window, a website or
-  anything on the screen, and instead of answering "I can't access that"
-  or asking the user to do a step themselves. Follow its path: act by
+  anything on the screen, and instead of answering "I can't access that",
+  asking the user to do a step, or ending with steps left for them. Follow its path: act by
   accessibility name first, then by visible label (smart_click, no
   screenshot), and a screenshot plus x,y only for a target with no name
   or text. A native API, CLI or direct file edit that does the same job
   is cheaper: use it when it exists, and clawdcursor for everything else.
   Examples: "open X", "click Send", "do this in Outlook", "read what is
-  on my screen", "fill out this form", "copy text between apps". Any
+  on my screen", "fill out this form". Any
   model with tool calling, over MCP (stdio or HTTP).
 homepage: https://clawdcursor.com
 source: https://github.com/AmrDab/clawdcursor
@@ -59,6 +59,16 @@ metadata:
 > **Ask first only** before an irreversible action the user did not ask for (sending, deleting, paying, closing unsaved work): `pause_for_user` with `choices`. The user's request is the permission for everything it covers.
 >
 > **Cost note:** a native API, a CLI or a direct file edit that does the same job is cheaper and exact: use it when it exists. Never decline or stall a task because none exists; that is what clawdcursor is for.
+
+---
+
+> **Before your final reply: leave the user nothing you can do.**
+>
+> Read your reply once more before you send it. Does it tell the user to do something on this computer: open, click, go to, turn on, install, restart, copy, or check that it works? Each of those steps is yours. Do it now with clawdcursor, then report it as done. A settings page, a web dashboard, an installer, restarting an app and checking the result are all clawdcursor tasks.
+>
+> The user keeps only what only they can do: a password, a 2FA code, a CAPTCHA, the system's admin prompt, a decision that is theirs, or a step away from this computer. Ask for it with `pause_for_user` when you reach it, then finish the rest yourself. Never leave it as a list at the end of your reply ("Next steps for you: …", "You'll need to …", "Once you've done that, let me know").
+>
+> When the user asked *how* to do something rather than asking you to do it, answer, and offer to do it for them.
 
 ---
 

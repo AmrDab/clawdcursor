@@ -23,6 +23,7 @@ export function getAgentTools(): ToolDefinition[] {
       name: 'pause_for_user',
       description:
         'Hand the desktop to the user for a step only they can do (sign in, a password or 2FA code, a CAPTCHA, a choice only they can make, a step your own rules won\'t let you take such as creating an account, downloading a private key or entering a secret, a plan limit or upgrade wall — never click Upgrade / Subscribe yourself) instead of stopping, turning the task down or asking them to come back to this chat. ' +
+        'This prompt is the only way to hand the user a step: never end your reply with steps for them to do on this computer; do those yourself. ' +
         'Ask for that ONE step only — e.g. "Sign in to Glama" — and do everything before and after it yourself (navigating, filling forms, clicking through): keep the user on screen as briefly as possible. ' +
         'A step your rules forbid is handed over as wide as your rules draw it; do the rest they allow. When a secret must go into a field or a terminal prompt, put the cursor there and ask only for the paste ("Paste your app-specific password into the Terminal, press Enter, then click Resume"), naming where it goes: never into the prompt\'s own reply box, whose text reaches you; afterwards pass the saved key\'s file path or keychain profile name, never the secret. ' +
         'For a sign-in, a code or a CAPTCHA, pass `done_when` (what shows once their step is done, e.g. [{"type":"element_exists","name":"Sign out"}]) so the prompt clears and you continue the moment they finish, with no Resume click; it must be false now, and must not be text the prompt itself shows (your message, Resume / End task). ' +
@@ -35,7 +36,7 @@ export function getAgentTools(): ToolDefinition[] {
         'BOUNDED: waits up to `timeout` seconds (default 45). {status:"waiting"} → the user is still busy: re-call with the SAME message, choices and input to keep waiting (re-attaches, the prompt stays up). ' +
         '{status:"resumed"} → re-read the screen, then continue the task. {status:"ended"} → the user stopped it: report back.',
       parameters: {
-        message: { type: 'string', description: 'The one thing only the user can do, short, e.g. "Sign in to GitHub", or the question when you pass choices / input. Say "then click Resume" only for a step they do themselves, and not with done_when, choices or input.', required: true },
+        message: { type: 'string', description: 'The one thing only the user can do, short, e.g. "Sign in to GitHub", or the question when you pass choices / input. Say "then click Resume" only for a step they do themselves, and not with done_when, choices or input. This is how the user gets a step, never a list of steps at the end of your reply: do every other step yourself.', required: true },
         choices: {
           type: 'array',
           description: 'A question\'s options: 2-6 distinct one-line strings, each at most 40 characters, one button each. Not with done_when.',

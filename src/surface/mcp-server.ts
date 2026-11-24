@@ -159,6 +159,11 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'on a screen, you can. Use it on your own whenever a request needs an app, a window, a website or anything on the screen; ' +
       'the user does not have to name it. Do not tell the user you cannot reach their desktop or an app, and do not ask them to do ' +
       'a step you can do with these tools. You drive the tools yourself. ' +
+      // Owner 2026-11-23: agents still ended with "the remaining steps are for you"; the check sits at the final reply, where it happens.
+      'Before your final reply, read it again: a step it leaves for the user on this computer (open, click, go to, turn on, install, restart, ' +
+      'check that it works) is yours, so do it now with these tools and report it done. The user keeps only what only they can do (a password, ' +
+      `a 2FA code, a CAPTCHA, the system's admin prompt, a decision that is theirs): ask for it with ${pauseTool} when you reach it, ` +
+      'never as a list of steps at the end of your reply. ' +
       // Live runs (audit 2026-11-19, and the 2026-11-19 terminal runs): the first call often went to a bare `window`, which
       // the host does not have, because it lists the tools with its own prefix.
       'The tool names in this text are short: call each tool by the full name your host lists for it (hosts add a prefix). ' +
