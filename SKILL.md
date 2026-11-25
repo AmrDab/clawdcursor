@@ -327,6 +327,19 @@ On any guard miss, refusal, or step error, `batch` halts and returns a per-step 
 **When to use `batch`:** deterministic form fills, multi-field sequences, known keystroke chains.
 **When NOT to use `batch`:** when you need to inspect state between steps to decide what to do next — that's a normal tool loop.
 
+### 4. Delegate multi-step screen tasks to a subagent
+
+If your host can spawn subagents, hand multi-step screen work to one instead of driving it in your own context. Every screenshot and tree read stays in the subagent's small context, so each step is faster and cheaper, and your main context stays small.
+
+- **Give it a precise brief:** the goal, the app or site, the exact success criteria, and what to return (e.g. "Create an API token with Zone:Read on example.com. Return only success or failure, and the token's name").
+- **Get back only the result,** not screenshots or a step log.
+- **Use a small, fast model to drive** when the host lets you pick one; the main agent plans and checks the result.
+
+**Do NOT delegate:**
+- **Single quick actions** (one click, one shortcut): the handoff costs more than it saves.
+- **Steps that need secrets or the user's approval:** passwords, keys, sends, purchases and other irreversible steps come back to you and the user. End the brief before them.
+- **Tasks that need your judgment mid-way:** if the subagent would keep coming back to ask, drive it yourself.
+
 ---
 
 ## Quick patterns
