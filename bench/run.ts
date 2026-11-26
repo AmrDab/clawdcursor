@@ -28,6 +28,8 @@ import type { AgentRun, CallSig, TaskSpec } from './lib/types';
 export interface Options {
   live: boolean; selfcheck: boolean; selfcheckFixtures: boolean; writeOracles: boolean; includeManual: boolean; updateBaseline: boolean; repeats: number;
   build?: string; models?: string; tasks?: string[]; out?: string; baseline?: string; claudeBin?: string; codexBin?: string;
+  /** Keep the routines each task saves here (one folder per model and task), across runs: a second run replays them. */
+  routinesDir?: string;
 }
 
 export function parseArgs(argv: string[]): Options {
@@ -48,6 +50,7 @@ export function parseArgs(argv: string[]): Options {
     else if (a === '--baseline') o.baseline = value();
     else if (a === '--claude-bin') o.claudeBin = value();
     else if (a === '--codex-bin') o.codexBin = value();
+    else if (a === '--routines-dir') o.routinesDir = path.resolve(value());
     else if (a === '--repeats') {
       o.repeats = Number(value());
       if (!Number.isInteger(o.repeats) || o.repeats < 1 || o.repeats > 9) throw new Error('--repeats needs a number from 1 to 9');
@@ -156,7 +159,7 @@ export function agentRoot(platform: string = process.platform, env: NodeJS.Proce
 }
 
 interface Env {
-  cli: string; server: FixtureServer; native: NativeBuild | { missing: string }; outDir: string; tempRoot: string; agentRoot: string;
+  cli: string; server: FixtureServer; native: NativeBuild | { missing: string }; outDir: string; tempRoot: string; agentRoot: string; routinesDir?: string;
   cleanup: Cleanup;
 }
 
@@ -178,7 +181,8 @@ async function runOne(task: TaskSpec, m: ModelRun, env: Env, n: number, repeat: 
     const cdpPort = fixture.cdp?.cdpPort ?? await freePort();
     // The fence: the daemon itself refuses, before acting or reading, whatever is outside the fixture's processes.
     const fencePids = await fixture.roots();
-    daemon = await startIsolated({ cli: env.cli, home: path.join(env.tempRoot, `home-${n}`), sessionDir, cdpPort, fencePids, logFile: path.join(workDir, 'server.log') });
+    const routinesDir = env.routinesDir ? path.join(env.routinesDir, m.label.replace(/[^A-Za-z0-9._-]/g, '_'), task.id) : undefined;
+    daemon = await startIsolated({ cli: env.cli, home: path.join(env.tempRoot, `home-${n}`), sessionDir, cdpPort, fencePids, logFile: path.join(workDir, 'server.log'), routinesDir });
     const started0 = daemon;
     daemonClosed = env.cleanup.add(() => started0.kill());
     // The second layer, after the fact: the watchdog's proofs (the focus is in a process this task started; CDP can only reach its browser).
@@ -310,7 +314,7 @@ async function live(o: Options): Promise<void> {
   const scores: Score[] = [];
   try {
     const native = run.some(t => t.fixture.kind === 'native') ? await buildNative(path.join(tempRoot, 'native')) : { missing: 'not needed' };
-    const env: Env = { cli, server, native, outDir, tempRoot, agentRoot: agents, cleanup };
+    const env: Env = { cli, server, native, outDir, tempRoot, agentRoot: agents, cleanup, routinesDir: o.routinesDir };
     let n = 0;
     for (const m of models) {
       for (const task of run) {

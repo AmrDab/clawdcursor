@@ -57,11 +57,13 @@ export function serverCommand(cli: string, port: number): { cmd: string; args: s
  * (CLAWD_AGENT_CDP_PORT) is the fixture browser's: the `browser` tool attaches there first, so it never reaches for a
  * browser the owner put on the default debug port.
  */
-export function isolatedEnv(base: NodeJS.ProcessEnv, o: { home: string; sessionDir: string; cdpPort: number; fencePids?: number[] }): NodeJS.ProcessEnv {
+export function isolatedEnv(base: NodeJS.ProcessEnv, o: { home: string; sessionDir: string; cdpPort: number; fencePids?: number[]; routinesDir?: string }): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   // Nothing of the owner's clawdcursor setup leaks in.
   for (const [k, v] of Object.entries(base)) if (!/^(CLAWD|CLAWDCURSOR|OPENCLAW)_/i.test(k)) env[k] = v;
   return { ...env, HOME: o.home, USERPROFILE: o.home, CLAWDCURSOR_SESSION_DIR: o.sessionDir, CLAWD_AGENT_CDP_PORT: String(o.cdpPort),
+    // --routines-dir: routines a run saves outlive its temp home, so a second run of the same task can replay them.
+    ...(o.routinesDir ? { CLAWDCURSOR_ROUTINES_DIR: o.routinesDir } : {}),
     // The fence (src/core/fence.ts): the daemon refuses, before acting or reading, anything outside these processes and
     // their children. An empty list still sets it: then everything is outside.
     ...(o.fencePids ? fenceEnv(o.fencePids) : {}) };
@@ -95,7 +97,7 @@ export interface IsolatedServer {
   kill(): void;
 }
 
-export async function startIsolated(o: { cli: string; home: string; sessionDir: string; cdpPort: number; logFile: string; fencePids?: number[] }): Promise<IsolatedServer> {
+export async function startIsolated(o: { cli: string; home: string; sessionDir: string; cdpPort: number; logFile: string; fencePids?: number[]; routinesDir?: string }): Promise<IsolatedServer> {
   fs.mkdirSync(o.home, { recursive: true, mode: 0o700 });
   fs.mkdirSync(o.sessionDir, { recursive: true, mode: 0o700 });
   const port = await freePort();
