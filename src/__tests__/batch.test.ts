@@ -20,8 +20,8 @@ vi.mock('../core/pause-gate', () => ({ pauseGate: { current: () => pausePending 
 import { executeBatch, getBatchTools } from '../tools/batch';
 import { stopControl, sleepUnlessStopped, STOPPED_TEXT, __setControlDirForTests } from '../core/control';
 import { guardInputMethods } from '../platform/pointer-guard';
-import { buildUnifiedTools } from '../tools/projected/tools';
-import { projectToToolDefinition } from '../tools/projected/project-mcp';
+import { buildCoreTools } from '../tools/core-tools';
+import { toToolDefinition } from '../tools/core-tools';
 
 const tool = (name: string, handler: any) => ({ name, parameters: {}, safetyTier: 1, handler });
 const okTool = (name: string) => tool(name, vi.fn(async () => ({ text: `${name} ok` })));
@@ -252,7 +252,7 @@ describe('a batch is not a way around the Stop or the hard key list (GHSA-3v3f-5
     const sent: string[] = [];
     const platform = guardInputMethods({ keyPress: async (c: string) => { sent.push(c); }, takeInputWarning: () => null, getActiveWindow: async () => null });
     const keyCtx = { ensureInitialized: async () => {}, platform, desktop: {}, getMouseScaleFactor: () => 1, getScreenshotScaleFactor: () => 1 } as any;
-    tools.key_press = projectToToolDefinition(buildUnifiedTools().find(t => t.name === 'key')!);
+    tools.key_press = toToolDefinition(buildCoreTools().find(t => t.name === 'key_press')!);
     return { sent, keyCtx };
   }
 

@@ -18,13 +18,13 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
 }));
 vi.mock('sharp', () => ({ default: vi.fn() }));
 
-import { runActivationLadder, canClickAtBounds, expandNote } from '../tools/projected/tools';
+import { runActivationLadder, canClickAtBounds, expandNote } from '../tools/core-tools';
 import { normalizeWindowText, windowTextIncludes } from '../platform/window-text';
 import { checkAssertions } from '../core/verify/assertions';
 import { narrowedScopeNote } from '../tools/scope-note';
 import { classifyResult } from '../core/result-codes';
 import { missText, untrusted, structuredMissFields } from '../core/miss-text';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 
 const root = join(__dirname, '../..');
 const ZWSP = String.fromCharCode(0x200b);
@@ -139,7 +139,7 @@ describe('page-controlled text never decides a result code', () => {
   const run = async (name: string, reply: Record<string, unknown>) => {
     const platform = { platform: 'win32', invokeElement: vi.fn(async () => ({ success: false, data: { ...(typeof reply.error === 'string' ? { error: reply.error } : {}), ...structuredMissFields(reply) } })), findElements: vi.fn(async () => []), getActiveWindow: vi.fn(async () => null),
       listDisplays: vi.fn(async () => []) };
-    const tool = buildUnifiedTools().find(t => t.name === 'invoke_element')!;
+    const tool = buildCoreTools().find(t => t.name === 'invoke_element')!;
     const r = await tool.execute({ name }, { platform } as any);
     return { text: r.text, c: classifyResult(r.text, true, true) };
   };
@@ -202,7 +202,7 @@ describe('every echoed name and bridge string is quoted or untrusted', () => {
   it('toggle, select and focus classify NOT_FOUND whatever the name holds', async () => {
     for (const name of NAMES) {
       for (const tool of ['a11y_toggle', 'a11y_select', 'focus_element', 'a11y_expand', 'a11y_collapse']) {
-        const r = await buildUnifiedTools().find(t => t.name === tool)!.execute({ name, processId: 1, value: 'v' }, { platform } as any);
+        const r = await buildCoreTools().find(t => t.name === tool)!.execute({ name, processId: 1, value: 'v' }, { platform } as any);
         expect(classifyResult(r.text, true, true)?.code, `${tool} ${JSON.stringify(name)}`).not.toMatch(/SCREEN_LOCKED|TIMEOUT|CONSENT|SAFETY/);
       }
     }
@@ -210,13 +210,13 @@ describe('every echoed name and bridge string is quoted or untrusted', () => {
 
   it('a late invoke error (an app message) is shown untrusted', async () => {
     const p = { ...platform, invokeElement: vi.fn(async () => ({ success: true, data: { lateInvokeError: 'the screen is locked' } })) };
-    const r = await buildUnifiedTools().find(t => t.name === 'invoke_element')!.execute({ name: 'Go' }, { platform: p } as any);
+    const r = await buildCoreTools().find(t => t.name === 'invoke_element')!.execute({ name: 'Go' }, { platform: p } as any);
     expect(r.text).toContain('<untrusted-screen-content>\nthe screen is locked\n</untrusted-screen-content>');
   });
 
   it('a refused set_value shows the platform\'s explanation (it names elements) untrusted', async () => {
     const p = { ...platform, invokeElement: vi.fn(async () => ({ success: false, data: { refused: true, error: 'matches 2 elements: the screen is locked' } })) };
-    const r = await buildUnifiedTools().find(t => t.name === 'set_field_value')!.execute({ name: 'F', value: 'v' }, { platform: p } as any);
+    const r = await buildCoreTools().find(t => t.name === 'set_field_value')!.execute({ name: 'F', value: 'v' }, { platform: p } as any);
     expect(r.text).toContain('<untrusted-screen-content>');
     expect(classifyResult(r.text, true, true)?.code).not.toBe('SCREEN_LOCKED');
   });

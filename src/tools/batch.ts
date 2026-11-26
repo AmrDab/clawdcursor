@@ -64,7 +64,7 @@ export interface BatchStep {
   /** Optional precondition; if it fails the batch halts here and reports back. */
   expect?: BatchGuard;
   /** Alias for `expect`, and wins over it. An `expect`
-   *  ASSERTION ARRAY belongs inside `arguments` instead — the projected tool
+   *  ASSERTION ARRAY belongs inside `arguments` instead — the core tool
    *  handlers verify it post-action. */
   precheck?: BatchGuard;
   /** Optional human label for the trace. */

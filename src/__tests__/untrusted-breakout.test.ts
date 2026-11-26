@@ -13,7 +13,7 @@ import { getA11yTools } from '../tools/a11y';
 import { getCdpTools } from '../tools/cdp';
 import { getSmartTools } from '../tools/smart';
 import { getOrchestrationTools } from '../tools/orchestration';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 import { copyAllText } from '../platform/copy-all-text';
 import { checkAssertions, renderReport } from '../core/verify/assertions';
 import type { ToolContext } from '../tools/types';
@@ -179,11 +179,11 @@ describe('tools that return page, document or clipboard text', () => {
 
 describe('agent-loop tools the MCP surface projects', () => {
   const run = (name: string, args: Record<string, unknown>, platform: Record<string, unknown>) =>
-    buildUnifiedTools().find(t => t.name === name)!.execute(args, { platform: { platform: 'win32', ...platform }, mcpSurface: true } as never);
+    buildCoreTools().find(t => t.name === name)!.execute(args, { platform: { platform: 'win32', ...platform }, mcpSurface: true } as never);
 
   it('list_windows: a title that belongs to another app is not delivered at all', async () => {
     const w = { processName: 'msedge', processId: 7, title: TITLE, bounds: { x: 0, y: 0, width: 10, height: 10 } };
-    const r = await run('list_windows', {}, { listWindows: async () => [w], getActiveWindow: async () => w });
+    const r = await run('get_windows', {}, { listWindows: async () => [w], getActiveWindow: async () => w });
     expect(r.text).not.toContain(FAKE);
   });
 
@@ -207,7 +207,7 @@ describe('process names are quoted like any other screen text', () => {
 
   it('window list', async () => {
     const w = { processName: PROC, processId: 7, title: 'Doc', bounds: { x: 0, y: 0, width: 10, height: 10 } };
-    const r = await buildUnifiedTools().find(t => t.name === 'list_windows')!.execute({}, { platform: { platform: 'darwin', listWindows: async () => [w], getActiveWindow: async () => w }, mcpSurface: true } as never);
+    const r = await buildCoreTools().find(t => t.name === 'get_windows')!.execute({}, { platform: { platform: 'darwin', listWindows: async () => [w], getActiveWindow: async () => w }, mcpSurface: true } as never);
     expectContained(r.text);
   });
 

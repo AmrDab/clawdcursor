@@ -21,7 +21,7 @@
  * LAYERING
  * --------
  * This module is pure core: it depends on PlatformAdapter (reads only) and
- * node:fs — never on tools or the MCP surface. Callers: the projected `verify`
+ * node:fs — never on tools or the MCP surface. Callers: the core `verify`
  * tool, every tool's `expect` (sense/reactive-check.ts), and pause_for_user's
  * `done_when` (tools/agent.ts).
  */

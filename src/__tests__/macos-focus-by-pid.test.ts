@@ -28,7 +28,7 @@ vi.mock('child_process', () => ({
 
 import { MacOSAdapter } from '../platform/macos';
 import { MacAxError, type MacAx, type FrontmostInfo } from '../platform/mac-ax';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 import type { WindowInfo } from '../platform/types';
 
 const RECT = { x: 0, y: 0, width: 600, height: 400 };
@@ -201,7 +201,7 @@ describe('focusWindow says why a lookup failed (live macOS 2026-10-24: a locked 
   });
 
   it('through the tool, the lock reaches the caller instead of "No matching window found."', async () => {
-    const tool = buildUnifiedTools().find(t => t.name === 'focus_window')!;
+    const tool = buildCoreTools().find(t => t.name === 'focus_window')!;
     const platform = new MacOSAdapter({ ax: fakeAx({ listWindowsDetailed: vi.fn(async () => { throw locked(); }), appState: vi.fn(async () => { throw locked(); }) }) });
     const r = await tool.execute({ processName: 'Finder' }, { platform } as never);
     expect(r.success).toBe(false);
@@ -210,7 +210,7 @@ describe('focusWindow says why a lookup failed (live macOS 2026-10-24: a locked 
 });
 
 describe('the focus_window tool', () => {
-  const tool = buildUnifiedTools().find(t => t.name === 'focus_window')!;
+  const tool = buildCoreTools().find(t => t.name === 'focus_window')!;
 
   it('says why when the focus did not happen, instead of "No matching window found."', async () => {
     const platform = { focusWindow: vi.fn(async () => false), takeFocusFailure: vi.fn(() => 'Focus went to Google Chrome (pid 935), not to pid 54172.') };

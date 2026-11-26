@@ -5,13 +5,13 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { getCdpTools } from '../tools/cdp';
-import { buildUnifiedTools } from '../tools/projected/tools';
-import { projectToToolDefinition } from '../tools/projected/project-mcp';
+import { buildCoreTools } from '../tools/core-tools';
+import { toToolDefinition } from '../tools/core-tools';
 import { classifyResult } from '../core/result-codes';
 
 const tool = (n: string) => getCdpTools().find(t => t.name === n)!;
 /** cdp_type, as agents get it: the agent-loop browser_type projected onto the MCP surface. */
-const cdpType = projectToToolDefinition(buildUnifiedTools().find(t => t.name === 'browser_type')!);
+const cdpType = toToolDefinition(buildCoreTools().find(t => t.name === 'cdp_type')!);
 const ctxWith = (cdp: object) => ({
   cdp: { isConnected: vi.fn(async () => true), ...cdp },
   platform: {}, desktop: {}, ensureInitialized: async () => {}, getMouseScaleFactor: () => 1, getScreenshotScaleFactor: () => 1,

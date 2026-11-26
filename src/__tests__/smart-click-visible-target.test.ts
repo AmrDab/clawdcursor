@@ -32,10 +32,10 @@ vi.mock('../platform/ocr-engine', () => {
 });
 
 import { getSmartTools } from '../tools/smart';
-import { buildUnifiedTools, runActivationLadder } from '../tools/projected/tools';
+import { buildCoreTools, runActivationLadder } from '../tools/core-tools';
 import { missText, structuredMissFields, targetOf, targetText } from '../core/miss-text';
 import { classifyResult } from '../core/result-codes';
-import type { AgentToolContext } from '../tools/projected/types';
+import type { AgentToolContext } from '../tools/types';
 import type { PlatformAdapter } from '../platform/types';
 
 const CANDIDATES = [
@@ -108,7 +108,7 @@ describe('smart_click', () => {
 });
 
 describe('accessibility invoke (invoke_element)', () => {
-  const invokeTool = buildUnifiedTools().find(t => t.name === 'invoke_element')!;
+  const invokeTool = buildCoreTools().find(t => t.name === 'invoke_element')!;
   const run = async (reply: Record<string, unknown>) => {
     const invokeElement = vi.fn(async () => ({ success: false, data: structuredMissFields(reply) }));
     const mouseClick = vi.fn(async () => {});
@@ -246,7 +246,7 @@ describe('the reply names the element acted on, and a partial match is listed, n
   });
 
   it('accessibility invoke: within reaches the platform; the success line names the element acted on', async () => {
-    const invokeTool = buildUnifiedTools().find(t => t.name === 'invoke_element')!;
+    const invokeTool = buildCoreTools().find(t => t.name === 'invoke_element')!;
     const invokeElement = vi.fn(async () => ({ success: true, data: { target: { name: 'Close', controlType: 'Button', match: 'exact' } } }));
     const platform = { invokeElement, mouseClick: vi.fn(), getActiveWindow: vi.fn(async () => null), listDisplays: vi.fn(async () => []) } as unknown as PlatformAdapter;
     const r = await invokeTool.execute({ name: 'close', within: 'Options' }, { platform, task: 't', screen: { logicalWidth: 1920, logicalHeight: 1080, physicalWidth: 1920, physicalHeight: 1080, dpiRatio: 1 }, screenshotsCaptured: { n: 0 } } as unknown as AgentToolContext);
@@ -255,7 +255,7 @@ describe('the reply names the element acted on, and a partial match is listed, n
   });
 
   it('accessibility invoke: an expand read back that names the role is still [confirmed]', async () => {
-    const invokeTool = buildUnifiedTools().find(t => t.name === 'invoke_element')!;
+    const invokeTool = buildCoreTools().find(t => t.name === 'invoke_element')!;
     const invokeElement = vi.fn(async () => ({ success: true, data: { expandState: 'Expanded', target: { name: 'Details', controlType: 'ControlType.Button', match: 'exact' } } }));
     const platform = { invokeElement, mouseClick: vi.fn(), getActiveWindow: vi.fn(async () => null), listDisplays: vi.fn(async () => []) } as unknown as PlatformAdapter;
     const r = await invokeTool.execute({ name: 'Details' }, { platform, task: 't', screen: { logicalWidth: 1920, logicalHeight: 1080, physicalWidth: 1920, physicalHeight: 1080, dpiRatio: 1 }, screenshotsCaptured: { n: 0 } } as unknown as AgentToolContext);

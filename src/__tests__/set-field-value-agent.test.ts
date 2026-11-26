@@ -6,9 +6,9 @@
  *   - Windows Save-As via element_id: typed after the old text ("oldnew").
  */
 import { describe, it, expect, vi } from 'vitest';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 
-const tool = buildUnifiedTools().find(t => t.name === 'set_field_value')!;
+const tool = buildCoreTools().find(t => t.name === 'set_field_value')!;
 
 function ctxWith(platform: string, setOk: boolean, found: any[]) {
   const p = {
@@ -75,7 +75,7 @@ describe('agent-loop set_field_value', () => {
 });
 
 describe('agent-loop a11y_get_value', () => {
-  const getTool = buildUnifiedTools().find(t => t.name === 'a11y_get_value')!;
+  const getTool = buildCoreTools().find(t => t.name === 'a11y_get_value')!;
 
   it('reads the field, not the same-named label (live Linux Chrome: "City" = "City")', async () => {
     const invoke = vi.fn(async (q: any) => ({ success: true, data: { value: q.controlType === 'Edit' ? 'Porto' : 'City' } }));

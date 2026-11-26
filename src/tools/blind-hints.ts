@@ -1,6 +1,6 @@
 /**
  * Shared wording for blind-first perception results, used by both tool
- * surfaces (the src/tools/*.ts tools and the projected tools in projected/).
+ * surfaces (the src/tools/*.ts tools and the core tools in core-tools.ts).
  */
 import type { UiElement } from '../platform/types';
 

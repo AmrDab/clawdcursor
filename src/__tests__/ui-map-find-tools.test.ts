@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 import { UIMapHolder } from '../core/sense/ui-map-holder';
-import type { AgentToolContext } from '../tools/projected/types';
+import type { AgentToolContext } from '../tools/types';
 import type { PlatformAdapter } from '../platform/types';
 
-const tool = (name: string) => buildUnifiedTools().find(t => t.name === name)!;
+const tool = (name: string) => buildCoreTools().find(t => t.name === name)!;
 
 function ctx(holder: UIMapHolder): AgentToolContext {
   const adapter = {

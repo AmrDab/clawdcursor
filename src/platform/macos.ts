@@ -680,7 +680,7 @@ export class MacOSAdapter implements PlatformAdapter {
     if (!res.success && (action === 'expand' || action === 'collapse') && (key === 'Return' || key === 'Escape')) {
       res = await this.finishWithKey({ ...query, action }, key);
     }
-    // The projected tools read the reason from `data.error` (the Linux adapter puts it there); the client reports it top-level,
+    // The core tools read the reason from `data.error` (the Linux adapter puts it there); the client reports it top-level,
     // so a refusal's explanation — "matches 2 elements: …" — used to read as "element not found or not actionable".
     return !res.success && res.error ? { ...res, data: { ...res.data, error: res.error } } : res;
   }

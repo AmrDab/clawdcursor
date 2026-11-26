@@ -11,7 +11,7 @@
 const BUDGETS_MS: Record<string, number> = {
   'registry: getAllTools() cold': 3000,
   'registry: getCompactSurface() cold': 3000,
-  'agent loop: buildUnifiedTools() x10': 2000,
+  'core tools: buildCoreTools() x10': 2000,
   'mcp: schema canonicalize (98 tools)': 3000,
 };
 
@@ -37,9 +37,9 @@ async function main(): Promise<void> {
     if (compact.length < 5) throw new Error(`compact surface suspiciously small: ${compact.length}`);
   });
 
-  await time('agent loop: buildUnifiedTools() x10', async () => {
-    const { buildUnifiedTools } = await import('../src/tools/projected/tools');
-    for (let i = 0; i < 10; i++) buildUnifiedTools();
+  await time('core tools: buildCoreTools() x10', async () => {
+    const { buildCoreTools } = await import('../src/tools/core-tools');
+    for (let i = 0; i < 10; i++) buildCoreTools();
   });
 
   await time('mcp: schema canonicalize (98 tools)', async () => {

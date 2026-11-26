@@ -1,5 +1,5 @@
 /**
- * What the projected tools (src/tools/projected/tools.ts) answer, as agents receive it on the granular and the compact
+ * What the core tools (src/tools/core-tools.ts) answer, as agents receive it on the compact
  * surface: their results name MCP tools (cdp_connect, navigate_browser, ocr_read_screen…), never the old agent-loop
  * names (browser_connect, browser_read, read_text…). And their MCP defaults: click / drag / scroll take image-space
  * coordinates when `space` is omitted, mouse_move_relative scales dx/dy from image space.

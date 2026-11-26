@@ -9,7 +9,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { getSmartTools } from '../tools/smart';
 import { getCompactTools } from '../tools/compact';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 import type { ToolContext } from '../tools/types';
 
 const WARNING = 'A modal dialog of "SomeAgent" — "Allow access?" (pid 9) is frontmost, so keystrokes go to it. If that is not the app you mean to drive, answer or close it first.';
@@ -108,8 +108,8 @@ describe('MCP smart_type', () => {
 });
 
 describe('agent loop type / key', () => {
-  const type = buildUnifiedTools().find(t => t.name === 'type')!;
-  const key = buildUnifiedTools().find(t => t.name === 'key')!;
+  const type = buildCoreTools().find(t => t.name === 'type_text')!;
+  const key = buildCoreTools().find(t => t.name === 'key_press')!;
   const platformCtx = (kb: ReturnType<typeof keyboard>, clip = clipboardOf('PRIOR')) => ({ ctx: { platform: { ...kb, ...clip } } as any, clip });
 
   it('type: the warning is appended', async () => {

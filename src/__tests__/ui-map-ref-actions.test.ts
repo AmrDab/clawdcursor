@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { resolveRef, REF_MIN_CONFIDENCE } from '../core/sense/ui-map-resolve';
 import { UIMapHolder } from '../core/sense/ui-map-holder';
 import type { UIMap, UIElement } from '../core/sense/ui-map-types';
-import { buildUnifiedTools } from '../tools/projected/tools';
-import type { AgentToolContext } from '../tools/projected/types';
+import { buildCoreTools } from '../tools/core-tools';
+import type { AgentToolContext } from '../tools/types';
 
 const el = (over: Partial<UIElement> & Pick<UIElement, 'id'>): UIElement => ({
   role: 'button', text: 'Send', normalized_text: 'send', bounds: [10, 20, 40, 12],
@@ -37,7 +37,7 @@ describe('invoke_element ref path — activation cascade', () => {
       invokeElement: async (q: any) => { attempts.push(q.action); return { success: q.action === 'select' }; },
     } as any;
     const ctx = { platform, task: 't', screen: { logicalWidth: 800, logicalHeight: 600, physicalWidth: 800, physicalHeight: 600, dpiRatio: 1 }, screenshotsCaptured: { n: 0 }, uiMaps: holder } as unknown as AgentToolContext;
-    const invoke = buildUnifiedTools().find(t => t.name === 'invoke_element')!;
+    const invoke = buildCoreTools().find(t => t.name === 'invoke_element')!;
     const res = await invoke.execute({ element_id: 'el_0', snapshot_id: 'obs_1' }, ctx);
     expect(res.success).toBe(true);
     expect(attempts).toEqual(['click', 'select']); // cascaded past the failing click
@@ -134,7 +134,7 @@ describe('resolveRef', () => {
         getFocusedElement: async () => null,
       } as any;
       const ctx = { platform, task: 't', screen: { logicalWidth: 800, logicalHeight: 600, physicalWidth: 800, physicalHeight: 600, dpiRatio: 1 }, screenshotsCaptured: { n: 0 }, uiMaps: holder } as unknown as AgentToolContext;
-      const tools = buildUnifiedTools();
+      const tools = buildCoreTools();
       const inv = await tools.find(t => t.name === 'invoke_element')!.execute({ element_id: 'el_0', snapshot_id: 'obs_1' }, ctx);
       expect(inv.success).toBe(true);
       expect(calls.find(q => q.action === 'click')).toMatchObject({ name: 'send', processId: 9 });

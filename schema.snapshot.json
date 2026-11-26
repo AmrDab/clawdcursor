@@ -2397,703 +2397,6 @@
           }
         },
         {
-          "name": "get_windows",
-          "description": "[inspect] List the open apps (process name, pid, and how many windows each has), and the title, process and bounds of the windows clawdcursor itself opened or worked in. The titles of other windows are not listed: a document title can hold private text. To see one app's window titles (to focus or close the right one), pass processName or processId: that app's windows are then listed in full.",
-          "inputSchema": {
-            "type": "object",
-            "properties": {
-              "processName": {
-                "type": "string",
-                "description": "List only this app's windows, with titles (name contains this, any case)"
-              },
-              "processId": {
-                "type": "number",
-                "description": "List only this process's windows, with titles"
-              }
-            }
-          },
-          "annotations": {
-            "readOnlyHint": true
-          },
-          "execution": {
-            "taskSupport": "forbidden"
-          }
-        },
-        {
-          "name": "focus_window",
-          "description": "[act] Bring a window to the foreground. Match by processName, pid, or title substring.",
-          "inputSchema": {
-            "type": "object",
-            "properties": {
-              "processName": {
-                "type": "string",
-                "description": "Process name to focus (e.g. \"notepad\", \"msedge\")"
-              },
-              "processId": {
-                "type": "number",
-                "description": "Process ID to focus"
-              },
-              "title": {
-                "type": "string",
-                "description": "Window title substring to match"
-              }
-            }
-          },
-          "annotations": {
-            "readOnlyHint": false,
-            "destructiveHint": false
-          },
-          "execution": {
-            "taskSupport": "forbidden"
-          }
-        },
-        {
-          "name": "maximize_window",
-          "description": "[act] Maximize the foreground window (or a matched window). Polite request; WM may interpret.",
-          "inputSchema": {
-            "type": "object",
-            "properties": {
-              "processName": {
-                "type": "string",
-                "description": "Optional process name match"
-              },
-              "processId": {
-                "type": "number",
-                "description": "Optional process id match"
-              },
-              "title": {
-                "type": "string",
-                "description": "Optional title-substring match"
-              }
-            }
-          },
-          "annotations": {
-            "readOnlyHint": false,
-            "destructiveHint": false
-          },
-          "execution": {
-            "taskSupport": "forbidden"
-          }
-        },
-        {
-          "name": "minimize_window_to_taskbar",
-          "description": "[act] Minimize the foreground or matched window to the taskbar / Dock.",
-          "inputSchema": {
-            "type": "object",
-            "properties": {
-              "processName": {
-                "type": "string",
-                "description": "Optional process name match"
-              },
-              "processId": {
-                "type": "number",
-                "description": "Optional process id match"
-              },
-              "title": {
-                "type": "string",
-                "description": "Optional title-substring match"
-              }
-            }
-          },
-          "annotations": {
-            "readOnlyHint": false,
-            "destructiveHint": false
-          },
-          "execution": {
-            "taskSupport": "forbidden"
-          }
-        },
-        {
-          "name": "restore_window",
-          "description": "[act] Restore a minimized or maximized window to its previous bounds.",
-          "inputSchema": {
-            "type": "object",
-            "properties": {
-              "processName": {
-                "type": "string",
-                "description": "Optional process name match"
-              },
-              "processId": {
-                "type": "number",
-                "description": "Optional process id match"
-              },
-              "title": {
-                "type": "string",
-                "description": "Optional title-substring match"
-              }
-            }
-          },
-          "annotations": {
-            "readOnlyHint": false,
-            "destructiveHint": false
-          },
-          "execution": {
-            "taskSupport": "forbidden"
-          }
-        },
-        {
-          "name": "close_window",
-          "description": "[act] Polite close request (WM_CLOSE / AXCloseAction / _NET_CLOSE_WINDOW). App may prompt.",
-          "inputSchema": {
-            "type": "object",
-            "properties": {
-              "processName": {
-                "type": "string",
-                "description": "Optional process name match"
-              },
-              "processId": {
-                "type": "number",
-                "description": "Optional process id match"
-              },
-              "title": {
-                "type": "string",
-                "description": "Optional title-substring match"
-              }
-            }
-          },
-          "annotations": {
-            "readOnlyHint": false,
-            "destructiveHint": true
-          },
-          "execution": {
-            "taskSupport": "forbidden"
-          }
-        },
-        {
-          "name": "resize_window",
-          "description": "[act] Set the foreground (or matched) window bounds. Units are SCREEN px — the same as get_windows and accessibility coordinates; pass space:\"image\" for screenshot coordinates. Omitted fields preserved.",
-          "inputSchema": {
-            "type": "object",
-            "properties": {
-              "x": {
-                "type": "number",
-                "description": "New X (top-left origin, logical px)"
-              },
-              "y": {
-                "type": "number",
-                "description": "New Y (top-left origin, logical px)"
-              },
-              "width": {
-                "type": "number",
-                "description": "New width in logical px"
-              },
-              "height": {
-                "type": "number",
-                "description": "New height in logical px"
-              },
-              "space": {
-                "type": "string",
-                "enum": [
-                  "screen",
-                  "image"
-                ],
-                "description": ""
-              },
-              "processName": {
-                "type": "string",
-                "description": "Optional process name match"
-              },
-              "processId": {
-                "type": "number",
-                "description": "Optional process id match"
-              },
-              "title": {
-                "type": "string",
-                "description": "Optional title-substring match"
-              }
-            }
-          },
-          "annotations": {
-            "readOnlyHint": false,
-            "destructiveHint": false
-          },
-          "execution": {
-            "taskSupport": "forbidden"
-          }
-        },
-        {
-          "name": "list_displays",
-          "description": "[inspect] Enumerate connected displays with logical bounds + DPI ratio. Use before display-specific screenshots.",
-          "inputSchema": {
-            "type": "object",
-            "properties": {}
-          },
-          "annotations": {
-            "readOnlyHint": true
-          },
-          "execution": {
-            "taskSupport": "forbidden"
-          }
-        },
-        {
-          "name": "type_text",
-          "description": "[act] Type text into the currently focused input. Prefer set_field_value when a field has an a11y name.",
-          "inputSchema": {
-            "type": "object",
-            "properties": {
-              "text": {
-                "type": "string",
-                "description": "The text to type"
-              },
-              "expect": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "type": {
-                      "type": "string",
-                      "enum": [
-                        "window_title_contains",
-                        "app_running",
-                        "element_exists",
-                        "element_value_contains",
-                        "clipboard_contains",
-                        "file_exists",
-                        "file_contains",
-                        "ocr_contains",
-                        "file_changed_since_start"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "type"
-                  ]
-                },
-                "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed."
-              }
-            },
-            "required": [
-              "text"
-            ]
-          },
-          "annotations": {
-            "readOnlyHint": false,
-            "destructiveHint": false
-          },
-          "execution": {
-            "taskSupport": "forbidden"
-          }
-        },
-        {
-          "name": "key_press",
-          "description": "[act] Press a key or key combo. \"mod\" is this OS's shortcut modifier (cmd on macOS, ctrl on Windows and Linux). Use \"+\" for a chord (e.g. \"mod+s\", \"shift+Tab\"). Space-separate for a sequence (\"Down Down End\"). Examples: \"Return\", \"Tab\", \"Escape\", \"F5\", \"mod+s\".",
-          "inputSchema": {
-            "type": "object",
-            "properties": {
-              "combo": {
-                "type": "string",
-                "description": "Key/combo to press (e.g. \"Return\", \"mod+s\"). Space-separate for a sequence."
-              },
-              "key": {
-                "type": "string",
-                "description": "Alias for combo — accepted for MCP/compound backward-compatibility."
-              },
-              "repeat": {
-                "type": "number",
-                "description": "Press it this many times (default 1)."
-              },
-              "expect": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "type": {
-                      "type": "string",
-                      "enum": [
-                        "window_title_contains",
-                        "app_running",
-                        "element_exists",
-                        "element_value_contains",
-                        "clipboard_contains",
-                        "file_exists",
-                        "file_contains",
-                        "ocr_contains",
-                        "file_changed_since_start"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "type"
-                  ]
-                },
-                "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed."
-              }
-            }
-          },
-          "annotations": {
-            "readOnlyHint": false,
-            "destructiveHint": false
-          },
-          "execution": {
-            "taskSupport": "forbidden"
-          }
-        },
-        {
-          "name": "key_down",
-          "description": "[act] Press a key without releasing. Pair with key_up. Use to hold modifiers (shift, ctrl) during clicks.",
-          "inputSchema": {
-            "type": "object",
-            "properties": {
-              "key": {
-                "type": "string",
-                "description": "Key token (e.g. \"shift\", \"ctrl\", \"a\", \"Return\")"
-              }
-            },
-            "required": [
-              "key"
-            ]
-          },
-          "annotations": {
-            "readOnlyHint": false,
-            "destructiveHint": false
-          },
-          "execution": {
-            "taskSupport": "forbidden"
-          }
-        },
-        {
-          "name": "key_up",
-          "description": "[act] Release a key previously pressed with key_down.",
-          "inputSchema": {
-            "type": "object",
-            "properties": {
-              "key": {
-                "type": "string",
-                "description": "Key token"
-              }
-            },
-            "required": [
-              "key"
-            ]
-          },
-          "annotations": {
-            "readOnlyHint": false,
-            "destructiveHint": false
-          },
-          "execution": {
-            "taskSupport": "forbidden"
-          }
-        },
-        {
-          "name": "undo_last",
-          "description": "[act] Send the OS Undo keystroke (mod+Z).",
-          "inputSchema": {
-            "type": "object",
-            "properties": {}
-          },
-          "annotations": {
-            "readOnlyHint": false,
-            "destructiveHint": false
-          },
-          "execution": {
-            "taskSupport": "forbidden"
-          }
-        },
-        {
-          "name": "mouse_click",
-          "description": "[act] Click at (x,y), or at each point of `path` in turn (pen points, several cells: one call). Pass space:\"screen\" for a11y/@x,y map coords, space:\"image\" for coords read off the screenshot. Prefer invoke_element when the target has an a11y name.",
-          "inputSchema": {
-            "type": "object",
-            "properties": {
-              "x": {
-                "type": "number",
-                "description": "X coordinate in image-space"
-              },
-              "y": {
-                "type": "number",
-                "description": "Y coordinate in image-space"
-              },
-              "path": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "x": {
-                      "type": "number"
-                    },
-                    "y": {
-                      "type": "number"
-                    }
-                  },
-                  "required": [
-                    "x",
-                    "y"
-                  ]
-                },
-                "description": "Instead of x,y: an array of {x,y} points (same space) clicked one after another, e.g. the points of a pen path. Each click is checked against the Stop button. At most 100 points and 30 s (points × interval_ms) per call."
-              },
-              "interval_ms": {
-                "type": "number",
-                "description": "With path: milliseconds between clicks (default 100, max 5000)."
-              },
-              "button": {
-                "type": "string",
-                "enum": [
-                  "left",
-                  "right",
-                  "middle"
-                ],
-                "description": "Mouse button to click: \"left\" (default), \"right\" or \"middle\""
-              },
-              "count": {
-                "type": "number",
-                "description": "1=single (default), 2=double, 3=triple"
-              },
-              "space": {
-                "type": "string",
-                "enum": [
-                  "screen",
-                  "image"
-                ],
-                "description": "Coordinate space. Omit (default) → image-space coords from the latest screenshot (the tool scales them to the screen). Pass \"screen\" → the positions an accessibility tree / find reports (@x,y), passed as reported, unscaled: physical pixels on Windows and Linux, POINTS on macOS (a Retina screenshot's \"real\" size is twice the point size)."
-              },
-              "expect": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "type": {
-                      "type": "string",
-                      "enum": [
-                        "window_title_contains",
-                        "app_running",
-                        "element_exists",
-                        "element_value_contains",
-                        "clipboard_contains",
-                        "file_exists",
-                        "file_contains",
-                        "ocr_contains",
-                        "file_changed_since_start"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "type"
-                  ]
-                },
-                "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed."
-              }
-            }
-          },
-          "annotations": {
-            "readOnlyHint": false,
-            "destructiveHint": false
-          },
-          "execution": {
-            "taskSupport": "forbidden"
-          }
-        },
-        {
-          "name": "mouse_drag",
-          "description": "[act] Drag the mouse from (startX,startY) to (endX,endY) — select text, draw, resize. To TRACE A CURVE/PATH (gesture, curved track, drawing), pass `path` = an array of 12–20 {x,y} points instead: press at the first point, move through each, release at the last. If you read coords off the SCREENSHOT, pass space:\"image\" so the tool scales them.",
-          "inputSchema": {
-            "type": "object",
-            "properties": {
-              "startX": {
-                "type": "number",
-                "description": "Start X in image-space"
-              },
-              "startY": {
-                "type": "number",
-                "description": "Start Y in image-space"
-              },
-              "endX": {
-                "type": "number",
-                "description": "End X in image-space"
-              },
-              "endY": {
-                "type": "number",
-                "description": "End Y in image-space"
-              },
-              "path": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "x": {
-                      "type": "number"
-                    },
-                    "y": {
-                      "type": "number"
-                    }
-                  },
-                  "required": [
-                    "x",
-                    "y"
-                  ]
-                },
-                "description": "Stepped drag path: array of {x,y} points (min 2). When given, startX/startY/endX/endY are ignored. Press at first point, release at last."
-              },
-              "space": {
-                "type": "string",
-                "enum": [
-                  "screen",
-                  "image"
-                ],
-                "description": "Coordinate space. Omit (default) → image-space coords from the latest screenshot (the tool scales them to the screen). Pass \"screen\" → the positions an accessibility tree / find reports (@x,y), passed as reported, unscaled: physical pixels on Windows and Linux, POINTS on macOS (a Retina screenshot's \"real\" size is twice the point size)."
-              },
-              "expect": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "type": {
-                      "type": "string",
-                      "enum": [
-                        "window_title_contains",
-                        "app_running",
-                        "element_exists",
-                        "element_value_contains",
-                        "clipboard_contains",
-                        "file_exists",
-                        "file_contains",
-                        "ocr_contains",
-                        "file_changed_since_start"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "type"
-                  ]
-                },
-                "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed."
-              }
-            }
-          },
-          "annotations": {
-            "readOnlyHint": false,
-            "destructiveHint": false
-          },
-          "execution": {
-            "taskSupport": "forbidden"
-          }
-        },
-        {
-          "name": "mouse_scroll",
-          "description": "[act] Scroll at (x,y) in a direction. Omit x,y to scroll at the screen center. If you read x,y off the SCREENSHOT, pass space:\"image\".",
-          "inputSchema": {
-            "type": "object",
-            "properties": {
-              "x": {
-                "type": "number",
-                "description": "X coordinate in image-space"
-              },
-              "y": {
-                "type": "number",
-                "description": "Y coordinate in image-space"
-              },
-              "direction": {
-                "type": "string",
-                "enum": [
-                  "up",
-                  "down"
-                ],
-                "description": "Scroll direction"
-              },
-              "amount": {
-                "type": "number",
-                "description": "Wheel ticks (default 3)"
-              },
-              "space": {
-                "type": "string",
-                "enum": [
-                  "screen",
-                  "image"
-                ],
-                "description": "Coordinate space. Omit (default) → image-space coords from the latest screenshot (the tool scales them to the screen). Pass \"screen\" → the positions an accessibility tree / find reports (@x,y), passed as reported, unscaled: physical pixels on Windows and Linux, POINTS on macOS (a Retina screenshot's \"real\" size is twice the point size)."
-              }
-            },
-            "required": [
-              "direction"
-            ]
-          },
-          "annotations": {
-            "readOnlyHint": false,
-            "destructiveHint": false
-          },
-          "execution": {
-            "taskSupport": "forbidden"
-          }
-        },
-        {
-          "name": "mouse_move_relative",
-          "description": "[act] Move cursor by a relative offset (dx, dy). Wayland-safe via cursor cache.",
-          "inputSchema": {
-            "type": "object",
-            "properties": {
-              "dx": {
-                "type": "number",
-                "description": "X offset in image-space pixels"
-              },
-              "dy": {
-                "type": "number",
-                "description": "Y offset in image-space pixels"
-              }
-            },
-            "required": [
-              "dx",
-              "dy"
-            ]
-          },
-          "annotations": {
-            "readOnlyHint": false,
-            "destructiveHint": false
-          },
-          "execution": {
-            "taskSupport": "forbidden"
-          }
-        },
-        {
-          "name": "mouse_down",
-          "description": "[act] Press a mouse button without releasing. Pair with mouse_up. Enables hold-and-drag + modifier clicks.",
-          "inputSchema": {
-            "type": "object",
-            "properties": {
-              "button": {
-                "type": "string",
-                "enum": [
-                  "left",
-                  "right",
-                  "middle"
-                ],
-                "description": "Which button (default: left)"
-              }
-            }
-          },
-          "annotations": {
-            "readOnlyHint": false,
-            "destructiveHint": false
-          },
-          "execution": {
-            "taskSupport": "forbidden"
-          }
-        },
-        {
-          "name": "mouse_up",
-          "description": "[act] Release a mouse button previously pressed with mouse_down.",
-          "inputSchema": {
-            "type": "object",
-            "properties": {
-              "button": {
-                "type": "string",
-                "enum": [
-                  "left",
-                  "right",
-                  "middle"
-                ],
-                "description": "Which button (default: left)"
-              }
-            }
-          },
-          "annotations": {
-            "readOnlyHint": false,
-            "destructiveHint": false
-          },
-          "execution": {
-            "taskSupport": "forbidden"
-          }
-        },
-        {
           "name": "read_screen",
           "description": "[perceive-text] START HERE — cheapest perception. Read the accessibility tree of the focused window: buttons, inputs, text elements with coordinates. If the tree is empty, escalate to ocr_read_screen (OCR) next, then screenshot only as a last resort.",
           "inputSchema": {
@@ -3110,6 +2413,29 @@
               "limit": {
                 "type": "number",
                 "description": "How many elements to list (default 60)"
+              }
+            }
+          },
+          "annotations": {
+            "readOnlyHint": true
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "get_windows",
+          "description": "[inspect] List the open apps (process name, pid, and how many windows each has), and the title, process and bounds of the windows clawdcursor itself opened or worked in. The titles of other windows are not listed: a document title can hold private text. To see one app's window titles (to focus or close the right one), pass processName or processId: that app's windows are then listed in full.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "processName": {
+                "type": "string",
+                "description": "List only this app's windows, with titles (name contains this, any case)"
+              },
+              "processId": {
+                "type": "number",
+                "description": "List only this process's windows, with titles"
               }
             }
           },
@@ -3489,6 +2815,541 @@
           }
         },
         {
+          "name": "mouse_click",
+          "description": "[act] Click at (x,y), or at each point of `path` in turn (pen points, several cells: one call). Pass space:\"screen\" for a11y/@x,y map coords, space:\"image\" for coords read off the screenshot. Prefer invoke_element when the target has an a11y name.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number",
+                "description": "X coordinate in image-space"
+              },
+              "y": {
+                "type": "number",
+                "description": "Y coordinate in image-space"
+              },
+              "path": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y"
+                  ]
+                },
+                "description": "Instead of x,y: an array of {x,y} points (same space) clicked one after another, e.g. the points of a pen path. Each click is checked against the Stop button. At most 100 points and 30 s (points × interval_ms) per call."
+              },
+              "interval_ms": {
+                "type": "number",
+                "description": "With path: milliseconds between clicks (default 100, max 5000)."
+              },
+              "button": {
+                "type": "string",
+                "enum": [
+                  "left",
+                  "right",
+                  "middle"
+                ],
+                "description": "Mouse button to click: \"left\" (default), \"right\" or \"middle\""
+              },
+              "count": {
+                "type": "number",
+                "description": "1=single (default), 2=double, 3=triple"
+              },
+              "space": {
+                "type": "string",
+                "enum": [
+                  "screen",
+                  "image"
+                ],
+                "description": "Coordinate space. Omit (default) → image-space coords from the latest screenshot (the tool scales them to the screen). Pass \"screen\" → the positions an accessibility tree / find reports (@x,y), passed as reported, unscaled: physical pixels on Windows and Linux, POINTS on macOS (a Retina screenshot's \"real\" size is twice the point size)."
+              },
+              "expect": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "window_title_contains",
+                        "app_running",
+                        "element_exists",
+                        "element_value_contains",
+                        "clipboard_contains",
+                        "file_exists",
+                        "file_contains",
+                        "ocr_contains",
+                        "file_changed_since_start"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed."
+              }
+            }
+          },
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "mouse_drag",
+          "description": "[act] Drag the mouse from (startX,startY) to (endX,endY) — select text, draw, resize. To TRACE A CURVE/PATH (gesture, curved track, drawing), pass `path` = an array of 12–20 {x,y} points instead: press at the first point, move through each, release at the last. If you read coords off the SCREENSHOT, pass space:\"image\" so the tool scales them.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "startX": {
+                "type": "number",
+                "description": "Start X in image-space"
+              },
+              "startY": {
+                "type": "number",
+                "description": "Start Y in image-space"
+              },
+              "endX": {
+                "type": "number",
+                "description": "End X in image-space"
+              },
+              "endY": {
+                "type": "number",
+                "description": "End Y in image-space"
+              },
+              "path": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y"
+                  ]
+                },
+                "description": "Stepped drag path: array of {x,y} points (min 2). When given, startX/startY/endX/endY are ignored. Press at first point, release at last."
+              },
+              "space": {
+                "type": "string",
+                "enum": [
+                  "screen",
+                  "image"
+                ],
+                "description": "Coordinate space. Omit (default) → image-space coords from the latest screenshot (the tool scales them to the screen). Pass \"screen\" → the positions an accessibility tree / find reports (@x,y), passed as reported, unscaled: physical pixels on Windows and Linux, POINTS on macOS (a Retina screenshot's \"real\" size is twice the point size)."
+              },
+              "expect": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "window_title_contains",
+                        "app_running",
+                        "element_exists",
+                        "element_value_contains",
+                        "clipboard_contains",
+                        "file_exists",
+                        "file_contains",
+                        "ocr_contains",
+                        "file_changed_since_start"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed."
+              }
+            }
+          },
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "mouse_scroll",
+          "description": "[act] Scroll at (x,y) in a direction. Omit x,y to scroll at the screen center. If you read x,y off the SCREENSHOT, pass space:\"image\".",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number",
+                "description": "X coordinate in image-space"
+              },
+              "y": {
+                "type": "number",
+                "description": "Y coordinate in image-space"
+              },
+              "direction": {
+                "type": "string",
+                "enum": [
+                  "up",
+                  "down"
+                ],
+                "description": "Scroll direction"
+              },
+              "amount": {
+                "type": "number",
+                "description": "Wheel ticks (default 3)"
+              },
+              "space": {
+                "type": "string",
+                "enum": [
+                  "screen",
+                  "image"
+                ],
+                "description": "Coordinate space. Omit (default) → image-space coords from the latest screenshot (the tool scales them to the screen). Pass \"screen\" → the positions an accessibility tree / find reports (@x,y), passed as reported, unscaled: physical pixels on Windows and Linux, POINTS on macOS (a Retina screenshot's \"real\" size is twice the point size)."
+              }
+            },
+            "required": [
+              "direction"
+            ]
+          },
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "type_text",
+          "description": "[act] Type text into the currently focused input. Prefer set_field_value when a field has an a11y name.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "description": "The text to type"
+              },
+              "expect": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "window_title_contains",
+                        "app_running",
+                        "element_exists",
+                        "element_value_contains",
+                        "clipboard_contains",
+                        "file_exists",
+                        "file_contains",
+                        "ocr_contains",
+                        "file_changed_since_start"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed."
+              }
+            },
+            "required": [
+              "text"
+            ]
+          },
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "key_press",
+          "description": "[act] Press a key or key combo. \"mod\" is this OS's shortcut modifier (cmd on macOS, ctrl on Windows and Linux). Use \"+\" for a chord (e.g. \"mod+s\", \"shift+Tab\"). Space-separate for a sequence (\"Down Down End\"). Examples: \"Return\", \"Tab\", \"Escape\", \"F5\", \"mod+s\".",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "combo": {
+                "type": "string",
+                "description": "Key/combo to press (e.g. \"Return\", \"mod+s\"). Space-separate for a sequence."
+              },
+              "key": {
+                "type": "string",
+                "description": "Alias for combo — accepted for MCP/compound backward-compatibility."
+              },
+              "repeat": {
+                "type": "number",
+                "description": "Press it this many times (default 1)."
+              },
+              "expect": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "window_title_contains",
+                        "app_running",
+                        "element_exists",
+                        "element_value_contains",
+                        "clipboard_contains",
+                        "file_exists",
+                        "file_contains",
+                        "ocr_contains",
+                        "file_changed_since_start"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed."
+              }
+            }
+          },
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "focus_window",
+          "description": "[act] Bring a window to the foreground. Match by processName, pid, or title substring.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "processName": {
+                "type": "string",
+                "description": "Process name to focus (e.g. \"notepad\", \"msedge\")"
+              },
+              "processId": {
+                "type": "number",
+                "description": "Process ID to focus"
+              },
+              "title": {
+                "type": "string",
+                "description": "Window title substring to match"
+              }
+            }
+          },
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "maximize_window",
+          "description": "[act] Maximize the foreground window (or a matched window). Polite request; WM may interpret.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "processName": {
+                "type": "string",
+                "description": "Optional process name match"
+              },
+              "processId": {
+                "type": "number",
+                "description": "Optional process id match"
+              },
+              "title": {
+                "type": "string",
+                "description": "Optional title-substring match"
+              }
+            }
+          },
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "minimize_window_to_taskbar",
+          "description": "[act] Minimize the foreground or matched window to the taskbar / Dock.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "processName": {
+                "type": "string",
+                "description": "Optional process name match"
+              },
+              "processId": {
+                "type": "number",
+                "description": "Optional process id match"
+              },
+              "title": {
+                "type": "string",
+                "description": "Optional title-substring match"
+              }
+            }
+          },
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "restore_window",
+          "description": "[act] Restore a minimized or maximized window to its previous bounds.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "processName": {
+                "type": "string",
+                "description": "Optional process name match"
+              },
+              "processId": {
+                "type": "number",
+                "description": "Optional process id match"
+              },
+              "title": {
+                "type": "string",
+                "description": "Optional title-substring match"
+              }
+            }
+          },
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "close_window",
+          "description": "[act] Polite close request (WM_CLOSE / AXCloseAction / _NET_CLOSE_WINDOW). App may prompt.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "processName": {
+                "type": "string",
+                "description": "Optional process name match"
+              },
+              "processId": {
+                "type": "number",
+                "description": "Optional process id match"
+              },
+              "title": {
+                "type": "string",
+                "description": "Optional title-substring match"
+              }
+            }
+          },
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": true
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "resize_window",
+          "description": "[act] Set the foreground (or matched) window bounds. Units are SCREEN px — the same as get_windows and accessibility coordinates; pass space:\"image\" for screenshot coordinates. Omitted fields preserved.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number",
+                "description": "New X (top-left origin, logical px)"
+              },
+              "y": {
+                "type": "number",
+                "description": "New Y (top-left origin, logical px)"
+              },
+              "width": {
+                "type": "number",
+                "description": "New width in logical px"
+              },
+              "height": {
+                "type": "number",
+                "description": "New height in logical px"
+              },
+              "space": {
+                "type": "string",
+                "enum": [
+                  "screen",
+                  "image"
+                ],
+                "description": ""
+              },
+              "processName": {
+                "type": "string",
+                "description": "Optional process name match"
+              },
+              "processId": {
+                "type": "number",
+                "description": "Optional process id match"
+              },
+              "title": {
+                "type": "string",
+                "description": "Optional title-substring match"
+              }
+            }
+          },
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "list_displays",
+          "description": "[inspect] Enumerate connected displays with logical bounds + DPI ratio. Use before display-specific screenshots.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {}
+          },
+          "annotations": {
+            "readOnlyHint": true
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
           "name": "focus_element",
           "description": "[act] Keyboard-focus an element by a11y name. Does NOT raise window — use focus_window first if needed.",
           "inputSchema": {
@@ -3549,6 +3410,145 @@
           },
           "annotations": {
             "readOnlyHint": true
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "mouse_move_relative",
+          "description": "[act] Move cursor by a relative offset (dx, dy). Wayland-safe via cursor cache.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "dx": {
+                "type": "number",
+                "description": "X offset in image-space pixels"
+              },
+              "dy": {
+                "type": "number",
+                "description": "Y offset in image-space pixels"
+              }
+            },
+            "required": [
+              "dx",
+              "dy"
+            ]
+          },
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "mouse_down",
+          "description": "[act] Press a mouse button without releasing. Pair with mouse_up. Enables hold-and-drag + modifier clicks.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "button": {
+                "type": "string",
+                "enum": [
+                  "left",
+                  "right",
+                  "middle"
+                ],
+                "description": "Which button (default: left)"
+              }
+            }
+          },
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "mouse_up",
+          "description": "[act] Release a mouse button previously pressed with mouse_down.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "button": {
+                "type": "string",
+                "enum": [
+                  "left",
+                  "right",
+                  "middle"
+                ],
+                "description": "Which button (default: left)"
+              }
+            }
+          },
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "key_down",
+          "description": "[act] Press a key without releasing. Pair with key_up. Use to hold modifiers (shift, ctrl) during clicks.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "Key token (e.g. \"shift\", \"ctrl\", \"a\", \"Return\")"
+              }
+            },
+            "required": [
+              "key"
+            ]
+          },
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "key_up",
+          "description": "[act] Release a key previously pressed with key_down.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "Key token"
+              }
+            },
+            "required": [
+              "key"
+            ]
+          },
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "undo_last",
+          "description": "[act] Send the OS Undo keystroke (mod+Z).",
+          "inputSchema": {
+            "type": "object",
+            "properties": {}
+          },
+          "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false
           },
           "execution": {
             "taskSupport": "forbidden"

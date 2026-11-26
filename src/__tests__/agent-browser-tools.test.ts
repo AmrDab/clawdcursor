@@ -7,10 +7,10 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-import { buildUnifiedTools } from '../tools/projected/tools';
-import type { AgentToolContext } from '../tools/projected/types';
+import { buildCoreTools } from '../tools/core-tools';
+import type { AgentToolContext } from '../tools/types';
 
-const tool = (name: string) => buildUnifiedTools().find(t => t.name === name)!;
+const tool = (name: string) => buildCoreTools().find(t => t.name === name)!;
 
 /** A mock CDPDriver exposing only the methods the browser_* tools call. */
 function mockCdp(overrides: Partial<Record<string, any>> = {}) {
@@ -46,14 +46,14 @@ afterEach(() => { if (ENV === undefined) delete process.env.CLAWD_AGENT_CDP_OFF;
 describe('browser_connect', () => {
   it('connects (launching when allowed) and reports url/title', async () => {
     const cdp = mockCdp();
-    const r = await tool('browser_connect').execute({}, ctx(cdp));
+    const r = await tool('cdp_connect').execute({}, ctx(cdp));
     expect(r.success).toBe(true);
     expect(cdp.ensureConnected).toHaveBeenCalledWith(expect.objectContaining({ launch: true }));
     expect(r.text).toMatch(/YouTube/);
   });
 
   it('degrades gracefully when CDP is not wired (null) — points to OCR', async () => {
-    const r = await tool('browser_connect').execute({}, ctx(null));
+    const r = await tool('cdp_connect').execute({}, ctx(null));
     expect(r.success).toBe(false);
     expect(r.text).toMatch(/read_text|smart_click/i);
   });
@@ -64,7 +64,7 @@ describe('browser_connect', () => {
       ensureConnected: vi.fn(async () => false),
       getConnectError: vi.fn(() => 'nothing is listening on port 9223 (ECONNREFUSED)'),
     });
-    const r = await tool('browser_connect').execute({}, ctx(cdp));
+    const r = await tool('cdp_connect').execute({}, ctx(cdp));
     expect(cdp.ensureConnected).toHaveBeenCalledWith(expect.objectContaining({ launch: false }));
     expect(r.success).toBe(false);
     expect(r.text).toMatch(/attach/i);
@@ -77,8 +77,8 @@ describe('browser_connect', () => {
 describe('browser_read / click / type', () => {
   it('every browser_* action refuses (no throw) when not connected → tells model to connect', async () => {
     const cdp = mockCdp({ isConnected: vi.fn(async () => false) });
-    for (const name of ['browser_read', 'browser_click', 'browser_type']) {
-      const args = name === 'browser_type' ? { text: 'x', selector: '#a' } : name === 'browser_click' ? { text: 'x' } : {};
+    for (const name of ['cdp_page_context', 'cdp_click', 'cdp_type']) {
+      const args = name === 'cdp_type' ? { text: 'x', selector: '#a' } : name === 'cdp_click' ? { text: 'x' } : {};
       const r = await tool(name).execute(args, ctx(cdp));
       expect(r.success).toBe(false);
       expect(r.text).toMatch(/cdp_connect/);
@@ -87,30 +87,30 @@ describe('browser_read / click / type', () => {
 
   it('read returns structured DOM (interactive elements) and does not change the screen', async () => {
     const cdp = mockCdp();
-    const r = await tool('browser_read').execute({}, ctx(cdp));
+    const r = await tool('cdp_page_context').execute({}, ctx(cdp));
     expect(r.success).toBe(true);
     expect(r.text).toMatch(/INTERACTIVE ELEMENTS/);
-    expect(tool('browser_read').changesScreen).toBe(false);
+    expect(tool('cdp_page_context').changesScreen).toBe(false);
     expect(cdp.getPageContext).toHaveBeenCalled();
   });
 
   it('click by visible text uses clickByText; failure nudges to cdp_page_context', async () => {
     const ok = mockCdp();
-    expect((await tool('browser_click').execute({ text: 'Search' }, ctx(ok))).success).toBe(true);
+    expect((await tool('cdp_click').execute({ text: 'Search' }, ctx(ok))).success).toBe(true);
     expect(ok.clickByText).toHaveBeenCalledWith('Search', Infinity, undefined);
 
     const bad = mockCdp({ clickByText: vi.fn(async () => ({ success: false, error: 'not found' })) });
-    const r = await tool('browser_click').execute({ text: 'Nope' }, ctx(bad));
+    const r = await tool('cdp_click').execute({ text: 'Nope' }, ctx(bad));
     expect(r.success).toBe(false);
     expect(r.text).toMatch(/cdp_page_context/);
   });
 
   it('type requires a selector or label', async () => {
     const cdp = mockCdp();
-    const r = await tool('browser_type').execute({ text: 'adele' }, ctx(cdp));
+    const r = await tool('cdp_type').execute({ text: 'adele' }, ctx(cdp));
     expect(r.success).toBe(false);
     expect(r.text).toMatch(/selector or label/i);
-    const ok = await tool('browser_type').execute({ text: 'adele', selector: '#search' }, ctx(cdp));
+    const ok = await tool('cdp_type').execute({ text: 'adele', selector: '#search' }, ctx(cdp));
     expect(ok.success).toBe(true);
     expect(cdp.typeInField).toHaveBeenCalledWith('#search', 'adele', undefined);
   });

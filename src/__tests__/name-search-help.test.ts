@@ -22,9 +22,9 @@ vi.mock('sharp', () => ({ default: vi.fn() }));
 
 import { wakeForNameSearch, onTopOfLine, resetNameSearchState } from '../tools/name-search-help';
 import { getA11yTools } from '../tools/a11y';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 import { classifyResult } from '../core/result-codes';
-import type { AgentToolContext } from '../tools/projected/types';
+import type { AgentToolContext } from '../tools/types';
 
 const NOTCHO = { processId: 11, processName: 'Notcho', title: 'Notcho', bounds: { x: 100, y: 100, width: 800, height: 600 }, isMinimized: false };
 const DIALOG = { processId: 99, processName: 'UserNotificationCenter', title: 'Accessibility Access' };
@@ -109,7 +109,7 @@ describe('find_element miss', () => {
 });
 
 describe('invoke_element miss', () => {
-  const invoke = buildUnifiedTools().find(t => t.name === 'invoke_element')!;
+  const invoke = buildCoreTools().find(t => t.name === 'invoke_element')!;
   const run = async (data: Record<string, unknown>, at: unknown) => {
     const platform = {
       invokeElement: vi.fn(async () => ({ success: false, data })),

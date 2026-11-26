@@ -5,11 +5,11 @@
  *   3. "Could not focus/select" dropped the platform's reason.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 import { classifyResult } from '../core/result-codes';
 import { preferControl } from '../platform/prefer-control';
 
-const agentTool = (n: string) => buildUnifiedTools().find(t => t.name === n)!;
+const agentTool = (n: string) => buildCoreTools().find(t => t.name === n)!;
 const label = { name: 'Your name', controlType: 'Text', bounds: { x: 0, y: 0, width: 50, height: 16 } };
 const edit = { name: 'Your name', controlType: 'Edit', bounds: { x: 60, y: 0, width: 200, height: 22 } };
 

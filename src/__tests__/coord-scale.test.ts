@@ -17,8 +17,8 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { imageScale, scaleCoord, screenCenter, LLM_TARGET_WIDTH } from '../platform/coord-scale';
-import { buildUnifiedTools } from '../tools/projected/tools';
-import type { AgentToolContext } from '../tools/projected/types';
+import { buildCoreTools } from '../tools/core-tools';
+import type { AgentToolContext } from '../tools/types';
 
 describe('imageScale / scaleCoord', () => {
   it('scales by physicalWidth/1280 when the screen is wider than the screenshot', () => {
@@ -131,7 +131,7 @@ async function withPlatform<T>(platform: NodeJS.Platform, run: () => Promise<T>)
 }
 
 describe('click tool coordinate space', () => {
-  const click = buildUnifiedTools().find(t => t.name === 'click')!;
+  const click = buildCoreTools().find(t => t.name === 'mouse_click')!;
 
   it('space:"image" scales screenshot coords to physical (1107 → 2214)', async () => {
     const clicks: Array<{ x: number; y: number }> = [];
@@ -228,7 +228,7 @@ describe('click tool coordinate space', () => {
 
 // The click activated the app it hit: another app in front is the click working, not focus theft.
 describe('click: another app in front after the click', () => {
-  const click = buildUnifiedTools().find(t => t.name === 'click')!;
+  const click = buildCoreTools().find(t => t.name === 'mouse_click')!;
   const win = (processId: number, processName: string, title: string) => ({ title, processName, processId, bounds: { x: 0, y: 0, width: 1, height: 1 }, isMinimized: false });
   function ctxWith(atPoint: unknown) {
     const ctx = makeCtx([]);

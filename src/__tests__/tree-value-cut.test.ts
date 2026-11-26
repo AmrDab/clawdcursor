@@ -8,8 +8,8 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import type { PlatformAdapter, UiElement } from '../platform/types';
-import { buildUnifiedTools } from '../tools/projected/tools';
-import type { AgentToolContext } from '../tools/projected/types';
+import { buildCoreTools } from '../tools/core-tools';
+import type { AgentToolContext } from '../tools/types';
 
 const NOTE = 'Meeting notes\nOwner: Dana\nStatus: draft\nNext review: Friday\n';
 
@@ -27,7 +27,7 @@ function ctxWith(tree: UiElement[], extra: Record<string, unknown> = {}): AgentT
   return { platform, task: 't', mcpSurface: true, screenshotsCaptured: { n: 0 } } as unknown as AgentToolContext;
 }
 const run = (name: string, args: Record<string, unknown>, ctx: AgentToolContext) =>
-  buildUnifiedTools().find(x => x.name === name)!.execute(args, ctx);
+  buildCoreTools().find(x => x.name === name)!.execute(args, ctx);
 
 describe('read_tree — long values', () => {
   it('marks a cut value, and says once (outside the screen content) how to read all of it', async () => {

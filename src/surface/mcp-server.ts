@@ -376,7 +376,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         const run = await withSteps(tool.name, action, () => inMcpSession(sessionStartedAt ?? started, () => withTurnBudget(() => asPauseOwner(sessionId, () => tool.handler(params, ctx)))));  // where the call's time went
         releasePill();
         if (!run.ok) {
-          // A handler throw (e.g. projected tools' toolContextToAgent when the
+          // A handler throw (e.g. core tools' toolContextToAgent when the
           // platform adapter failed to init) must NOT propagate to the MCP SDK
           // — in stdio mode an unhandled rejection can corrupt the JSON-RPC
           // stream. Convert to a clean isError result.

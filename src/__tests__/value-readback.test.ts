@@ -6,7 +6,7 @@
  * text); get_value failed with code UNKNOWN. Every path now ends in one read-back that compares the whole value.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 import { readBackTyped, fieldRead } from '../tools/paste-guard';
 import { classifyResult } from '../core/result-codes';
 
@@ -19,8 +19,8 @@ async function settled<T>(p: Promise<T>): Promise<T> {
   return p;
 }
 
-const setTool = buildUnifiedTools().find(t => t.name === 'set_field_value')!;
-const getTool = buildUnifiedTools().find(t => t.name === 'a11y_get_value')!;
+const setTool = buildCoreTools().find(t => t.name === 'set_field_value')!;
+const getTool = buildCoreTools().find(t => t.name === 'a11y_get_value')!;
 const EDIT = [{ name: 'Distance', controlType: 'Edit', bounds: { x: 60, y: 8, width: 200, height: 22 } }];
 
 /** `invoke` answers the by-name calls (set-value, get-value); `focused` is what the focused field shows. */

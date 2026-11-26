@@ -14,7 +14,7 @@ import { guardInputMethods, setInputGuard, unguarded, _resetHeldKeys } from '../
 import { normalizeKey } from '../platform/keys';
 import { getShortcutTools } from '../tools/shortcuts';
 import { SHORTCUTS, resolveShortcutKey } from '../shortcuts';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 import type { ToolContext } from '../tools/types';
 
 const refused = (combo: unknown, os: NodeJS.Platform, held: string[] = []) => hardKeyRefusal(combo, held, os) !== null;
@@ -257,8 +257,8 @@ ${LOCK_KEY}`]) {
     const sequence = `esc ${LOCK}`;
 
     it('the agent-loop tools `key` (the advisory\'s tool name) and `key_down`, by `combo` or by `key`', async () => {
-      const tools = buildUnifiedTools();
-      const key = tools.find(t => t.name === 'key')!;
+      const tools = buildCoreTools();
+      const key = tools.find(t => t.name === 'key_press')!;
       const keyDown = tools.find(t => t.name === 'key_down')!;
       // `combo` wins over `key` in this tool; whichever it presses, the lock chord never reaches the OS.
       for (const args of [{ combo: LOCK }, { key: LOCK }, { combo: sequence }, { combo: 'a', key: LOCK }, { combo: LOCK, key: 'a' }]) {

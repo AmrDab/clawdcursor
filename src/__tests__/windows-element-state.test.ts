@@ -30,8 +30,8 @@ vi.mock('../platform/ps-runner', () => ({
 }));
 
 import { WindowsAdapter } from '../platform/windows';
-import { buildUnifiedTools } from '../tools/projected/tools';
-import type { AgentToolContext } from '../tools/projected/types';
+import { buildCoreTools } from '../tools/core-tools';
+import type { AgentToolContext } from '../tools/types';
 
 const box = { x: 1, y: 1, width: 10, height: 10 };
 
@@ -55,7 +55,7 @@ describe('WindowsAdapter — checked state', () => {
 
   it('state reports checked for a checkbox', async () => {
     reply = [{ name: 'Subscribe', controlType: 'ControlType.CheckBox', bounds: box, toggleState: 'On' }];
-    const t = buildUnifiedTools().find(x => x.name === 'get_element_state')!;
+    const t = buildCoreTools().find(x => x.name === 'get_element_state')!;
     const res = await t.execute({ name: 'Subscribe' }, { platform: adapter, task: 't' } as unknown as AgentToolContext);
     expect(JSON.parse(res.text)).toMatchObject({ name: 'Subscribe', checked: true });
   });

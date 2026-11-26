@@ -4,9 +4,9 @@
  * reply said "read back ✓" [confirmed].
  */
 import { describe, it, expect } from 'vitest';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 
-const type = buildUnifiedTools().find(t => t.name === 'type')!;
+const type = buildCoreTools().find(t => t.name === 'type_text')!;
 
 /** A field that holds `start`, and after typing holds `after` (as read back). */
 function field(start: string, after: string) {

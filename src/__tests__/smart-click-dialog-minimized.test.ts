@@ -16,12 +16,12 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
 }));
 vi.mock('sharp', () => ({ default: vi.fn() }));
 
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 import { structuredMissFields } from '../core/miss-text';
 import { classifyResult } from '../core/result-codes';
 import { UIMapHolder } from '../core/sense/ui-map-holder';
 import type { UIMap, UIElement } from '../core/sense/ui-map-types';
-import type { AgentToolContext } from '../tools/projected/types';
+import type { AgentToolContext } from '../tools/types';
 
 
 describe('invoke by element_id: an ambiguous name answers with the list, as the name path does', () => {
@@ -43,7 +43,7 @@ describe('invoke by element_id: an ambiguous name answers with the list, as the 
     const platform = { invokeElement, mouseClick, listDisplays: async () => [],
       getActiveWindow: async () => ({ processId: 9, processName: 'notepad', title: 'Untitled - Notepad', bounds: { x: 0, y: 0, width: 800, height: 600 } }) };
     const ctx = { platform, task: 't', screen: { logicalWidth: 800, logicalHeight: 600, physicalWidth: 800, physicalHeight: 600, dpiRatio: 1 }, screenshotsCaptured: { n: 0 }, uiMaps: holder } as unknown as AgentToolContext;
-    const r = await buildUnifiedTools().find(t => t.name === 'invoke_element')!.execute({ element_id: 'el_0', snapshot_id: 'obs_1' }, ctx);
+    const r = await buildCoreTools().find(t => t.name === 'invoke_element')!.execute({ element_id: 'el_0', snapshot_id: 'obs_1' }, ctx);
     return { r, invokeElement, mouseClick };
   };
 
