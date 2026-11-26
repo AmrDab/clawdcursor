@@ -42,7 +42,7 @@ const ctx = (): ToolContext => ({
   ensureInitialized: async () => {},
 });
 async function connect(compact: boolean) {
-  const { server } = await createMcpServer({ compact, ctx: ctx() });
+  const { server } = await createMcpServer({ ctx: ctx() });
   const [a, b] = InMemoryTransport.createLinkedPair();
   await (server as any).connect(a);
   const client = new Client({ name: 'steering-test', version: '0' });

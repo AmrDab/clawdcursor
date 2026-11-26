@@ -51,8 +51,8 @@ const NO_SHOT = /none has been taken/;
 const PAUSED = /a pause is waiting for the user on screen/;
 
 async function mcpText(params: Record<string, unknown>): Promise<string> {
-  await createMcpServer({ ctx, compact: false });
-  const r = await handlers.get('mouse_click')!(params);
+  await createMcpServer({ ctx });
+  const r = await handlers.get('computer')!({ action: 'click', ...params });
   return r.content.map(c => c.text ?? '').join('\n');
 }
 async function batchText(params: Record<string, unknown>): Promise<string> {
@@ -138,7 +138,7 @@ describe('an acting call that fails or throws', () => {
     });
   };
   const runs = [
-    ['the MCP server', async () => { await createMcpServer({ ctx, compact: false }); await handlers.get('mouse_click')!({ x: 1, y: 1, space: 'screen' }); }],
+    ['the MCP server', async () => { await createMcpServer({ ctx }); await handlers.get('computer')!({ action: 'click', x: 1, y: 1, space: 'screen' }); }],
     ['a batch step', async () => { await executeBatch([{ name: 'mouse_click', arguments: { x: 1, y: 1, space: 'screen' } }], ctx); }],
   ] as const;
 
@@ -157,8 +157,8 @@ describe('an acting call that fails or throws', () => {
     const read = vi.spyOn(getTool('read_screen')!, 'handler').mockRejectedValue(new Error('no tree'));
     const empty = vi.spyOn(ocrEngine(), 'invalidateCache');
     try {
-      await createMcpServer({ ctx, compact: false });
-      await handlers.get('read_screen')!({});
+      await createMcpServer({ ctx });
+      await handlers.get('accessibility')!({ action: 'read_tree' });
       await executeBatch([{ name: 'read_screen', arguments: {} }], ctx);
       expect(read).toHaveBeenCalledTimes(2);
       expect(empty).not.toHaveBeenCalled();

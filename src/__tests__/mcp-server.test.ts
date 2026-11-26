@@ -49,22 +49,15 @@ function fakeCtx(): ToolContext {
 describe('createMcpServer', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('registers the full granular surface by default', async () => {
+  it('registers the 5 primitive compounds + batch, the only surface', async () => {
     const ctx = fakeCtx();
     const handle = await createMcpServer({ ctx });
-    expect(handle.toolCount).toBe(getAllTools().length);
-    expect(handle.tools.length).toBe(getAllTools().length);
-  });
-
-  it('registers the 5 primitive compounds + batch with --compact', async () => {
-    const ctx = fakeCtx();
-    const handle = await createMcpServer({ compact: true, ctx });
     expect(handle.toolCount).toBe(getCompactSurface().length);
     expect(handle.toolCount).toBe(6); // computer/accessibility/window/system/browser + batch
   });
 
   it('serves the tools-only instructions and no `task` tool', async () => {
-    const { server, tools } = await createMcpServer({ compact: true, ctx: fakeCtx() });
+    const { server, tools } = await createMcpServer({ ctx: fakeCtx() });
     expect(tools.find(t => t.name === 'task')).toBeUndefined();
     const [a, b] = InMemoryTransport.createLinkedPair();
     await (server as any).connect(a);

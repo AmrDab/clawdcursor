@@ -25,7 +25,7 @@ export interface CoreContext { coreVersion: string; coreEntry: string; node: str
 
 interface TaskResult { exitCode: number }
 interface AgentAddon {
-  runTask(opts: { task: string; with?: string; model?: string; granular?: boolean }, ctx: CoreContext): Promise<TaskResult>;
+  runTask(opts: { task: string; with?: string; model?: string }, ctx: CoreContext): Promise<TaskResult>;
   runLogs(opts: Record<string, unknown>, ctx: CoreContext): Promise<number>;
 }
 interface DoctorAddon { runSetup(ctx: CoreContext & { agent: AgentAddon; hasConsent(): boolean }): Promise<number> }
@@ -166,11 +166,11 @@ export function coreContext(): CoreContext {
 const CONSENT_FIRST = 'clawdcursor needs your one-time consent before an agent can drive the desktop: run `clawdcursor consent`, then try again.';
 
 /** `clawdcursor task "<task>"` */
-export async function runTaskCommand(task: string, opts: { with?: string; model?: string; granular?: boolean; yes?: boolean }): Promise<number> {
+export async function runTaskCommand(task: string, opts: { with?: string; model?: string; yes?: boolean }): Promise<number> {
   if (!hasConsent()) { DEFAULT_DEPS.out(CONSENT_FIRST); return 1; }
   const ready = await ensureAddons([AGENT_ADDON], '`clawdcursor task`', { preApproved: opts.yes });
   if (ready !== 'ready') return ready;
-  const r = await load<AgentAddon>(AGENT_ADDON).runTask({ task, with: opts.with, model: opts.model, granular: opts.granular }, coreContext());
+  const r = await load<AgentAddon>(AGENT_ADDON).runTask({ task, with: opts.with, model: opts.model }, coreContext());
   return r.exitCode;
 }
 

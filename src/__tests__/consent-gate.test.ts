@@ -125,7 +125,7 @@ describe('consent gate in createMcpServer tool handlers (PR #169)', () => {
 
   async function buildAndGetHandler(): Promise<HandlerFn> {
     const ctx = fakeCtx();
-    await createMcpServer({ ctx, compact: true }); // compact → fewer tools, faster
+    await createMcpServer({ ctx }); // compact → fewer tools, faster
     // Pick any registered handler — every tool goes through the same gate.
     const [name, handler] = [...capturedHandlers.entries()][0];
     expect(name).toBeTruthy(); // sanity: at least one tool was registered
@@ -323,7 +323,7 @@ describe('consent gate in createMcpServer tool handlers (PR #169)', () => {
   // ── 5. Turning off error reports needs no consent ──────────────────────────
   it('system telemetry_optout works before consent (it touches nothing on screen)', async () => {
     mockHasConsent.mockReturnValue(false);
-    await createMcpServer({ ctx: fakeCtx(), compact: true });
+    await createMcpServer({ ctx: fakeCtx() });
 
     const result = await capturedHandlers.get('system')!({ action: 'telemetry_optout' });
 

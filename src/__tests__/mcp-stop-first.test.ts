@@ -117,7 +117,7 @@ describe('the stop comes before every other refusal in the MCP tool wrapper', ()
 
   const text = (r: McpToolResult) => (r.content.find(b => b.type === 'text') as { text: string }).text;
   async function handlers() {
-    await createMcpServer({ ctx: fakeCtx(), compact: true });
+    await createMcpServer({ ctx: fakeCtx() });
     return capturedHandlers;
   }
 

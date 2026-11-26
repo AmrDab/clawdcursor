@@ -7,8 +7,9 @@ import { CLAUDE_ISOLATION, CODEX_ISOLATION, SERVER_NAME, hostSessionEnv, toml, t
 /** How the agent starts clawdcursor's stdio MCP server. `runId` reaches the server, which writes it in its session header. */
 export interface McpEntry { command: string; args: string[]; env: Record<string, string> }
 
-export function mcpEntry(o: { node: string; coreEntry: string; runId: string; granular?: boolean }): McpEntry {
-  return { command: o.node, args: [o.coreEntry, 'mcp', ...(o.granular ? [] : ['--compact'])], env: { CLAWDCURSOR_RUN_ID: o.runId } };
+export function mcpEntry(o: { node: string; coreEntry: string; runId: string }): McpEntry {
+  // `--compact`: the only surface from 3.0 on; an older core still needs it to serve the six compound tools.
+  return { command: o.node, args: [o.coreEntry, 'mcp', '--compact'], env: { CLAWDCURSOR_RUN_ID: o.runId } };
 }
 
 export const SYSTEM_PROMPT = [

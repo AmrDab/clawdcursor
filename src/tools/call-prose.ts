@@ -4,16 +4,14 @@
  * Tool text and result lines write a call as `browser {"action":"page_context"}`. A host does not call a tool named
  * `browser`: it prefixes every tool with its server name, so agents that copied the bare name got "No such tool" and lost a
  * round trip (8 of 16 test runs, audit 2026-11-19). Prose names the tool and the action and leaves the host's spelling to the
- * agent: "the browser tool, action page_context". The tool names follow the surface being served: compact names a compound
- * tool and its action, granular names the one granular tool that action runs.
+ * agent: "the browser tool, action page_context": a compound tool and its action, also for a granular tool a hint names (its
+ * compound route).
  *
  * Applied once, to the text that leaves the server (mcp-server.ts), so every hint is covered whoever wrote it.
  */
 
 import { COMPOUND_ROUTE_INDEX, compactCall } from './compact-routes';
 import { rewriteOutsideData } from './hint-rewrite';
-
-export type CallSurface = 'compact' | 'granular';
 
 const COMPOUNDS = Object.keys(COMPOUND_ROUTE_INDEX);
 const DELEGATES = [...new Set(Object.values(COMPOUND_ROUTE_INDEX).flat().map(r => r.delegate))];
@@ -56,7 +54,7 @@ function readArgs(s: string, from: number): { args: [string, string][]; end: num
   }
 }
 
-function proseCall(name: string, args: [string, string][], surface: CallSurface): string | null {
+function proseCall(name: string, args: [string, string][]): string | null {
   const given = args.find(([k]) => k === 'action');
   const action = given ? given[1].replace(/^"|"$/g, '') : undefined;
   const rest = args.filter(([k]) => k !== 'action').map(([k, v]) => `${k} ${v}`);
@@ -64,20 +62,17 @@ function proseCall(name: string, args: [string, string][], surface: CallSurface)
   let act: string | undefined;
   if (COMPOUNDS.includes(name)) {
     if (!action) return null;
-    const route = COMPOUND_ROUTE_INDEX[name].find(r => r.action === action);
-    if (surface === 'compact') { tool = name; act = action; }
-    else if (route) tool = route.delegate;
-    else return null;
-  } else if (surface === 'compact') {
+    tool = name; act = action;
+  } else {
     const c = compactCall(name);
     if (!c.action) return null;
     tool = c.tool; act = c.action;
-  } else tool = name;
+  }
   return [`the ${tool} tool${act ? `, action ${act}` : ''}`, ...rest].join(', ');
 }
 
-/** Rewrite every call-shaped text in `text` as prose for `surface`. Text that is not a well-formed call stays as it is. */
-export function callsAsProse(text: string, surface: CallSurface): string {
+/** Rewrite every call-shaped text in `text` as prose. Text that is not a well-formed call stays as it is. */
+export function callsAsProse(text: string): string {
   if (!text.includes('{')) return text;
   let out = '';
   let last = 0;
@@ -90,7 +85,7 @@ export function callsAsProse(text: string, surface: CallSurface): string {
     if (m[3]) { if (text[end] !== ')') continue; end++; }
     const ticks = !!m[1] && text[end] === '`';
     if (ticks) end++;
-    const prose = proseCall(m[2], parsed.args, surface);
+    const prose = proseCall(m[2], parsed.args);
     if (!prose) continue;
     out += text.slice(last, m.index) + (m[1] && !ticks ? m[1] : '') + prose;
     last = end;
@@ -103,7 +98,7 @@ export function callsAsProse(text: string, surface: CallSurface): string {
 const ADVICE_FIELDS = ['next', 'hint', 'toMouseClick'] as const;
 
 /** `callsAsProse` for a result that is prose or a JSON result: prose outside the screen-content blocks, a JSON result's advice fields only. */
-export function resultCallsAsProse(text: string, surface: CallSurface): string {
+export function resultCallsAsProse(text: string): string {
   const t = text.trim();
   if (t.startsWith('{')) {
     let o: Record<string, unknown> | undefined;
@@ -113,7 +108,7 @@ export function resultCallsAsProse(text: string, surface: CallSurface): string {
       for (const k of ADVICE_FIELDS) {
         const v = o[k];
         if (typeof v !== 'string') continue;
-        const p = callsAsProse(v, surface);
+        const p = callsAsProse(v);
         if (p !== v) { o[k] = p; changed = true; }
       }
       if (!changed) return text;
@@ -129,5 +124,5 @@ export function resultCallsAsProse(text: string, surface: CallSurface): string {
       return outText;
     }
   }
-  return rewriteOutsideData(text, prose => callsAsProse(prose, surface));
+  return rewriteOutsideData(text, prose => callsAsProse(prose));
 }

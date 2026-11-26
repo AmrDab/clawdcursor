@@ -29,8 +29,6 @@ export type Transport = 'stdio' | 'http';
 
 export interface ServeOptions {
   transport: Transport;
-  /** The 6 compound tools instead of the granular surface (`--compact`; HTTP also CLAWD_MCP_COMPACT=1). */
-  compact: boolean;
   /** false: no on-screen control banner (`--no-banner`). */
   banner: boolean;
   /** HTTP: `--port`, already validated. */
@@ -59,7 +57,7 @@ export async function serveMcp(opts: ServeOptions): Promise<void> {
  * On stdio the console must already write to stderr when this runs (captureConsole copies what it writes).
  */
 export async function startServing(
-  opts: { compact: boolean; banner: boolean; disableVision: boolean },
+  opts: { banner: boolean; disableVision: boolean },
   makeContext: (o: { disableVision: boolean }) => Promise<ToolContext> = createToolContext,
 ): Promise<{ ctx: ToolContext; createHandle: () => Promise<McpServerHandle> }> {
   captureConsole();
@@ -74,13 +72,13 @@ export async function startServing(
       controlBanner.unpin();
     },
   });
-  return { ctx, createHandle: () => createMcpServer({ compact: opts.compact, ctx }) };
+  return { ctx, createHandle: () => createMcpServer({ ctx }) };
 }
 
 /** Once the transport is up: the start event, and the servers that died earlier without a clean exit. */
-function announceStart(transport: Transport, compact: boolean): void {
+function announceStart(transport: Transport): void {
   logger.info('mcp.start', { version: VERSION, pid: process.pid, hostPid: process.ppid, transport,
-    surface: compact ? 'compact' : 'granular', readyMs: Math.round(process.uptime() * 1000) });
+    surface: 'compact', readyMs: Math.round(process.uptime() * 1000) });
   reportUncleanExits();
 }
 
@@ -151,13 +149,13 @@ async function serveStdio(opts: ServeOptions): Promise<void> {
     );
   }
 
-  console.log(`clawdcursor MCP mode starting... (${opts.compact ? 'compact' : 'granular'})`);
+  console.log('clawdcursor MCP mode starting...');
   // CLAWD_DISABLE_VISION=1 / config disableVision holds here too (no --no-vision flag on stdio).
-  const { ctx, createHandle } = await startServing({ compact: opts.compact, banner: opts.banner, disableVision: resolveConfig().disableVision });
+  const { ctx, createHandle } = await startServing({ banner: opts.banner, disableVision: resolveConfig().disableVision });
   const { server, toolCount, sessionLog } = await createHandle();
   await startMcpStdio(server);
   console.log(`clawdcursor MCP ready — ${toolCount} tools registered`);
-  announceStart('stdio', opts.compact);
+  announceStart('stdio');
   initInBackground(ctx);
 
   const exit = exitRoutine(reason => sessionLog.end(reason));
@@ -228,9 +226,7 @@ async function serveHttp(opts: ServeOptions): Promise<void> {
 
   console.log(`${pc.green('✓')} ${pc.bold('clawdcursor')} ${pc.gray(`v${VERSION}`)} ${pc.gray(`— desktop control active on ${BIND_HOST}:${resolved.port}`)}`);
 
-  // Default granular for backward compatibility; agent hosts can opt into the 6-compound surface.
-  const compact = opts.compact || process.env.CLAWD_MCP_COMPACT === '1';
-  const { ctx, createHandle } = await startServing({ compact, banner: opts.banner, disableVision: resolved.disableVision });
+  const { ctx, createHandle } = await startServing({ banner: opts.banner, disableVision: resolved.disableVision });
 
   // Starting the daemon is the user's own act: it gives control back after a stop.
   if (isStopped()) {
@@ -264,7 +260,7 @@ async function serveHttp(opts: ServeOptions): Promise<void> {
     mcp: mcp?.handle,
   });
 
-  const toolCount = servedTools(compact).length;
+  const toolCount = servedTools().length;
   app.listen(resolved.port, BIND_HOST, async () => {
     // Where `stop` / `resume` find this daemon (see daemonPortForClient).
     recordLockPort(DAEMON_LOCK, resolved.port);
@@ -272,14 +268,11 @@ async function serveHttp(opts: ServeOptions): Promise<void> {
     console.log(`\n${pc.green(`${e('🌐', '[NET]')} API server:`)} http://${BIND_HOST}:${resolved.port}`);
     console.log(`${pc.yellow(`${e('🔑', '[KEY]')} Auth token:`)} ${serverToken.slice(0, 8)}...`);
     console.log(pc.gray(`   (full token saved to ${TOKEN_PATH})`));
-    console.log(`\nHTTP routes (agents use MCP at /mcp: the ${compact ? 'compact' : 'granular'} surface, ${toolCount} tools):`);
+    console.log(`\nHTTP routes (agents use MCP at /mcp: ${toolCount} tools):`);
     for (const line of describeRoutes()) console.log(`  ${line}`);
-    if (!compact) {
-      console.log(pc.gray(`   (tip: pass --compact or set CLAWD_MCP_COMPACT=1 to expose the 6-compound public surface)`));
-    }
     console.log(`\nAll mutating endpoints require: ${pc.cyan('Authorization: Bearer <token>')}`);
     console.log(`\nReady. ${e('🐾', '')}`);
-    announceStart('http', compact);
+    announceStart('http');
     // In a terminal: every action from any clawdcursor on this computer, as it happens (live-log.ts).
     liveLog = startAgentLiveLog();
   });

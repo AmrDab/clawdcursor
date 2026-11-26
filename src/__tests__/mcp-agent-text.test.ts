@@ -25,6 +25,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createMcpServer } from '../surface/mcp-server';
 import type { ToolContext } from '../tools/registry';
+import { getTool } from '../tools/registry';
 
 const ctx = (): ToolContext => ({
   desktop: {} as any, a11y: {} as any, cdp: {} as any, platform: undefined,
@@ -33,7 +34,7 @@ const ctx = (): ToolContext => ({
 });
 
 async function connect(compact: boolean) {
-  const { server } = await createMcpServer({ compact, ctx: ctx() });
+  const { server } = await createMcpServer({ ctx: ctx() });
   const [a, b] = InMemoryTransport.createLinkedPair();
   await (server as any).connect(a);
   const client = new Client({ name: 'agent-text-test', version: '0' });
@@ -52,8 +53,7 @@ describe('MCP agent-facing text matches the MCP surface', () => {
   });
 
   it('mouse_click and read_screen descriptions describe the MCP behaviour', async () => {
-    const { tools } = await connect(false);
-    const desc = (n: string) => tools.find(t => t.name === n)?.description ?? '';
+    const desc = (n: string) => getTool(n)?.description ?? '';
     expect(desc('mouse_click')).toContain('Click at');
     expect(desc('mouse_click')).not.toContain('follows context');
     expect(desc('read_screen')).not.toContain('auto-attached');

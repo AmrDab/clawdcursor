@@ -32,14 +32,14 @@ describe('the tool context both transports build', () => {
 describe('logs_recent on a served server (the stdio path builds it the same way)', () => {
   it('returns the console lines the server printed after it started', async () => {
     writeConsentFile();
-    const { createHandle } = await startServing({ compact: false, banner: false, disableVision: false });
+    const { createHandle } = await startServing({ banner: false, disableVision: false });
     console.log('serve-context: a line the agent can read');
     const { server } = await createHandle();
     const [a, b] = InMemoryTransport.createLinkedPair();
     await (server as unknown as { connect(t: unknown): Promise<void> }).connect(a);
     const client = new Client({ name: 'serve-context-test', version: '0' });
     await client.connect(b);
-    const r = await client.callTool({ name: 'logs_recent', arguments: {} });
+    const r = await client.callTool({ name: 'batch', arguments: { steps: [{ name: 'logs_recent' }] } });
     await client.close();
     const text = (r.content as Array<{ text: string }>)[0].text;
     expect(text).toContain('serve-context: a line the agent can read');

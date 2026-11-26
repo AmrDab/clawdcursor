@@ -103,7 +103,7 @@ describe('MCP results carry an outcome line', () => {
   });
 
   async function handler(name: string): Promise<HandlerFn> {
-    await createMcpServer({ ctx: fakeCtx(), compact: true });
+    await createMcpServer({ ctx: fakeCtx() });
     const h = capturedHandlers.get(name);
     expect(h).toBeTruthy();
     return h!;
@@ -157,7 +157,7 @@ describe('screenshot-bound clicks through the MCP wrapper', () => {
 
   it('an image click with no screenshot is refused before anything moves', async () => {
     const { ctx } = ctxWithFront(app);
-    await createMcpServer({ ctx, compact: true });
+    await createMcpServer({ ctx });
     const r = await capturedHandlers.get('computer')!({ action: 'click', x: 10, y: 10 });
     expect(r.isError).toBe(true);
     expect(text(r)).toMatch(/none has been taken[\s\S]*\[refused · STALE_SCREENSHOT/);
@@ -165,7 +165,7 @@ describe('screenshot-bound clicks through the MCP wrapper', () => {
 
   it('a dialog opened after the screenshot → the next image click is refused; space:"screen" is not checked', async () => {
     const { state, ctx } = ctxWithFront(app);
-    await createMcpServer({ ctx, compact: true });
+    await createMcpServer({ ctx });
     (await import('../core/screen-binding')).recordShot(state.windows);   // as computer screenshot does
     state.front = { processId: 1, title: 'Delete file?', handle: 12 };
     const refused = await capturedHandlers.get('computer')!({ action: 'click', x: 10, y: 10 });
@@ -176,7 +176,7 @@ describe('screenshot-bound clicks through the MCP wrapper', () => {
 
   it('a click naming an older screenshot is refused', async () => {
     const { state, ctx } = ctxWithFront(app);
-    await createMcpServer({ ctx, compact: true });
+    await createMcpServer({ ctx });
     const sb = await import('../core/screen-binding');
     sb.recordShot(state.windows);
     sb.recordShot(state.windows);
@@ -186,7 +186,7 @@ describe('screenshot-bound clicks through the MCP wrapper', () => {
 
   it('a batch stops at the image click when a new window came up under it', async () => {
     const { state, ctx } = ctxWithFront(app);
-    await createMcpServer({ ctx, compact: true });
+    await createMcpServer({ ctx });
     (await import('../core/screen-binding')).recordShot(state.windows);
     state.front = { processId: 2, title: 'Other', handle: 22 };
     const r = await capturedHandlers.get('batch')!({ steps: [{ name: 'computer', arguments: { action: 'click', x: 1, y: 1 } }] });
@@ -197,7 +197,7 @@ describe('screenshot-bound clicks through the MCP wrapper', () => {
     const { state, ctx } = ctxWithFront(app);
     state.windows = [{ processId: 9, title: 'Host', handle: 99 }, app];
     state.front = state.windows[0];
-    await createMcpServer({ ctx, compact: true });
+    await createMcpServer({ ctx });
     (await import('../core/screen-binding')).recordShot(state.windows);
     state.front = app;
     const r = await capturedHandlers.get('computer')!({ action: 'click', x: 1, y: 1 });
@@ -215,7 +215,7 @@ describe('mac report fixes', () => {
   const text = (r: McpToolResult) => r.content.filter(c => c.type === 'text').map(c => (c as { text: string }).text).join('\n');
 
   it('expect passed to a tool that does not check it is reported as ignored — not silently dropped', async () => {
-    await createMcpServer({ ctx: fakeCtx(), compact: true });
+    await createMcpServer({ ctx: fakeCtx() });
     const r = await capturedHandlers.get('system')!({ action: 'build_uri', scheme: 'mailto', path: 'a@b.com', expect: [{ type: 'window_title_contains', value: 'x' }] });
     expect(text(r)).toMatch(/ignored an argument it does not accept: expect/);
   });
@@ -233,7 +233,7 @@ describe('expect is checked on every compound action (live macOS: window focus d
   const ctxWithWindows = () => ({ ...fakeCtx(), platform: { listWindows: vi.fn(async () => [win, { ...win, processId: 2, title: 'secret-doc rk_live_xyz' }]), getActiveWindow: vi.fn(async () => win) } as any });
 
   it('a failing expect on a tool that does not check it itself → DEVIATION (no longer ignored)', async () => {
-    await createMcpServer({ ctx: ctxWithWindows(), compact: true });
+    await createMcpServer({ ctx: ctxWithWindows() });
     const r = await capturedHandlers.get('system')!({ action: 'build_uri', scheme: 'mailto', path: 'a@b.com', expect: [{ type: 'window_title_contains', value: 'zzz' }] });
     expect(r.isError).toBe(true);
     expect(text(r)).toMatch(/DEVIATION/);
@@ -244,14 +244,14 @@ describe('expect is checked on every compound action (live macOS: window focus d
   });
 
   it('a passing expect → verified', async () => {
-    await createMcpServer({ ctx: ctxWithWindows(), compact: true });
+    await createMcpServer({ ctx: ctxWithWindows() });
     const r = await capturedHandlers.get('system')!({ action: 'build_uri', scheme: 'mailto', path: 'a@b.com', expect: [{ type: 'window_title_contains', value: 'Notes' }] });
     expect(r.isError).toBeFalsy();
     expect(text(r)).toMatch(/verified 1 check\(s\)/);
   });
 
   it('a malformed expect is refused before the action runs', async () => {
-    await createMcpServer({ ctx: ctxWithWindows(), compact: true });
+    await createMcpServer({ ctx: ctxWithWindows() });
     const r = await capturedHandlers.get('system')!({ action: 'build_uri', scheme: 'mailto', path: 'a@b.com', expect: 'window title has Notes' });
     expect(r.isError).toBe(true);
     expect(text(r)).toMatch(/^expect rejected \(nothing executed\)/);
@@ -259,7 +259,7 @@ describe('expect is checked on every compound action (live macOS: window focus d
   });
 
   it('a failed action keeps its own error — not relabelled DEVIATION', async () => {
-    await createMcpServer({ ctx: ctxWithWindows(), compact: true });
+    await createMcpServer({ ctx: ctxWithWindows() });
     const r = await capturedHandlers.get('system')!({ action: 'build_uri', scheme: '9bad', expect: [{ type: 'window_title_contains', value: 'zzz' }] });
     expect(r.isError).toBe(true);
     expect(text(r)).toMatch(/scheme must be lowercase/);
@@ -267,7 +267,7 @@ describe('expect is checked on every compound action (live macOS: window focus d
   });
 
   it('an ignored argument does not hide the verified verdict from the outcome line', async () => {
-    await createMcpServer({ ctx: ctxWithWindows(), compact: true });
+    await createMcpServer({ ctx: ctxWithWindows() });
     const r = await capturedHandlers.get('system')!({ action: 'build_uri', scheme: 'mailto', path: 'a@b.com', message: 'x', expect: [{ type: 'window_title_contains', value: 'Notes' }] });
     expect(text(r)).toMatch(/ignored an argument/);
     // the verdict ends the text, so the outcome classifier's anchored ` — verified N check(s)` marker still matches
@@ -286,7 +286,7 @@ describe('the user\'s own controls are never a target (owner requirement, live m
 
   it('reading the pill\'s tree by its pid is refused before anything runs', async () => {
     const ctx = fakeCtx();
-    await createMcpServer({ ctx, compact: true });
+    await createMcpServer({ ctx });
     const r = await capturedHandlers.get('accessibility')!({ action: 'read_tree', processId: 4242 });
     expect(r.isError).toBe(true);
     expect(text(r)).toMatch(/pid 4242 is clawdcursor's own on-screen control/);
@@ -297,7 +297,7 @@ describe('the user\'s own controls are never a target (owner requirement, live m
   // that ran.
   it('a guard refusal is logged as a refusal', async () => {
     const warn = vi.spyOn(logger, 'warn');
-    await createMcpServer({ ctx: fakeCtx(), compact: true });
+    await createMcpServer({ ctx: fakeCtx() });
     await capturedHandlers.get('accessibility')!({ action: 'read_tree', processId: 4242 });
     expect(warn).toHaveBeenCalledWith('safety.refused', expect.objectContaining({ tool: 'accessibility', action: 'read_tree', guard: 'own_ui' }));
     warn.mockRestore();
@@ -321,23 +321,21 @@ describe('--no-vision: no screenshot reaches the MCP client\'s model', () => {
   const latestShot = async () => (await import('../core/screen-binding')).latestShotId();
   const REFUSED = /vision is disabled on this server[\s\S]*\[refused · VISION_DISABLED · .*next: the (?:accessibility tool, action compile_ui|compile_ui tool)/;
 
-  // Every surface a screenshot can be taken from: the compact compound, and the two granular screenshot tools.
-  const calls: Array<{ compact: boolean; name: string; args: Record<string, unknown> }> = [
-    { compact: true, name: 'computer', args: { action: 'screenshot' } },
-    { compact: false, name: 'desktop_screenshot', args: {} },
-    { compact: false, name: 'screenshot_full', args: {} },
+  // A screenshot by the compound tool, and by a granular screenshot tool named in a batch step.
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [
+    { name: 'computer', args: { action: 'screenshot' } },
   ];
 
-  describe.each(calls)('$name $args', ({ compact, name, args }) => {
+  describe.each(calls)('$name $args', ({ name, args }) => {
     it('control: without it, the call returns an image and records the screenshot', async () => {
-      await createMcpServer({ ctx: ctxWithScreen(false), compact });
+      await createMcpServer({ ctx: ctxWithScreen(false) });
       const r = await capturedHandlers.get(name)!(args);
       expect(r.content.some(c => c.type === 'image')).toBe(true);
       expect(await latestShot()).not.toBeNull();
     });
 
     it('with it, the image is withheld, the call is refused with a blind next step, and nothing is recorded', async () => {
-      await createMcpServer({ ctx: ctxWithScreen(true), compact });
+      await createMcpServer({ ctx: ctxWithScreen(true) });
       const r = await capturedHandlers.get(name)!(args);
       expect(r.content.some(c => c.type === 'image')).toBe(false);
       expect(r.isError).toBe(true);
@@ -346,14 +344,14 @@ describe('--no-vision: no screenshot reaches the MCP client\'s model', () => {
     });
 
     it('control: without it, the same call as a batch step runs and records the screenshot', async () => {
-      await createMcpServer({ ctx: ctxWithScreen(false), compact });
+      await createMcpServer({ ctx: ctxWithScreen(false) });
       const r = await capturedHandlers.get('batch')!({ steps: [{ name, arguments: args }] });
       expect(r.isError).toBeFalsy();
       expect(await latestShot()).not.toBeNull();
     });
 
     it('with it, the same call as a batch step is refused and not recorded as seen', async () => {
-      await createMcpServer({ ctx: ctxWithScreen(true), compact });
+      await createMcpServer({ ctx: ctxWithScreen(true) });
       const r = await capturedHandlers.get('batch')!({ steps: [{ name, arguments: args }] });
       expect(r.isError).toBe(true);
       expect(r.content.some(c => c.type === 'image')).toBe(false);
@@ -379,7 +377,7 @@ describe('the first screenshot of a session that read nothing is nudged to blind
   });
 
   it('a screenshot before any text was read says what is cheaper and exact; it points at smart_click for a labelled target', async () => {
-    await createMcpServer({ ctx: shotCtx(), compact: true });
+    await createMcpServer({ ctx: shotCtx() });
     const r = await capturedHandlers.get('computer')!({ action: 'screenshot' });
     expect(text(r)).toMatch(/A screenshot before any text was read\. Cheaper and exact:/);
     expect(text(r)).toMatch(/If the target has a visible label, click it with the accessibility tool, action smart_click, target "<label>" instead of coordinates\./);
@@ -387,7 +385,7 @@ describe('the first screenshot of a session that read nothing is nudged to blind
 
   it('a screenshot after a blind read in the same session is not nudged', async () => {
     const ctx = { ...shotCtx(), a11y: { getScreenContext: async () => 'text' } as any };
-    await createMcpServer({ ctx, compact: true });
+    await createMcpServer({ ctx });
     await capturedHandlers.get('accessibility')!({ action: 'read_tree' });
     const r = await capturedHandlers.get('computer')!({ action: 'screenshot' });
     expect(text(r)).not.toMatch(/before any text was read/);
@@ -396,7 +394,7 @@ describe('the first screenshot of a session that read nothing is nudged to blind
   // #380: the nudge repeated every 5th screenshot of a long run and changed nothing.
   it('a run of screenshots is nudged once, at the third', async () => {
     const ctx = { ...shotCtx(), a11y: { getScreenContext: async () => 'text' } as any };
-    await createMcpServer({ ctx, compact: true });
+    await createMcpServer({ ctx });
     await capturedHandlers.get('accessibility')!({ action: 'read_tree' });
     const nudged: number[] = [];
     for (let i = 1; i <= 9; i++) {
@@ -412,7 +410,7 @@ describe('the first screenshot of a session that read nothing is nudged to blind
       { name: 'Board', controlType: 'Pane', bounds: { x: 0, y: 100, width: 1000, height: 700 } }];
     const base = shotCtx();
     const ctx = { ...base, platform: { ...base.platform, getUiTree: vi.fn(async () => tree), lastTreeTruncated: false } };
-    await createMcpServer({ ctx, compact: true });
+    await createMcpServer({ ctx });
     expect(text(await capturedHandlers.get('accessibility')!({ action: 'read_tree' }))).toMatch(/→ Opaque area @0,100 1000×700 \(88% of the window\)/);
     const first = text(await capturedHandlers.get('computer')!({ action: 'screenshot' }));
     expect(first).toMatch(/send all remaining strokes in ONE batch \(computer click with path, drag_path\), then ONE computer screenshot_region of only the changed area with max_edge 512/);
@@ -427,7 +425,7 @@ describe('the first screenshot of a session that read nothing is nudged to blind
       { name: 'Board', controlType: 'Pane', bounds: { x: 0, y: 100, width: 1000, height: 700 } }];
     const base = shotCtx();
     const ctx = { ...base, platform: { ...base.platform, getUiTree: vi.fn(async () => tree), lastTreeTruncated: false, mouseClick: vi.fn(async () => {}) } };
-    await createMcpServer({ ctx, compact: true });
+    await createMcpServer({ ctx });
     await capturedHandlers.get('accessibility')!({ action: 'read_tree' });
     const hints = [text(await capturedHandlers.get('computer')!({ action: 'screenshot' }))];
     await capturedHandlers.get('computer')!({ action: 'click', x: 500, y: 400, space: 'screen' });
@@ -439,7 +437,7 @@ describe('the first screenshot of a session that read nothing is nudged to blind
   it('after a find that missed a name, the screenshot gets no canvas advice', async () => {
     const base = shotCtx();
     const ctx = { ...base, platform: { ...base.platform, findElements: vi.fn(async () => []), getUiTree: vi.fn(async () => []), lastFindScope: [] } };
-    await createMcpServer({ ctx, compact: true });
+    await createMcpServer({ ctx });
     expect(text(await capturedHandlers.get('accessibility')!({ action: 'find', name: 'Submit' }))).toMatch(/^\(no elements found\)/);
     expect(text(await capturedHandlers.get('computer')!({ action: 'screenshot' }))).not.toMatch(/strokes/);
   });
@@ -455,7 +453,7 @@ describe('the first screenshot of a session that read nothing is nudged to blind
       getUiTree: vi.fn(async () => [{ name: 'Total: 42' }]),
     };
     const ctx = { ...fakeCtx(), platform: platform as any, a11y: { invalidateCache() {} } as any };
-    const { sessionLog } = await createMcpServer({ ctx, compact: true });
+    const { sessionLog } = await createMcpServer({ ctx });
     const r = await capturedHandlers.get('system')!({ action: 'copy_all_text' });
     expect(text(r)).toMatch(/names only/);
     expect(sessionLog.summary).toMatchObject({ blind: 1 });
@@ -481,29 +479,23 @@ describe('coordinate clicks with none by name are nudged to smart_click, once', 
   const NUDGE = /3 clicks by coordinates and none by name\./;
   const ctx = () => ({ ...fakeCtx(), platform: { listWindows: vi.fn(async () => []), getActiveWindow: vi.fn(async () => null),
     listDisplays: vi.fn(async () => []), mouseClick: vi.fn(async () => {}), findElements: vi.fn(async () => []), invokeElement: vi.fn(async () => ({ success: true })) } as any });
-  const click = (compact = true) => capturedHandlers.get(compact ? 'computer' : 'mouse_click')!(compact ? { action: 'click', x: 5, y: 5, space: 'screen' } : { x: 5, y: 5, space: 'screen' });
+  const click = () => capturedHandlers.get('computer')!({ action: 'click', x: 5, y: 5, space: 'screen' });
 
   it('fires on the 3rd coordinate click, and not again later in the session', async () => {
-    await createMcpServer({ ctx: ctx(), compact: true });
+    await createMcpServer({ ctx: ctx() });
     const seen: boolean[] = [];
     for (let i = 0; i < 7; i++) seen.push(NUDGE.test(text(await click())));
     expect(seen).toEqual([false, false, true, false, false, false, false]);
   });
 
-  it('compact and granular name smart_click in their own names', async () => {
-    await createMcpServer({ ctx: ctx(), compact: true });
+  it('names smart_click as the accessibility tool and its action', async () => {
+    await createMcpServer({ ctx: ctx() });
     for (let i = 0; i < 2; i++) await click();
     expect(text(await click())).toContain('the accessibility tool, action smart_click, target "<label>" presses it with no screenshot');
-    capturedHandlers.clear();
-    await createMcpServer({ ctx: ctx(), compact: false });
-    for (let i = 0; i < 2; i++) await click(false);
-    const g = text(await click(false));
-    expect(g).toContain('the smart_click tool, target "<label>" presses it with no screenshot');
-    expect(g).not.toContain('accessibility smart_click');
   });
 
   it('a click by name in between starts the count again; screenshots and other calls do not', async () => {
-    await createMcpServer({ ctx: ctx(), compact: true });
+    await createMcpServer({ ctx: ctx() });
     await click(); await click();
     await capturedHandlers.get('accessibility')!({ action: 'invoke', name: 'OK' });   // act-name: the count starts over
     expect(NUDGE.test(text(await click()))).toBe(false);
@@ -515,7 +507,7 @@ describe('coordinate clicks with none by name are nudged to smart_click, once', 
   it('a scroll at x,y is not a click: it is not counted', async () => {
     const c = ctx();
     c.platform.mouseScroll = vi.fn(async () => {});
-    await createMcpServer({ ctx: c, compact: true });
+    await createMcpServer({ ctx: c });
     const scroll = () => capturedHandlers.get('computer')!({ action: 'scroll', x: 5, y: 5, direction: 'down', amount: 1, space: 'screen' });
     await click(); await click();
     for (let i = 0; i < 3; i++) expect(NUDGE.test(text(await scroll()))).toBe(false);
@@ -533,7 +525,7 @@ describe("downloads the agent's browser kept", () => {
 
   it('are named once, in a block of their own after the result, which stays exactly as it was', async () => {
     const saved = [path.join('Downloads', 'Hopetoun_falls.jpg')];
-    await createMcpServer({ ctx: { ...fakeCtx(), cdp: { takeSavedDownloads: () => saved.splice(0) } }, compact: true });
+    await createMcpServer({ ctx: { ...fakeCtx(), cdp: { takeSavedDownloads: () => saved.splice(0) } } });
     const system = capturedHandlers.get('system')!;
     const r = await system({ action: 'build_uri', scheme: 'mailto', path: 'a@b.com' });
     const texts = r.content.filter(c => c.type === 'text').map(c => (c as { text: string }).text);

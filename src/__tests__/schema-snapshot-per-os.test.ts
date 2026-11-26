@@ -1,30 +1,21 @@
 /**
- * The schema snapshot captures each OS's tool list on that OS: a description that depends on process.platform shows up
- * under perOs, not as the first OS's text for all three. And a field only some OS returns is kept.
+ * The schema snapshot captures each OS's surface on that OS: text that depends on process.platform shows up under perOs,
+ * not as the first OS's text for all three. And a field only some OS returns is kept.
  */
-import { describe, it, expect, vi } from 'vitest';
-
-vi.mock('../tools/orchestration', async () => {
-  const actual = await vi.importActual<typeof import('../tools/orchestration')>('../tools/orchestration');
-  return {
-    ...actual,
-    getOrchestrationTools: () => actual.getOrchestrationTools().map(t =>
-      (t.name === 'wait' ? { ...t, description: `${t.description} (built on ${process.platform})` } : t)),
-  };
-});
+import { describe, it, expect } from 'vitest';
 
 import { currentSnapshot, mergeByOs } from '../schema/snapshot';
 
 describe('schema snapshot, per OS', () => {
-  it('a tool description that differs by OS is captured on each OS', async () => {
+  it('text that differs by OS is captured on each OS (the instructions name the keys of each OS)', async () => {
     const { surfaces } = JSON.parse(await currentSnapshot()) as {
-      surfaces: { granular: { tools?: unknown; perOs: Record<string, Record<string, Array<{ name: string; description: string }>>> } };
+      surfaces: { compact: { instructions?: unknown; perOs: Record<string, Record<string, string>> } };
     };
-    const tools = surfaces.granular.perOs.tools;
-    expect(surfaces.granular.tools).toBeUndefined();
-    for (const os of ['darwin', 'linux', 'win32']) {
-      expect(tools[os].find(t => t.name === 'wait')!.description).toMatch(new RegExp(`\\(built on ${os}\\)$`));
-    }
+    const byOs = surfaces.compact.perOs.instructions;
+    expect(surfaces.compact.instructions).toBeUndefined();
+    expect(byOs.win32).toMatch(/runs Windows/);
+    expect(byOs.darwin).not.toBe(byOs.win32);
+    expect(byOs.linux).not.toBe(byOs.win32);
   }, 60_000);
 
   it('a field only some OS returns is kept, under perOs', () => {

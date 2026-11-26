@@ -51,7 +51,7 @@ beforeEach(async () => {
   delete process.env.CLAWDCURSOR_SESSION_LOG;
   handlers.clear();
   consent.given = true;
-  await createMcpServer({ ctx, compact: true });
+  await createMcpServer({ ctx });
 });
 
 describe('MCP session log', () => {

@@ -58,7 +58,7 @@ async function call(name: string, args: Record<string, unknown>) {
     desktop: { getDpiRatio: () => 1 } as any, a11y: { invalidateCache() {} } as any, cdp: {} as any, platform: {} as any,
     getMouseScaleFactor: () => 1, getScreenshotScaleFactor: () => 1, ensureInitialized: async () => {},
   };
-  const { server } = await createMcpServer({ compact: true, ctx });
+  const { server } = await createMcpServer({ ctx });
   const [a, b] = InMemoryTransport.createLinkedPair();
   await (server as any).connect(a);
   const client = new Client({ name: 'undeclared-args-test', version: '0' });
