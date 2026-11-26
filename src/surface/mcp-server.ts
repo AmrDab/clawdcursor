@@ -166,6 +166,12 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'TO ACT: (1) accessibility invoke with name clicks an element, set_value types into a field; ' +
       '(2) if the name is not found, accessibility smart_click with target = the visible label; ' +
       '(3) only for a target with no name and no text: computer screenshot, then computer click with x,y from that image. ' +
+      // Routines (tools/routines.ts): the second time a task is asked, one call instead of the whole exploration. Early in
+      // the text: hosts cut long instructions (Claude Code at about 4,000 characters; bench 2026-11-26: placed last, no agent saved).
+      'Repeat work: when a task is done and it took 3 or more calls that changed something, save it before you report back: batch with ' +
+      'save_as (a short name) and description (what it does, in which app); it costs one call and makes the next run one call. When a saved ' +
+      'routine fits the task, run it first with batch replay (vars for its {{names}}), and do the steps by hand only from where it halts. ' +
+      routinesLine() +
       // The OS is read once, here, when the server starts: the agent knows from its first message which keys to send.
       osKeysGuide() +
       'A surface with no names and no text (a drawing canvas, whiteboard, CAD viewport or map; read_tree says "Opaque area") ' +
@@ -189,11 +195,6 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'reports a DEVIATION instead of a hollow success. Each action result and error ends with one line: ' +
       '[confirmed | unverified | refused · CODE · hint · next | failed · CODE · hint · next] — follow its next call instead of guessing. ' +
       'PAUSED (the user paused clawdcursor) means nothing was sent: call the same step again until it runs, and do not give up or act another way meanwhile. USER_ACTIVE (the user is using the computer, which they may while you work in the background) means nothing was sent: keep working by name meanwhile, and call that step again in a few seconds. A STOPPED reply is different: do not retry it. ' +
-      // Routines (tools/routines.ts): the second time a task is asked, one call instead of the whole exploration.
-      'Repeat work: when a task is done and it took 3 or more calls that changed something, save it before you report back: batch with ' +
-      'save_as (a short name) and description (what it does, in which app); it costs one call and makes the next run one call. When a saved ' +
-      'routine fits the task, run it first with batch replay (vars for its {{names}}), and do the steps by hand only from where it halts. ' +
-      routinesLine() +
       'A native API, CLI or direct file edit that does the same job is cheaper: use it when it exists, and never decline a task ' +
       'because none does. Full usage guide: the `clawdcursor` skill registered in your agent, or ' +
       'https://clawdcursor.com/llms.txt.';

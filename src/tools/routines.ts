@@ -31,8 +31,8 @@ export function routinesDir(): string { return testDir ?? process.env.CLAWDCURSO
 export const NAME_RULE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,59}$/;
 const MAX_STEPS = 50;
 /** Most routines the server instructions list, and the most of a description they show. */
-export const LISTED_MAX = 20;
-const DESCRIPTION_SHOWN = 120;
+export const LISTED_MAX = 10;
+const DESCRIPTION_SHOWN = 80;
 
 const fileOf = (name: string) => path.join(routinesDir(), `${name.toLowerCase()}.json`);
 
