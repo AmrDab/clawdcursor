@@ -1,7 +1,7 @@
 /**
  * Routines: a sequence of tool calls that worked once, saved under a name and replayed later in one `batch` call.
  *
- * - Saved by `batch {save_as}`: with `steps`, once they all ran; without, the calls that changed something in this MCP
+ * - Saved by `batch {save_as}`: with `steps`, those steps as given (not run); without, the calls that changed something in this MCP
  *   session since its last save (recorded here, per session).
  * - Stored as JSON in ~/.clawdcursor/routines/<name>.json, on this computer only. They hold what the agent sent (typed
  *   text included), as the session log does not.

@@ -425,7 +425,7 @@ computer({ action: "key", combo: "mod+s" })          // Cmd+S on macOS, Ctrl+S e
 window({ action: "open_app", name: "Outlook" })
 ```
 
-**Routines.** When a task worked and may be asked again, your AI saves it with `batch {save_as, description}`: the calls of that session that changed something, or the steps it passes. The next session's instructions list the saved routines, and `batch {replay, vars}` runs one in a single call, `{{name}}` placeholders filled from `vars`. A step whose element is not there yet is tried again; the replay halts at the first failure, and your AI carries on by hand from there. Routines are JSON files in `~/.clawdcursor/routines/`, on your computer only, and hold what was typed.
+**Routines.** When a task worked and may be asked again, your AI saves it with `batch {save_as, description}`: the calls of that session that changed something, or the steps it passes (saved, not run again). The next session's instructions list the saved routines, and `batch {replay, vars}` runs one in a single call, `{{name}}` placeholders filled from `vars`. A step whose element is not there yet is tried again; the replay halts at the first failure, and your AI carries on by hand from there. Routines are JSON files in `~/.clawdcursor/routines/`, on your computer only, and hold what was typed.
 
 The full guide for agents is [SKILL.md](SKILL.md); it ships in the npm package and the Claude Code plugin. [clawdcursor.com/llms.txt](https://clawdcursor.com/llms.txt) is a shorter summary of it: install, the tool surface and the safety rules. Every parameter is in [schema.snapshot.json](schema.snapshot.json).
 

@@ -154,15 +154,14 @@ describe('batch save_as', () => {
     expect(listRoutines()).toEqual([]);
   });
 
-  it('with steps: runs them and saves only when every step ran', async () => {
+  it('with steps: saves them as given and runs nothing (they already ran: running them again would act twice)', async () => {
     tools.accessibility = okTool('accessibility');
     const ok = await batch.handler({ save_as: 'two', steps: [{ name: 'accessibility', arguments: { action: 'invoke', name: 'A' } },
       { name: 'accessibility', arguments: { action: 'invoke', name: 'B' } }] }, {} as any);
-    expect(ok.text).toMatch(/Saved routine "two" \(2 steps\)/);
-    tools.accessibility.handler.mockResolvedValueOnce({ text: 'boom', isError: true });
-    const bad = await batch.handler({ save_as: 'broken', steps: [{ name: 'accessibility', arguments: { action: 'invoke', name: 'A' } }] }, {} as any);
-    expect(bad.text).toMatch(/Not saved as "broken": not every step ran/);
-    expect(loadRoutine('broken')).toBeNull();
+    expect(ok.text).toMatch(/^Saved routine "two" \(2 steps\)/);
+    expect(ok.steps).toEqual([]);
+    expect(tools.accessibility.handler).not.toHaveBeenCalled();
+    expect(loadRoutine('two')?.steps).toHaveLength(2);
   });
 
   it('refuses a name that is not a routine name, and save_as with replay', async () => {

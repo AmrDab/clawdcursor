@@ -896,7 +896,7 @@
               },
               "save_as": {
                 "type": "string",
-                "description": "Save a routine under this name (letters, digits, - and _), so the next time is one call. Without steps: the calls of this session that changed something since the last save. With steps: runs them, and saves them once all ran. Put {{name}} in an argument for a value that changes between runs. The same name replaces the old one."
+                "description": "Save a routine under this name (letters, digits, - and _), so the next time is one call. Without steps: the calls of this session that changed something since the last save. With steps: saves those steps as they are and runs nothing. Put {{name}} in an argument for a value that changes between runs. The same name replaces the old one."
               },
               "description": {
                 "type": "string",

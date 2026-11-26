@@ -337,7 +337,7 @@ A task the user may ask again (a weekly export, the same form, a report in the s
 batch({"save_as":"export-pdf","description":"Export the open sheet as PDF in Excel"})
 ```
 
-With no `steps`, `save_as` saves the calls of this session that changed something since the last save (reads and screenshots are left out) and lists them: if one does not belong, save again with `steps`. With `steps`, it runs them and saves them once every step ran. Put `{{name}}` in an argument for a value that changes between runs (`"value":"{{to}}"`).
+With no `steps`, `save_as` saves the calls of this session that changed something since the last save (reads and screenshots are left out) and lists them: if one does not belong, save again with `steps`. With `steps`, it saves those steps as given and runs nothing: pass the calls that worked. Put `{{name}}` in an argument for a value that changes between runs (`"value":"{{to}}"`).
 
 The next session's server instructions name every saved routine. When one fits the task, replay it first:
 

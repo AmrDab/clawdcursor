@@ -276,7 +276,7 @@ export function getBatchTools(): ToolDefinition[] {
           },
         },
         maxSteps: { type: 'number', description: `Most steps one batch may hold; a longer one is refused before step 1 (default ${DEFAULT_MAX_STEPS}).`, required: false },
-        save_as: { type: 'string', description: 'Save a routine under this name (letters, digits, - and _), so the next time is one call. Without steps: the calls of this session that changed something since the last save. With steps: runs them, and saves them once all ran. Put {{name}} in an argument for a value that changes between runs. The same name replaces the old one.', required: false },
+        save_as: { type: 'string', description: 'Save a routine under this name (letters, digits, - and _), so the next time is one call. Without steps: the calls of this session that changed something since the last save. With steps: saves those steps as they are and runs nothing. Put {{name}} in an argument for a value that changes between runs. The same name replaces the old one.', required: false },
         description: { type: 'string', description: 'With save_as: what the routine does and in which app, e.g. "Export the open sheet as PDF in Excel".', required: false },
         replay: { type: 'string', description: 'Run the saved routine of this name. A step whose element is not there yet is tried again; it halts at the first failure: carry on by hand from there.', required: false },
         vars: { type: 'object', description: 'With replay: a value for each {{name}} in the routine, e.g. {"to":"a@b.com"}.', required: false },
@@ -326,17 +326,17 @@ export function getBatchTools(): ToolDefinition[] {
         if (steps.length > cap) {
           return { text: `batch: ${steps.length} steps is over the cap of ${cap} steps per batch, so none ran. Split it into batches of at most ${cap} steps.`, isError: true };
         }
+        // save_as with steps saves them and runs nothing: they are the steps that already worked (bench 2026-11-26: run
+        // again on saving, a click or a typed text happened twice and 3 tasks of 15 failed).
+        if (saveAs !== undefined) {
+          const text = await saveSteps(saveAs, typeof params.description === 'string' ? params.description : '', steps.map(s => ({ name: bareStepName(s.name), arguments: stepArgs(s) })), ctx);
+          return { text, isError: text.startsWith('Not saved'), steps: [] };
+        }
         const w0 = await window();
         const result = await executeBatch(steps, ctx);
         const effect = effectLine(w0, await window());
-        let saved = '';
-        if (saveAs !== undefined) {
-          saved = result.allDone
-            ? `\n${await saveSteps(saveAs, typeof params.description === 'string' ? params.description : '', steps.map(s => ({ name: bareStepName(s.name), arguments: stepArgs(s) })), ctx)}`
-            : `\nNot saved as "${saveAs}": not every step ran.`;
-        }
         return {
-          text: renderResult(result) + (effect ? `\n${effect.replace(/^effect:/, 'effect (whole batch):')}` : '') + saved,
+          text: renderResult(result) + (effect ? `\n${effect.replace(/^effect:/, 'effect (whole batch):')}` : ''),
           isError: !result.allDone,
           ...(result.image ? { image: result.image } : {}),
           steps: result.steps.map(s => {
