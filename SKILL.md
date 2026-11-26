@@ -64,6 +64,8 @@ metadata:
 
 ## Start here - compact mode and the compound tools
 
+> **From 3.0: the six compound tools are the only surface.** `clawdcursor mcp` and `clawdcursor agent` always serve them; `--compact` and `CLAWD_MCP_COMPACT` are still accepted and do nothing. The granular tool names in this file are the internal handlers behind each action: you call the compound tool and its action.
+
 > **If you are an LLM reading this: YOU SHOULD BE USING COMPACT MODE.**
 >
 > - MCP stdio (editor host): add `"args": ["mcp", "--compact"]` to your config.
@@ -326,6 +328,25 @@ On any guard miss, refusal, or step error, `batch` halts and returns a per-step 
 
 **When to use `batch`:** deterministic form fills, multi-field sequences, known keystroke chains.
 **When NOT to use `batch`:** when you need to inspect state between steps to decide what to do next — that's a normal tool loop.
+
+### Routines: save what worked, replay it next time
+
+A task the user may ask again (a weekly export, the same form, a report in the same app) costs the full exploration only once. When it worked, save it:
+
+```json
+batch({"save_as":"export-pdf","description":"Export the open sheet as PDF in Excel"})
+```
+
+With no `steps`, `save_as` saves the calls of this session that changed something since the last save (reads and screenshots are left out) and lists them: if one does not belong, save again with `steps`. With `steps`, it runs them and saves them once every step ran. Put `{{name}}` in an argument for a value that changes between runs (`"value":"{{to}}"`).
+
+The next session's server instructions name every saved routine. When one fits the task, replay it first:
+
+```json
+batch({"replay":"export-pdf"})
+batch({"replay":"send-update","vars":{"to":"amy@x.com"}})
+```
+
+A step whose element is not there yet is tried again (after 1 s, then 2 s). The replay halts at the first step that fails and says which: carry on by hand from there, then save the routine again if the app changed. Routines are JSON files in `~/.clawdcursor/routines/` on this computer only; they hold what was typed, so never save a step that typed a secret. Steps act by name and label, so a routine works on any OS the app looks the same on; a step at x,y replays right only while the window is where it was.
 
 ---
 
