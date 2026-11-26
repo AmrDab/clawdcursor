@@ -43,8 +43,10 @@ async function captureOnce(os: Os): Promise<Record<string, unknown>> {
 
   const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
   const sessionLogEnv = process.env.CLAWDCURSOR_SESSION_LOG;
+  const routinesEnv = process.env.CLAWDCURSOR_ROUTINES_DIR;
   Object.defineProperty(process, 'platform', { ...platform, value: os });
   process.env.CLAWDCURSOR_SESSION_LOG = '0';  // no session file for a server nobody calls
+  process.env.CLAWDCURSOR_ROUTINES_DIR = path.join(__dirname, 'no-routines');  // this computer's saved routines are not part of the surface
   try {
     resetToolCaches();   // the tool lists are built on this OS, not reused from the OS captured before it
     const { server } = await createMcpServer({ ctx: stubContext() });
@@ -75,6 +77,8 @@ async function captureOnce(os: Os): Promise<Record<string, unknown>> {
     Object.defineProperty(process, 'platform', platform);
     if (sessionLogEnv === undefined) delete process.env.CLAWDCURSOR_SESSION_LOG;
     else process.env.CLAWDCURSOR_SESSION_LOG = sessionLogEnv;
+    if (routinesEnv === undefined) delete process.env.CLAWDCURSOR_ROUTINES_DIR;
+    else process.env.CLAWDCURSOR_ROUTINES_DIR = routinesEnv;
   }
 }
 

@@ -36,6 +36,7 @@ import { classifyResult, renderResultLine, isJsonText, isActingAction, isUnverif
 import { quoteScreenText } from '../core/untrusted-screen-content';
 import { refusalBefore, afterCall, forgetScreenIfActed, guardedCall } from '../tools/call-guards';
 import { bareStepName } from '../tools/batch';
+import { noteCall, forgetSession, routinesLine, inRoutineSession } from '../tools/routines';
 
 // ── Typed SDK boundary (#115) ────────────────────────────────────────────────
 //
@@ -188,6 +189,10 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'reports a DEVIATION instead of a hollow success. Each action result and error ends with one line: ' +
       '[confirmed | unverified | refused · CODE · hint · next | failed · CODE · hint · next] — follow its next call instead of guessing. ' +
       'PAUSED (the user paused clawdcursor) means nothing was sent: call the same step again until it runs, and do not give up or act another way meanwhile. USER_ACTIVE (the user is using the computer, which they may while you work in the background) means nothing was sent: keep working by name meanwhile, and call that step again in a few seconds. A STOPPED reply is different: do not retry it. ' +
+      // Routines (tools/routines.ts): the second time a task is asked, one call instead of the whole exploration.
+      'Repeat work: when a multi-step task worked and may be asked again, save it with batch save_as and a description. When a saved ' +
+      'routine fits the task, run it first with batch replay (vars for its {{names}}), and do the steps by hand only from where it halts. ' +
+      routinesLine() +
       'A native API, CLI or direct file edit that does the same job is cheaper: use it when it exists, and never decline a task ' +
       'because none does. Full usage guide: the `clawdcursor` skill registered in your agent, or ' +
       'https://clawdcursor.com/llms.txt.';
@@ -269,7 +274,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
   const lowClose = server as unknown as { server?: { onclose?: () => void } };
   if (lowClose.server) {
     const prior = lowClose.server.onclose;
-    lowClose.server.onclose = () => { prior?.(); pauseGate.withdrawFor(sessionId); };
+    lowClose.server.onclose = () => { prior?.(); pauseGate.withdrawFor(sessionId); forgetSession(sessionId); };
   }
 
   for (const tool of tools) {
@@ -346,7 +351,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // double-clicked (#294).
         const refused = await refusalBefore(call, ctx, () => {
           if ((tool.safetyTier ?? 0) >= 1 && !COMPOUND_TOOLS.has(tool.name)) controlBanner.touch();
-          if (tool.name === 'batch' && batchActs(params?.steps)) controlBanner.touch();
+          if (tool.name === 'batch' && (batchActs(params?.steps) || typeof params?.replay === 'string')) controlBanner.touch();
         });
         if (refused) return refuse(refused.guard, refused.why);
         const started = Date.now();
@@ -356,7 +361,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         const releasePill = controlBanner.hold();  // the call has control until it returns, waits included
         sessionLog.running(tool.name, action, clientInfo());
         // withTurnBudget: the call's waits for the user (control.ts) end before a host's 60 s call limit.
-        const run = await withSteps(tool.name, action, () => inMcpSession(sessionStartedAt ?? started, () => withTurnBudget(() => asPauseOwner(sessionId, () => tool.handler(params, ctx)))));  // where the call's time went
+        const run = await withSteps(tool.name, action, () => inMcpSession(sessionStartedAt ?? started, () => withTurnBudget(() => asPauseOwner(sessionId, () => inRoutineSession(sessionId, () => tool.handler(params, ctx))))));  // where the call's time went
         releasePill();
         if (!run.ok) {
           // A handler throw (e.g. core tools' toolContextToAgent when the
@@ -385,6 +390,8 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         const batchRefused = result.isError && steps?.[steps.length - 1]?.outcome === 'refused';
         const outcome = batchRefused ? 'refused' : outcomeOf(!!result.isError, result.text ?? '');
         const blindBefore = sessionLog.summary.blind;
+        // What a routine saved later would replay: calls that changed something, and a batch's steps that ran.
+        if (!result.isError || tool.name === 'batch') noteCall(sessionId, tool.name, params ?? {}, result.steps?.map(s => s.status));
         const cls = sessionLog.record(tool.name, action, !result.isError, Date.now() - started,
           result.isError ? result.text : undefined, clientInfo(),
           { outcome, space: typeof params?.space === 'string' ? params.space : undefined,

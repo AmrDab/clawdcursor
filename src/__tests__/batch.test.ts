@@ -257,7 +257,7 @@ describe('a batch is not a way around the Stop or the hard key list (GHSA-3v3f-5
   }
 
   it('the tool no longer takes allowConfirm or dryRun', () => {
-    expect(Object.keys(batchTool().parameters).sort()).toEqual(['maxSteps', 'steps']);
+    expect(Object.keys(batchTool().parameters).sort()).toEqual(['description', 'maxSteps', 'replay', 'save_as', 'steps', 'vars']);
     expect(batchTool().description).not.toMatch(/allowConfirm|dryRun|confirm-tier|CLAWD_BATCH_ALLOW_CONFIRM/);
   });
 
