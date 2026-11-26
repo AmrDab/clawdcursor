@@ -205,7 +205,7 @@ An app guide lists one app's keyboard shortcuts for your OS, a few workflows and
 2.0.0 sent nothing. **From 2.1**, Clawd Cursor sends anonymous error reports by default, so bugs get found and fixed. Every value is a number or comes from a fixed list, and tool and action names are Clawd Cursor's own.
 
 - **With every report:** a random install id made on your computer (not derived from your hardware or accounts), the Clawd Cursor version and your OS family.
-- **`start`, when the server starts:** OS major version, CPU architecture, Node.js major version, which AI app started it (from a fixed list: Claude Code, Claude Desktop, Cursor, Codex and others; anything else is "other").
+- **`start`, when the server starts:** OS major version, CPU architecture, Node.js major version, which AI app started it (from a fixed list: Claude Code, Claude Desktop, Cursor, Codex and others; anything else is "other"), and compact or granular tools (always compact from 3.0).
 - **`call_failed`, when a call fails, times out or reads nothing:** the tool and action name, the result code (`NOT_FOUND`, `TIMEOUT`, ...), the outcome, how long it took, and whether the app was a browser, an Electron app or a native app.
 - **`slow_call`, when a call takes over 10 seconds:** the tool and action name, how long it took, and its slow internal steps (Clawd Cursor's own helper programs, by name, with their time).
 - **`exit`, when the server exits during a call, or was killed or crashed:** the exit reason (from a fixed list: `sigterm`, `host_gone`, ...), and the tool and action that were cut off and how long they had run.
