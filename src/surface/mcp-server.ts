@@ -190,7 +190,8 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       '[confirmed | unverified | refused · CODE · hint · next | failed · CODE · hint · next] — follow its next call instead of guessing. ' +
       'PAUSED (the user paused clawdcursor) means nothing was sent: call the same step again until it runs, and do not give up or act another way meanwhile. USER_ACTIVE (the user is using the computer, which they may while you work in the background) means nothing was sent: keep working by name meanwhile, and call that step again in a few seconds. A STOPPED reply is different: do not retry it. ' +
       // Routines (tools/routines.ts): the second time a task is asked, one call instead of the whole exploration.
-      'Repeat work: when a multi-step task worked and may be asked again, save it with batch save_as and a description. When a saved ' +
+      'Repeat work: when a task is done and it took 3 or more calls that changed something, save it before you report back: batch with ' +
+      'save_as (a short name) and description (what it does, in which app); it costs one call and makes the next run one call. When a saved ' +
       'routine fits the task, run it first with batch replay (vars for its {{names}}), and do the steps by hand only from where it halts. ' +
       routinesLine() +
       'A native API, CLI or direct file edit that does the same job is cheaper: use it when it exists, and never decline a task ' +

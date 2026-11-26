@@ -67,7 +67,7 @@ async function session() {
 describe('routines over MCP', () => {
   it('records, saves, lists in the next session, and replays', async () => {
     const first = await session();
-    expect(first.instructions).toMatch(/save it with batch save_as/);
+    expect(first.instructions).toMatch(/save it before you report back: batch with save_as/);
     expect(first.instructions).not.toMatch(/Saved routines on this computer/);
     await first.client.callTool({ name: 'window', arguments: { action: 'focus', processId: 4242 } });
     await first.client.callTool({ name: 'system', arguments: { action: 'system_time' } });   // a read: not recorded
