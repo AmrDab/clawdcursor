@@ -188,6 +188,9 @@ export function noteCall(session: string, tool: string, params: Record<string, u
   recordings.set(session, rec);
 }
 
+/** How many calls this session has recorded since its last save. */
+export function recordedCount(session: string): number { return recordings.get(session)?.length ?? 0; }
+
 /** This session's recorded calls since its last save, handed over and forgotten. */
 export function takeRecording(session: string): RoutineStep[] {
   const rec = recordings.get(session) ?? [];

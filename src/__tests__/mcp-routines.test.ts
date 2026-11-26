@@ -84,4 +84,12 @@ describe('routines over MCP', () => {
     expect(platform.focusWindow).toHaveBeenCalledWith(expect.objectContaining({ processName: 'notepad' }));
     await second.client.close();
   });
+
+  it('says once, at the 3rd recorded change, to save the task when it is done', async () => {
+    const s = await session();
+    const focus = async () => s.text(await s.client.callTool({ name: 'window', arguments: { action: 'focus', processName: 'notepad' } }));
+    const seen = [await focus(), await focus(), await focus(), await focus()].map(t => /save it before you report back/.test(t));
+    expect(seen).toEqual([false, false, true, false]);
+    await s.client.close();
+  });
 });

@@ -36,7 +36,7 @@ import { classifyResult, renderResultLine, isJsonText, isActingAction, isUnverif
 import { quoteScreenText } from '../core/untrusted-screen-content';
 import { refusalBefore, afterCall, forgetScreenIfActed, guardedCall } from '../tools/call-guards';
 import { bareStepName } from '../tools/batch';
-import { noteCall, forgetSession, routinesLine, inRoutineSession } from '../tools/routines';
+import { noteCall, forgetSession, routinesLine, inRoutineSession, recordedCount } from '../tools/routines';
 
 // ── Typed SDK boundary (#115) ────────────────────────────────────────────────
 //
@@ -216,6 +216,11 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
     '[clawdcursor] 3 clicks by coordinates and none by name. A button, tab, menu or field with a visible label: smart_click {"target":"<label>"} presses it with no screenshot; keep x,y for points with no label, like inside a canvas.';
   let coordClicks = 0;
   let coordNudged = false;
+  // Bench 2026-11-26: with the advice in the instructions only, no agent saved a routine in 45 tasks. Said once, in the
+  // result of the call that makes the recording worth saving, it is read when it matters.
+  const SAVE_HINT_AT = 3;
+  let saveHinted = false;
+  const SAVE_HINT = '[clawdcursor] This session has changed something 3 times. When the task is done, save it before you report back: the batch tool with save_as (a short name) and description. The next time, the batch tool with replay runs it in one call.';
   let blindFoundNothing = false;
   let nudgedThisStreak = false;
   const clientInfo = () => (server as unknown as { server?: { getClientVersion?: () => { name?: string; version?: string } | undefined } })
@@ -394,6 +399,12 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         const blindBefore = sessionLog.summary.blind;
         // What a routine saved later would replay: calls that changed something, and a batch's steps that ran.
         if (!result.isError || tool.name === 'batch') noteCall(sessionId, tool.name, params ?? {}, result.steps?.map(s => s.status));
+        if (!saveHinted && !params?.replay && recordedCount(sessionId) >= SAVE_HINT_AT) {
+          saveHinted = true;
+          result = { ...result, text: `${result.text}
+
+${SAVE_HINT}` };
+        }
         const cls = sessionLog.record(tool.name, action, !result.isError, Date.now() - started,
           result.isError ? result.text : undefined, clientInfo(),
           { outcome, space: typeof params?.space === 'string' ? params.space : undefined,
