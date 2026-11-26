@@ -10,7 +10,10 @@ export const PRIVACY_RULES = [
   'If the task cannot be done inside these rules, stop and say so.',
 ];
 
-export function buildPrompt(task: TaskSpec, window: string): string {
+/** --save-routines: the line that asks the agent to use routines (measures replay, not whether an agent saves unasked). */
+export const ROUTINES_LINE = 'This task may be asked again. If a saved routine fits it, replay it first (the batch tool, replay). When the task is done, save it (the batch tool, save_as and description) before you end.';
+
+export function buildPrompt(task: TaskSpec, window: string, routines = false): string {
   return [
     'You are driving a desktop through the clawdcursor tools. This is an automated benchmark on a person\'s own computer.',
     '',
@@ -21,6 +24,7 @@ export function buildPrompt(task: TaskSpec, window: string): string {
     '',
     `Task: ${task.prompt}`,
     '',
+    ...(routines ? [ROUTINES_LINE, ''] : []),
     `When you have finished, end your reply with exactly one line: "${DONE_MARK}" if the task is done, or "${FAILED_MARK}" if it is not.`,
   ].join('\n');
 }

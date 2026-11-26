@@ -30,6 +30,8 @@ export interface Options {
   build?: string; models?: string; tasks?: string[]; out?: string; baseline?: string; claudeBin?: string; codexBin?: string;
   /** Keep the routines each task saves here (one folder per model and task), across runs: a second run replays them. */
   routinesDir?: string;
+  /** Ask the agent in the prompt to replay a fitting routine and to save the task when done. */
+  saveRoutines?: boolean;
 }
 
 export function parseArgs(argv: string[]): Options {
@@ -51,6 +53,7 @@ export function parseArgs(argv: string[]): Options {
     else if (a === '--claude-bin') o.claudeBin = value();
     else if (a === '--codex-bin') o.codexBin = value();
     else if (a === '--routines-dir') o.routinesDir = path.resolve(value());
+    else if (a === '--save-routines') o.saveRoutines = true;
     else if (a === '--repeats') {
       o.repeats = Number(value());
       if (!Number.isInteger(o.repeats) || o.repeats < 1 || o.repeats > 9) throw new Error('--repeats needs a number from 1 to 9');
@@ -159,7 +162,7 @@ export function agentRoot(platform: string = process.platform, env: NodeJS.Proce
 }
 
 interface Env {
-  cli: string; server: FixtureServer; native: NativeBuild | { missing: string }; outDir: string; tempRoot: string; agentRoot: string; routinesDir?: string;
+  cli: string; server: FixtureServer; native: NativeBuild | { missing: string }; outDir: string; tempRoot: string; agentRoot: string; routinesDir?: string; saveRoutines?: boolean;
   cleanup: Cleanup;
 }
 
@@ -218,7 +221,7 @@ async function runOne(task: TaskSpec, m: ModelRun, env: Env, n: number, repeat: 
     const unreachable = await probeMcp(daemon.mcpUrl, daemon.token);
     try {
       if (unreachable) result = { finalText: '', exitCode: null, serverUnreachable: unreachable };
-      else result = await m.adapter.run({ prompt: buildPrompt(task, fixture.window), model: m.model, mcpUrl: daemon.mcpUrl, token: daemon.token,
+      else result = await m.adapter.run({ prompt: buildPrompt(task, fixture.window, env.saveRoutines), model: m.model, mcpUrl: daemon.mcpUrl, token: daemon.token,
         workDir: agentDir, logFile: path.join(workDir, 'agent.log'), signal: abort.signal, onSig: s => { sigs.push(s); stop(dog.onSig(s)); } });
     } catch (e) {
       result.finalText = `adapter error: ${(e as Error).message}`;
@@ -314,7 +317,7 @@ async function live(o: Options): Promise<void> {
   const scores: Score[] = [];
   try {
     const native = run.some(t => t.fixture.kind === 'native') ? await buildNative(path.join(tempRoot, 'native')) : { missing: 'not needed' };
-    const env: Env = { cli, server, native, outDir, tempRoot, agentRoot: agents, cleanup, routinesDir: o.routinesDir };
+    const env: Env = { cli, server, native, outDir, tempRoot, agentRoot: agents, cleanup, routinesDir: o.routinesDir, saveRoutines: o.saveRoutines };
     let n = 0;
     for (const m of models) {
       for (const task of run) {
