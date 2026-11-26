@@ -30,8 +30,9 @@ export function routinesDir(): string { return testDir ?? process.env.CLAWDCURSO
 /** A routine name: letters, digits, `-` and `_`, 1 to 60 characters. Kept as given, matched without case. */
 export const NAME_RULE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,59}$/;
 const MAX_STEPS = 50;
-/** Most routines the server instructions list. */
+/** Most routines the server instructions list, and the most of a description they show. */
 export const LISTED_MAX = 20;
+const DESCRIPTION_SHOWN = 120;
 
 const fileOf = (name: string) => path.join(routinesDir(), `${name.toLowerCase()}.json`);
 
@@ -47,7 +48,10 @@ export function loadRoutine(name: string): Routine | null {
   if (!NAME_RULE.test(name)) return null;
   try {
     const r = JSON.parse(fs.readFileSync(fileOf(name), 'utf8')) as Routine;
-    return Array.isArray(r.steps) ? r : null;
+    if (!Array.isArray(r.steps)) return null;
+    // The name shown is the file's own: a name inside the file that is not that one is not trusted.
+    const shown = typeof r.name === 'string' && r.name.toLowerCase() === name.toLowerCase() ? r.name : name.toLowerCase();
+    return { ...r, name: shown, description: typeof r.description === 'string' ? r.description : '' };
   } catch { return null; }
 }
 
@@ -63,7 +67,9 @@ export function listRoutines(): Routine[] {
 export function routinesLine(): string {
   const all = listRoutines();
   if (!all.length) return '';
-  const shown = all.slice(0, LISTED_MAX).map(r => `${r.name} (${r.steps.length} steps${varsOf(r.steps).length ? `, vars ${varsOf(r.steps).join(', ')}` : ''}): ${r.description || 'no description'}`);
+  // A description is text from a file: one line, cut short, so it cannot pose as more of these instructions.
+  const line = (d: string) => { const t = d.replace(/\s+/g, ' ').trim(); return t.length > DESCRIPTION_SHOWN ? `${t.slice(0, DESCRIPTION_SHOWN - 1)}…` : t; };
+  const shown = all.slice(0, LISTED_MAX).map(r => `${r.name} (${r.steps.length} steps${varsOf(r.steps).length ? `, vars ${varsOf(r.steps).join(', ')}` : ''}): ${line(r.description) || 'no description'}`);
   return `Saved routines on this computer: ${shown.join('; ')}${all.length > LISTED_MAX ? `; and ${all.length - LISTED_MAX} more` : ''}. `;
 }
 
