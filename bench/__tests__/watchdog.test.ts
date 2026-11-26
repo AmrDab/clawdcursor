@@ -144,6 +144,11 @@ describe('the watchdog rules', () => {
         ({ tool, action, cls, ok: true, outcome: 'ok', ...(app ? { app } : {}), ...(appPid ? { appPid, appHandle: 18814450 } : {}) });
       const batch = (steps: ReturnType<typeof s>[], line: Partial<LogCall> = {}) => call('batch', '', 'act-other', { steps, ...line });
 
+      it('a batch that lists no step ran nothing (a replay of no saved routine): passes; one with no step list stops', async () => {
+        expect(await calcDog(false).judge(call('batch', '', 'act-other', { steps: [], outcome: 'error' }))).toBeNull();
+        expect(await calcDog(false).judge(call('batch', '', 'act-other', { outcome: 'error' }))).toMatchObject({ rule: 'privacy' });
+      });
+
       it('every step in the Calculator the benchmark started: passes', async () => {
         const steps = [s('accessibility', 'invoke', 'act-name', 'Calculator', CALC), s('computer', 'type', 'act-other', 'Application Frame Host', CALC), s('computer', 'wait', 'act-other')];
         expect(await calcDog(false).judge(batch(steps, { app: 'Calculator', appPid: CALC }))).toBeNull();

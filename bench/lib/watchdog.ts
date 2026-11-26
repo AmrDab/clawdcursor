@@ -63,7 +63,9 @@ export class Watchdog {
     // A batch is judged step by step, each step by what IT recorded: the batch line's app and process are those of
     // its last act, and say nothing about the steps before it.
     type Unit = { tool: string; action?: string; cls: LogCall['cls']; outcome?: string; app?: string; appPid?: number; step: boolean };
-    const units: Unit[] = c.steps?.length ? c.steps.map(s => ({ ...s, step: true })) : [{ ...c, step: false }];
+    // A batch that lists its steps is judged by them, even by none (a replay of no saved routine, a save: nothing ran).
+    const units: Unit[] = c.tool === 'batch' && Array.isArray(c.steps) ? c.steps.map(s => ({ ...s, step: true }))
+      : c.steps?.length ? c.steps.map(s => ({ ...s, step: true })) : [{ ...c, step: false }];
     // One probe per log line, and only when a unit needs it.
     let focus: Promise<boolean> | undefined;
     const ownsFocus = () => focus ??= Promise.resolve(this.proof.ownsFocus()).catch(() => false);

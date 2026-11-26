@@ -286,16 +286,18 @@ export function getBatchTools(): ToolDefinition[] {
       handler: async (params, ctx: ToolContext): Promise<ToolResult> => {
         const saveAs = typeof params.save_as === 'string' ? params.save_as.trim() : undefined;
         const replay = typeof params.replay === 'string' ? params.replay.trim() : undefined;
-        if (saveAs !== undefined && replay !== undefined) return { text: 'batch: save_as and replay go in separate calls.', isError: true };
+        // `steps: []` says no step ran (a log reader judges a batch with no step list as one that could have done anything).
+        const none = (text: string): ToolResult => ({ text, isError: true, steps: [] });
+        if (saveAs !== undefined && replay !== undefined) return none('batch: save_as and replay go in separate calls.');
         if (saveAs !== undefined && !NAME_RULE.test(saveAs)) {
-          return { text: `batch: save_as ${JSON.stringify(saveAs)} is not a routine name: use 1-60 letters, digits, - or _, starting with a letter or digit.`, isError: true };
+          return none(`batch: save_as ${JSON.stringify(saveAs)} is not a routine name: use 1-60 letters, digits, - or _, starting with a letter or digit.`);
         }
         if (replay !== undefined) {
-          if (params.steps !== undefined && params.steps !== null) return { text: 'batch: replay runs the saved steps; pass no steps with it.', isError: true };
-          return replayRoutine(replay, params.vars, params.maxSteps, ctx);
+          if (params.steps !== undefined && params.steps !== null) return none('batch: replay runs the saved steps; pass no steps with it.');
+          return { steps: [], ...await replayRoutine(replay, params.vars, params.maxSteps, ctx) };
         }
         if (saveAs !== undefined && (params.steps === undefined || params.steps === null)) {
-          return saveRecording(saveAs, typeof params.description === 'string' ? params.description : '', ctx);
+          return { steps: [], ...await saveRecording(saveAs, typeof params.description === 'string' ? params.description : '', ctx) };
         }
         // `steps` arrives as a JSON string (constrained schema) or, from clients
         // that pass rich JSON, a real array. Accept both.
