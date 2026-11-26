@@ -131,7 +131,7 @@ export interface UiElement {
    */
   description?: string;
   /** What the app shows on hover, when the platform exposes it: UIA HelpText, AXHelp, the AT-SPI description. Set only when
-   *  it differs from `name`; screen text, so quoted wherever it is shown (blind-hints.ts shownHelp). */
+   *  it differs from `name`; screen text, so quoted wherever it is shown (hints.ts shownHelp). */
   help?: string;
   /** Checkbox / toggle state when the element supports toggling (UIA TogglePattern). */
   checked?: boolean | 'mixed';

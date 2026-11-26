@@ -3,7 +3,7 @@
  * host's tools carry a server prefix, and an agent that copied the bare name got "No such tool".
  */
 import { describe, it, expect } from 'vitest';
-import { callsAsProse, resultCallsAsProse } from '../tools/call-prose';
+import { callsAsProse, resultCallsAsProse } from '../tools/hints';
 import { classifyResult, renderResultLine } from '../core/result-codes';
 
 /** Any `name {"key": …` or `name({…` call shape left in a text. */

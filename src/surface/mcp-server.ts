@@ -22,7 +22,7 @@ import { actedIn, actRecord, withTurnBudget } from '../core/control';
 import { asPauseOwner, pauseGate } from '../core/pause-gate';
 import { logger } from '../core/observability/logger';
 import { COMPOUND_ROUTE_INDEX, compactCall } from '../tools/compact-routes';
-import { resultCallsAsProse } from '../tools/call-prose';
+import { resultCallsAsProse, OPAQUE_MARK } from '../tools/hints';
 
 const COMPOUND_TOOLS = new Set(Object.keys(COMPOUND_ROUTE_INDEX));
 /** A compound call's arguments that its schema does not list (keepUndeclaredArgs), for the call being run. */
@@ -35,7 +35,6 @@ import { allowNames, setHost } from '../core/observability/telemetry';
 import { classifyResult, renderResultLine, isJsonText, isActingAction, isUnverifiableAction } from '../core/result-codes';
 import { quoteScreenText } from '../core/untrusted-screen-content';
 import { refusalBefore, afterCall, forgetScreenIfActed, guardedCall } from '../tools/call-guards';
-import { OPAQUE_MARK } from '../tools/blind-hints';
 import { bareStepName } from '../tools/batch';
 
 // ── Typed SDK boundary (#115) ────────────────────────────────────────────────
@@ -301,7 +300,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // (its report has a status per step).
         const callAction = typeof params?.action === 'string' ? params.action : undefined;
         // Every call a hint names goes out as prose ("the browser tool, action page_context"), never as a
-        // call-shaped text the host has no tool of that name for (call-prose.ts).
+        // call-shaped text the host has no tool of that name for (hints.ts).
         const withOutcome = (text: string, isError: boolean): string => {
           if (tool.name === 'batch' || isJsonText(text)) return resultCallsAsProse(text);
           const c = classifyResult(text, isError, isActingCall(tool.name, callAction, isUnverifiableAction), 'mcp', isActingCall(tool.name, callAction));

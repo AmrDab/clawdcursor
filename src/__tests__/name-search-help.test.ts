@@ -20,7 +20,7 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
 }));
 vi.mock('sharp', () => ({ default: vi.fn() }));
 
-import { wakeForNameSearch, onTopOfLine, resetNameSearchState } from '../tools/name-search-help';
+import { wakeForNameSearch, onTopOfLine, resetNameSearchState } from '../tools/hints';
 import { getA11yTools } from '../tools/a11y';
 import { buildCoreTools } from '../tools/core-tools';
 import { classifyResult } from '../core/result-codes';

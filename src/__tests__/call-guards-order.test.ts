@@ -34,8 +34,7 @@ vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => ({
 import { createMcpServer } from '../surface/mcp-server';
 import { executeBatch } from '../tools/batch';
 import { __resetShotsForTests } from '../core/screen-binding';
-import { noteScreenshot } from '../tools/screen-guard';
-import { afterCall, guardedCall } from '../tools/call-guards';
+import { noteScreenshot, afterCall, guardedCall } from '../tools/call-guards';
 import { ocrEngine } from '../platform/ocr-engine';
 import { getTool } from '../tools/registry';
 import { isActingAction } from '../core/result-codes';

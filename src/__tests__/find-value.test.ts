@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 import { getCompactTools } from '../tools/compact';
 import type { ToolContext } from '../tools/types';
 import type { UiElement } from '../platform/types';
-import { shownValue } from '../tools/blind-hints';
+import { shownValue } from '../tools/hints';
 
 const accessibility = () => getCompactTools().find(t => t.name === 'accessibility')!;
 

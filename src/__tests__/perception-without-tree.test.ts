@@ -6,7 +6,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { imageCost, imageScale } from '../platform/coord-scale';
-import { drawnControlsLine, opaqueArea, opaqueAreaLine, shownHelp, SPARSE_NEXT_STEP } from '../tools/blind-hints';
+import { drawnControlsLine, opaqueArea, opaqueAreaLine, shownHelp, SPARSE_NEXT_STEP } from '../tools/hints';
 import { toCompactNames } from '../tools/compact';
 import { buildCoreTools } from '../tools/core-tools';
 import { stopControl, __setControlDirForTests } from '../core/control';

@@ -31,7 +31,7 @@
 import { getTool } from './registry';
 import { controlBanner } from '../core/banner';
 import { getBatchTools } from './batch';
-import { rewriteOutsideData } from './hint-rewrite';
+import { rewriteOutsideData } from './hints';
 import type { ToolDefinition, ToolContext, ToolResult } from './types';
 import { expectRefusal, checkExpect } from '../core/sense/reactive-check';
 import { EXPECT_SCHEMA } from '../core/verify/assertions';
@@ -292,7 +292,7 @@ async function dispatchCompound(
 
   const forwarded: Record<string, unknown> = { ...point };
   for (const [k, v] of Object.entries(args)) {
-    // `shot` is checked by the MCP wrapper / batch (screen-guard.ts), not by the granular tool.
+    // `shot` is checked by the MCP wrapper / batch (call-guards.ts), not by the granular tool.
     if (k === 'action' || k === 'shot') continue;
     if (k === 'coordinate' && 'x' in point) continue;
     const mapped = route.argRemap?.[k] ?? k;

@@ -6,8 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { getAllTools } from '../tools/registry';
 import { COMPOUND_ROUTE_INDEX } from '../tools/compact-routes';
-import { isImagePointerCall, isFullScreenshotCall } from '../tools/screen-guard';
-import { guardedCall } from '../tools/call-guards';
+import { isImagePointerCall, isFullScreenshotCall, guardedCall } from '../tools/call-guards';
 
 function facts(tool: string, action?: string): string {
   const c = guardedCall(tool, action, {});

@@ -6,7 +6,7 @@
  * and <untrusted-screen-content> blocks pass through byte-identical.
  */
 import { describe, it, expect } from 'vitest';
-import { rewriteOutsideData } from '../tools/hint-rewrite';
+import { rewriteOutsideData } from '../tools/hints';
 import { toCompactNames } from '../tools/compact';
 
 const ocrResult = JSON.stringify({

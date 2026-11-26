@@ -526,7 +526,7 @@ class ControlBanner {
   }
 
   /**
-   * Pids of the live overlay processes (pill, outline, glow) — the user's controls, never a target (own-ui-guard.ts) — and
+   * Pids of the live overlay processes (pill, outline, glow) — the user's controls, never a target (call-guards.ts) — and
    * of the host app that draws the pill, when it named itself (CLAWD_OWN_UI_PIDS).
    */
   overlayPids(): number[] {

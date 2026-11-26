@@ -27,7 +27,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createMcpServer } from '../surface/mcp-server';
 import type { ToolContext } from '../tools/registry';
 import { getCompactTools, toCompactNames, renameJsonAdvice } from '../tools/compact';
-import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, isSparseTree } from '../tools/blind-hints';
+import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, isSparseTree } from '../tools/hints';
 import { classifyResult, isUnverifiableAction } from '../core/result-codes';
 import { quoteScreenText } from '../core/untrusted-screen-content';
 import { sameApp, walkAncestors } from '../core/ai-hosts';

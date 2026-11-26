@@ -19,10 +19,8 @@ import type { InvokeAction, UiElement } from '../platform/types';
 import { ocrEngine } from '../platform/ocr-engine';
 import { selectOption, selectedResult } from '../platform/select-option';
 import { comboSequence } from '../platform/keys';
-import { ownsPoint } from './click-owner';
-import { SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, drawnControlsLine, SPARSE_NEXT_STEP, isSparseTree, CUT_VALUE_NEXT_STEP, cdpStepFor, cdpBrowserPid } from './blind-hints';
+import { ownsPoint, SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, drawnControlsLine, SPARSE_NEXT_STEP, isSparseTree, CUT_VALUE_NEXT_STEP, cdpStepFor, cdpBrowserPid, wakeForNameSearch, onTopOfLine } from './hints';
 import { getUiTreeWithWake } from '../platform/a11y-wake';
-import { wakeForNameSearch, onTopOfLine } from './name-search-help';
 import { isBrowserProcess } from '../platform/browser-config';
 import { agentBrowserConnectOptions, DEFAULT_CDP_PORT } from '../platform/browser-config';
 import { parseAssertions, checkAssertions, renderReport, EXPECT_SCHEMA } from '../core/verify/assertions';
@@ -157,7 +155,7 @@ export function buildCoreTools(): CoreTool[] {
         // app has controls of its own to list: an Electron / WebView2 app (VS Code, Slack) IS its document.
         const fold = content.length > DOC_FOLD_MIN && own.length >= DOC_FOLD_MIN && offset < own.length;
         const page = ordered.slice(offset, fold ? Math.min(offset + limit, own.length) : offset + limit);
-        // One element per line: line breaks in a value are escaped, and a cut value says so (blind-hints.ts shownValue).
+        // One element per line: line breaks in a value are escaped, and a cut value says so (hints.ts shownValue).
         let cut = false;
         const shown = (v?: string) => shownValue(v, () => { cut = true; });
         const lines = page.map(el => isOff(el)
@@ -172,7 +170,7 @@ export function buildCoreTools(): CoreTool[] {
         const opaque = partial || (activeIsBrowser && sparse) ? null : opaqueArea(tree);
         const cdpStep = sparse || browser ? await cdpStepFor(ctx.cdp, pid ?? active?.processId) : '';
         const step = sparse ? cdpStep || nextStep : cdpStep;
-        // Not on a cut walk, whose panes may only be missing their children; a sparse tree and a browser get none (blind-hints.ts).
+        // Not on a cut walk, whose panes may only be missing their children; a sparse tree and a browser get none (hints.ts).
         const drawn = partial ? null : drawnControlsLine(tree, browser);
         const hint = (opaque ? `\n${opaqueAreaLine(opaque)}` : '') + (drawn ? `\n${drawn}` : '') + (step ? `\n${step}` : '') +
           (cut ? `\n${CUT_VALUE_NEXT_STEP}` : '');

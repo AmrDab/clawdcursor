@@ -22,8 +22,7 @@ import { ensureVisible } from '../core/sense/ui-map-visible';
 import { locateFieldByLabel } from '../core/sense/ui-map-field';
 import { unguarded } from '../platform/pointer-guard';
 import { isGuardRefusal } from '../core/control';
-import { foreignWindowRefusal } from './click-owner';
-import { wakeForNameSearch } from './name-search-help';
+import { foreignWindowRefusal, wakeForNameSearch } from './hints';
 import { untrusted, missText, structuredMissFields, targetOf, targetText } from '../core/miss-text';
 
 

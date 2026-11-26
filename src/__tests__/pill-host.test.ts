@@ -14,7 +14,7 @@ const spawnMock = vi.hoisted(() => vi.fn());
 vi.mock('child_process', async () => ({ ...(await vi.importActual<typeof import('child_process')>('child_process')), spawn: spawnMock }));
 
 import { controlBanner, parsePillCmd, hostUiPids, pillArgs } from '../core/banner';
-import { ownUiRefusal } from '../core/own-ui-guard';
+import { ownUiRefusal } from '../tools/call-guards';
 import { isOwnUiPid } from '../platform/pointer-guard';
 import { logger } from '../core/observability/logger';
 

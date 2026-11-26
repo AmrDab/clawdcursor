@@ -17,7 +17,7 @@ import {
   __setControlDirForTests, __setForegroundReaderForTests, workingWindow,
 } from '../core/control';
 import { guardInputMethods, unguarded } from '../platform/pointer-guard';
-import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
+import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../tools/call-guards';
 import { pauseGate } from '../core/pause-gate';
 
 type Win = { processId: number; processName: string; title?: string };
