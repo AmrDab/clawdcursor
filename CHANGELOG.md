@@ -2,6 +2,16 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **Input works again after the app restarts.** When the app the agent worked in restarted (a reinstall or a crash) and
+  came back under a new process, every click and key was refused as "foreground changed" until the server restarted.
+  Input now goes to the same app under its new process once the old one has exited. Another app, or a second copy of the
+  app while the first still runs, is still refused.
+- **`window focus` by `processId` finds always-on-top and tool windows on Windows.** Such a window was missing from the
+  accessibility tree's window list, so focusing it by pid failed with "Window not found".
+
 ## [2.3.0] - 2026-11-20
 
 ### Security

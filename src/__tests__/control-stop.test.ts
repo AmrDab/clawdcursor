@@ -14,7 +14,7 @@ vi.mock('../core/banner', () => ({
 
 import {
   stopControl, isStopped, resumeControl, sleepUnlessStopped, STOPPED_TEXT,
-  __setControlDirForTests, __setForegroundReaderForTests, workingWindow,
+  __setControlDirForTests, __setForegroundReaderForTests, __setPidAliveForTests, workingWindow,
 } from '../core/control';
 import { guardInputMethods, unguarded } from '../platform/pointer-guard';
 import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
@@ -183,6 +183,50 @@ describe('the window in front (#294)', () => {
     const d = fakeDesktop();
     await d.keyPress('x');
     expect(d.sent).toEqual(['key x']);
+  });
+});
+
+describe('the app the agent worked in restarted (live 2026-11-19)', () => {
+  // ClippyAI was reinstalled mid-run: its window came back under a new pid, and every click and key after that was refused
+  // as "foreground changed" for good, with no way to focus out of it.
+  const OLD: Win = { processId: 500, processName: 'ClippyAI' };
+  const NEW: Win = { processId: 501, processName: 'ClippyAI' };
+  let alive: Set<number>;
+  beforeEach(() => { alive = new Set([100, 200, 300, 500, 501]); __setPidAliveForTests(pid => alive.has(pid)); });
+  afterEach(() => __setPidAliveForTests(() => true));
+
+  async function workInOldThenWait(d: ReturnType<typeof fakeDesktop>) {
+    fg = OLD;
+    await d.keyPress('a');
+    vi.advanceTimersByTime(30_000);   // the reinstall: well past the agent's own-move window
+  }
+
+  it('the old process is gone and the same app is in front under a new pid: input goes to it, and it is the working window', async () => {
+    const d = fakeDesktop();
+    await workInOldThenWait(d);
+    alive.delete(500);
+    fg = NEW;
+    await d.mouseClick(5, 5);
+    await d.keyPress('b');
+    expect(d.sent).toEqual(['key a', 'click 5,5', 'key b']);
+    expect(workingWindow()).toEqual({ processId: 501, handle: undefined });
+  });
+
+  it('a second copy of the app while the first still runs is still refused (the user may have switched to it)', async () => {
+    const d = fakeDesktop();
+    await workInOldThenWait(d);
+    fg = NEW;
+    await expect(d.keyPress('b')).rejects.toThrow(/foreground changed: you were working in "ClippyAI" \(pid 500\), but "ClippyAI" \(pid 501\)/);
+    expect(d.sent).toEqual(['key a']);
+  });
+
+  it('another app in front after the old process is gone is still refused', async () => {
+    const d = fakeDesktop();
+    await workInOldThenWait(d);
+    alive.delete(500);
+    fg = EDGE;
+    await expect(d.keyPress('b')).rejects.toThrow(/foreground changed: you were working in "ClippyAI" \(pid 500\), but "msedge" \(pid 100\)/);
+    expect(d.sent).toEqual(['key a']);
   });
 });
 
