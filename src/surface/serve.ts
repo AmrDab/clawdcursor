@@ -27,9 +27,24 @@ import { TOKEN_PATH } from '../paths';
 
 export type Transport = 'stdio' | 'http';
 
+/**
+ * Which surface a server serves. Compact (the 6 compound tools) is the default for `mcp` and `agent`; the granular surface,
+ * where every action is its own tool, is opt-in with `--granular` or CLAWD_MCP_GRANULAR=1 and is deprecated. `--compact`
+ * and CLAWD_MCP_COMPACT=1 are still accepted (they ask for the default) so existing configs keep working; `--granular` wins
+ * if both are given.
+ */
+export function pickCompact(flags: { compact?: boolean; granular?: boolean }, env: NodeJS.ProcessEnv = process.env): boolean {
+  return !(flags.granular === true || env.CLAWD_MCP_GRANULAR === '1');
+}
+
+/** The line a server prints (stderr) when it serves the deprecated granular surface. */
+export const GRANULAR_DEPRECATION =
+  '[clawdcursor] The granular surface (one tool per action) is deprecated and will be removed in a future major release. ' +
+  'Drop --granular / CLAWD_MCP_GRANULAR=1 to use the 6 compound tools; each granular tool is an action of one of them.';
+
 export interface ServeOptions {
   transport: Transport;
-  /** The 6 compound tools instead of the granular surface (`--compact`; HTTP also CLAWD_MCP_COMPACT=1). */
+  /** true: the 6 compound tools (the default, see pickCompact); false: the deprecated granular surface. */
   compact: boolean;
   /** false: no on-screen control banner (`--no-banner`). */
   banner: boolean;
@@ -152,6 +167,7 @@ async function serveStdio(opts: ServeOptions): Promise<void> {
   }
 
   console.log(`clawdcursor MCP mode starting... (${opts.compact ? 'compact' : 'granular'})`);
+  if (!opts.compact) process.stderr.write(`${GRANULAR_DEPRECATION}\n`);
   // CLAWD_DISABLE_VISION=1 / config disableVision holds here too (no --no-vision flag on stdio).
   const { ctx, createHandle } = await startServing({ compact: opts.compact, banner: opts.banner, disableVision: resolveConfig().disableVision });
   const { server, toolCount, sessionLog } = await createHandle();
@@ -228,8 +244,7 @@ async function serveHttp(opts: ServeOptions): Promise<void> {
 
   console.log(`${pc.green('✓')} ${pc.bold('clawdcursor')} ${pc.gray(`v${VERSION}`)} ${pc.gray(`— desktop control active on ${BIND_HOST}:${resolved.port}`)}`);
 
-  // Default granular for backward compatibility; agent hosts can opt into the 6-compound surface.
-  const compact = opts.compact || process.env.CLAWD_MCP_COMPACT === '1';
+  const compact = opts.compact;
   const { ctx, createHandle } = await startServing({ compact, banner: opts.banner, disableVision: resolved.disableVision });
 
   // Starting the daemon is the user's own act: it gives control back after a stop.
@@ -274,9 +289,7 @@ async function serveHttp(opts: ServeOptions): Promise<void> {
     console.log(pc.gray(`   (full token saved to ${TOKEN_PATH})`));
     console.log(`\nHTTP routes (agents use MCP at /mcp: the ${compact ? 'compact' : 'granular'} surface, ${toolCount} tools):`);
     for (const line of describeRoutes()) console.log(`  ${line}`);
-    if (!compact) {
-      console.log(pc.gray(`   (tip: pass --compact or set CLAWD_MCP_COMPACT=1 to expose the 6-compound public surface)`));
-    }
+    if (!compact) console.error(pc.yellow(GRANULAR_DEPRECATION));
     console.log(`\nAll mutating endpoints require: ${pc.cyan('Authorization: Bearer <token>')}`);
     console.log(`\nReady. ${e('🐾', '')}`);
     announceStart('http', compact);

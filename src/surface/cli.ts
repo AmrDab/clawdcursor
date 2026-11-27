@@ -121,6 +121,7 @@ interface AgentModeOpts {
   vision?: boolean;
   skipConsent?: boolean;
   compact?: boolean;
+  granular?: boolean;
   /** Commander `--no-banner` → false. Undefined = banner enabled (default). */
   banner?: boolean;
 }
@@ -143,8 +144,8 @@ function clientPort(raw: string | undefined): number {
 
 async function runAgentMode(opts: AgentModeOpts): Promise<void> {
   const port = portFlag(opts.port);
-  const { serveMcp } = await import('./serve');
-  await serveMcp({ transport: 'http', compact: opts.compact === true, banner: opts.banner !== false, port,
+  const { serveMcp, pickCompact } = await import('./serve');
+  await serveMcp({ transport: 'http', compact: pickCompact(opts), banner: opts.banner !== false, port,
     vision: opts.vision, accept: opts.accept, skipConsent: opts.skipConsent });
 }
 
@@ -157,7 +158,8 @@ program
   .option('--no-vision', 'High-security mode: no screenshot goes to any model — MCP clients work blind (also CLAWD_DISABLE_VISION=1)')
   .option('--no-llm', 'No effect (kept so existing scripts keep working): the daemon never runs a model')
   .option('--skip-consent', 'Skip consent prompt (requires NODE_ENV=development)')
-  .option('--compact', 'Expose the 6-compound MCP surface (computer/accessibility/window/system/browser/batch) over HTTP /mcp instead of the granular surface, where every action is its own tool (also CLAWD_MCP_COMPACT=1)')
+  .option('--compact', 'Serve the 6 compound tools (computer/accessibility/window/system/browser/batch) over HTTP /mcp. The default; kept so existing scripts keep working')
+  .option('--granular', '[deprecated] Serve the granular surface, where every action is its own tool, instead (also CLAWD_MCP_GRANULAR=1)')
   .option('--no-banner', 'Disable the on-screen "desktop control in progress" banner (also CLAWD_NO_BANNER=1)')
   .action(async (opts) => {
     await runAgentMode(opts);
@@ -171,7 +173,8 @@ program
   .option('--accept', 'Accept desktop control consent non-interactively and start')
   .option('--no-vision', 'High-security mode: no screenshot goes to any model — MCP clients work blind (also CLAWD_DISABLE_VISION=1)')
   .option('--no-llm', 'No effect (kept so existing scripts keep working): the daemon never runs a model')
-  .option('--compact', 'Expose the 6-compound MCP surface over HTTP /mcp (also CLAWD_MCP_COMPACT=1)')
+  .option('--compact', 'Serve the 6 compound tools over HTTP /mcp. The default; kept so existing scripts keep working')
+  .option('--granular', '[deprecated] Serve the granular surface instead (also CLAWD_MCP_GRANULAR=1)')
   .option('--no-banner', 'Disable the on-screen "desktop control in progress" banner (also CLAWD_NO_BANNER=1)')
   .action(async (opts) => {
     console.warn(`${e('⚠', '[WARN]')} \`clawdcursor start\` is deprecated; use \`clawdcursor agent\`.`);
@@ -418,11 +421,12 @@ program
 program
   .command('mcp')
   .description('Run as MCP tool server over stdio (for Claude Code, Cursor, Windsurf, Zed)')
-  .option('--compact', 'Expose 6 compound tools instead of the granular surface, where every action is its own tool (recommended for most agents)')
+  .option('--compact', 'Serve the 6 compound tools. The default; kept so existing configs keep working')
+  .option('--granular', '[deprecated] Serve the granular surface, where every action is its own tool, instead (also CLAWD_MCP_GRANULAR=1)')
   .option('--no-banner', 'Disable the on-screen "desktop control in progress" banner (also CLAWD_NO_BANNER=1)')
-  .action(async (opts: { compact?: boolean; banner?: boolean }) => {
-    const { serveMcp } = await import('./serve');
-    await serveMcp({ transport: 'stdio', compact: opts.compact === true, banner: opts.banner !== false });
+  .action(async (opts: { compact?: boolean; granular?: boolean; banner?: boolean }) => {
+    const { serveMcp, pickCompact } = await import('./serve');
+    await serveMcp({ transport: 'stdio', compact: pickCompact(opts), banner: opts.banner !== false });
   });
 
 program
