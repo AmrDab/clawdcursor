@@ -3,7 +3,8 @@
  * Host-header check.
  *
  * The daemon generates a 32-byte token when it binds its port and saves it to ~/.clawdcursor/token (owner-only). Callers
- * send it as `Authorization: Bearer <token>`; the dashboard gets it as an httpOnly cookie when it loads `/`.
+ * send it as `Authorization: Bearer <token>`; the dashboard gets it as an httpOnly cookie when the browser opens a
+ * one-time link from `clawdcursor dashboard` (mintDashboardNonce below), never from a plain GET /.
  */
 import type express from 'express';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
@@ -115,42 +116,89 @@ function readCookieToken(req: express.Request): string {
 let loggedTokenDrift = false;
 
 /**
- * The token gate. The daemon's in-memory token always passes. `diskTokenOk` (the /stop route) also accepts the token
- * now on disk: /stop is a localhost-only SHUTDOWN control with no data or tool access, and the file is owner-only, so a
- * drifted disk token there makes `clawdcursor stop` reliable across daemon restarts WITHOUT weakening /mcp, which stays
- * strict. CLAWD_ALLOW_DISK_TOKEN_DRIFT=1 accepts the disk token on every gated route (v0.8.2 silent-401 fix: a second
- * process that rotated the file).
+ * Whether the request carries the token: `Authorization: Bearer <token>`, else the dashboard's cookie. The daemon's
+ * in-memory token always passes. `diskTokenOk` (the /stop route) also accepts the token now on disk: /stop is a
+ * localhost-only SHUTDOWN control with no data or tool access, and the file is owner-only, so a drifted disk token there
+ * makes `clawdcursor stop` reliable across daemon restarts WITHOUT weakening /mcp, which stays strict.
+ * CLAWD_ALLOW_DISK_TOKEN_DRIFT=1 accepts the disk token on every gated route (v0.8.2 silent-401 fix: a second process
+ * that rotated the file).
  */
+export function hasToken(req: express.Request, opts: { diskTokenOk: boolean }): boolean {
+  const authHeader = req.headers['authorization'] || '';
+  const headerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  const received = headerToken || readCookieToken(req);
+
+  if (timingSafeTokenEqual(received, SERVER_TOKEN)) return true;
+  const drift = process.env.CLAWD_ALLOW_DISK_TOKEN_DRIFT === '1';
+  if (!(opts.diskTokenOk || drift)) return false;
+  const diskToken = currentDiskToken();
+  if (!diskToken || diskToken === SERVER_TOKEN) return false;
+  if (!loggedTokenDrift && drift) {
+    loggedTokenDrift = true;
+    console.warn(
+      `${e('⚠', '[WARN]')} Auth token file was rewritten by another process. ` +
+      `Accepting either the original or the new token to avoid silent 401s. ` +
+      `Run \`clawdcursor stop\` once and restart if you want a single canonical token.`,
+    );
+  }
+  return timingSafeTokenEqual(received, diskToken);
+}
+
+/** The token gate (hasToken): a 401 without it. */
 export function requireToken(opts: { diskTokenOk: boolean }): express.RequestHandler {
   return (req, res, next) => {
-    const authHeader = req.headers['authorization'] || '';
-    const headerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-    const received = headerToken || readCookieToken(req);
-
-    const memoryOk = timingSafeTokenEqual(received, SERVER_TOKEN);
-    let diskOk = false;
-    const drift = process.env.CLAWD_ALLOW_DISK_TOKEN_DRIFT === '1';
-    if (!memoryOk && (opts.diskTokenOk || drift)) {
-      const diskToken = currentDiskToken();
-      if (diskToken && diskToken !== SERVER_TOKEN) {
-        if (!loggedTokenDrift && drift) {
-          loggedTokenDrift = true;
-          console.warn(
-            `${e('⚠', '[WARN]')} Auth token file was rewritten by another process. ` +
-            `Accepting either the original or the new token to avoid silent 401s. ` +
-            `Run \`clawdcursor stop\` once and restart if you want a single canonical token.`,
-          );
-        }
-        diskOk = timingSafeTokenEqual(received, diskToken);
-      }
-    }
-
-    if (!memoryOk && !diskOk) {
+    if (!hasToken(req, opts)) {
       res.status(401).json({ error: 'Unauthorized — include Authorization: Bearer <token> header. Token is at ~/.clawdcursor/token' });
       return;
     }
     next();
   };
+}
+
+// ── The dashboard's one-time link ───────────────────────────────────────
+//
+// GET / used to set the token cookie for anyone who asked, so any local process or other OS user could read the token
+// with `curl -si http://127.0.0.1:3847/`. Now a browser gets the cookie only by opening a link that `clawdcursor
+// dashboard` asks the daemon for with the token (POST /dashboard-link): a random nonce, good once and for
+// DASHBOARD_LINK_TTL_MS, kept only in this process's memory.
+
+export const DASHBOARD_LINK_TTL_MS = 60_000;
+/** Links not yet used. A token holder can mint more, but never grow this map past a handful. */
+const MAX_LIVE_DASHBOARD_LINKS = 16;
+const dashboardLinks = new Map<string, number>();   // nonce → expiry (ms since epoch)
+
+function pruneDashboardLinks(now: number): void {
+  for (const [nonce, expires] of dashboardLinks) if (expires <= now) dashboardLinks.delete(nonce);
+}
+
+/** A new one-time dashboard nonce, valid for DASHBOARD_LINK_TTL_MS. */
+export function mintDashboardNonce(now: number = Date.now()): string {
+  pruneDashboardLinks(now);
+  // The oldest go first (a Map keeps insertion order).
+  while (dashboardLinks.size >= MAX_LIVE_DASHBOARD_LINKS) dashboardLinks.delete(dashboardLinks.keys().next().value as string);
+  const nonce = randomBytes(32).toString('hex');
+  dashboardLinks.set(nonce, now + DASHBOARD_LINK_TTL_MS);
+  return nonce;
+}
+
+/**
+ * True, once, for an unexpired nonce that mintDashboardNonce made: a match spends it. Every live nonce is compared in
+ * constant time, and the loop does not stop at a match.
+ */
+export function consumeDashboardNonce(received: string, now: number = Date.now()): boolean {
+  pruneDashboardLinks(now);
+  let match: string | null = null;
+  for (const nonce of dashboardLinks.keys()) {
+    if (timingSafeTokenEqual(received, nonce)) match = nonce;
+  }
+  if (match === null) return false;
+  dashboardLinks.delete(match);
+  return true;
+}
+
+/** Tests only: forget every nonce. */
+export function __resetDashboardLinksForTests(): void {
+  dashboardLinks.clear();
 }
 
 /** Only a caller on this machine: `${what} is only allowed from localhost` otherwise. */

@@ -211,7 +211,7 @@ An app guide lists one app's keyboard shortcuts for your OS, a few workflows and
 - **`exit`, when the server exits during a call, or was killed or crashed:** the exit reason (from a fixed list: `sigterm`, `host_gone`, ...), and the tool and action that were cut off and how long they had run.
 - **`crash`, on an uncaught error:** the error class (`TypeError`, ...), the error code (`ENOENT`, ...), and the stack reduced to file and line in Clawd Cursor's own code.
 - **Never sent:** error messages, typed text, the clipboard, screen or OCR text, screenshots, window titles, the names of the apps your AI works in, URLs, element names, file paths outside Clawd Cursor, user names, emails or IP addresses.
-- **Where it goes:** over HTTPS to `telemetry.clawdcursor.com`, a Cloudflare Worker run by the project. It checks every event against the same fixed lists and drops anything else, does not read or store your IP address or request headers, and deletes events after 90 days.
+- **Where it goes:** over HTTPS to `telemetry.clawdcursor.com`, a Cloudflare Worker run by the project. It checks every event against the same fixed lists and drops anything else, does not store your IP address or request headers (it hashes the address in memory to rate-limit each sender), and deletes events after 90 days.
 - **To turn them off:** run `clawdcursor optout` (`clawdcursor optin` turns them back on), ask your AI (it calls `system {action:"telemetry_optout"}`; your AI can only turn them off), or set `CLAWD_TELEMETRY=0` or `DO_NOT_TRACK=1`. They are always off in CI and in test runs.
 
 From 2.1, `clawdcursor telemetry` prints the status and every field it sends. The same list is in [docs/telemetry.md](docs/telemetry.md).
@@ -471,6 +471,7 @@ clawdcursor consent         Desktop-control consent (--accept / --revoke / --sta
 clawdcursor grant           Request macOS permissions (macOS only)
 clawdcursor mcp             stdio MCP server; your host starts this (--compact for the six tools)
 clawdcursor agent           HTTP MCP server on 127.0.0.1:3847, with the live log in a terminal (--port, --compact, --no-vision)
+clawdcursor dashboard       Open the daemon's dashboard (log, pause banner, Stop) through a one-time link (--no-open prints it)
 clawdcursor stop            Stop every running instance; agents stay stopped until resume
 clawdcursor resume          Continue the daemon's paused task or give control back after a stop (--end to end the task)
 clawdcursor doctor          Diagnose the install (version, consent, screen capture, accessibility, permissions)

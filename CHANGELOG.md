@@ -2,6 +2,38 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Security
+- **The daemon's dashboard handed its full-control token to anyone on the machine (high).** `GET /` on
+  `clawdcursor agent` set the bearer token as a cookie for any caller, so any local process or other user of the computer
+  could read it with `curl -si http://127.0.0.1:3847/` and then drive the desktop through `/mcp`. Open the dashboard with
+  the new `clawdcursor dashboard` command: it asks the daemon for a one-time link with the token from
+  `~/.clawdcursor/token` and opens it in your browser (`--no-open` prints it). The link is good once and for 60 seconds;
+  opening it sets the same httpOnly cookie and redirects to `/`. A plain `GET /` now sets no cookie and shows a page
+  that says to run the command. The dashboard can no longer be framed by another site. Clients that send
+  `Authorization: Bearer` are unaffected. Affects 2.3.0 and earlier.
+- **macOS: screenshots were written to a predictable file in the shared `/tmp` (medium).** Another user of the Mac could
+  read a capture of your screen there, or plant a file at its name first. The screenshot and the Screen Recording check
+  now write to a random file name in a new folder only you can open, in your own temp folder, and remove it right after.
+- **Typed text was written to the log (low).** The keyboard behind `type_text` and `smart_type` logged the first 60
+  characters it typed (Windows and Linux X11), which ended up in the MCP host's log files and in `logs_recent`. It now
+  logs only how many characters it typed. On macOS, a failed keystroke logs osascript's error number instead of its
+  message, which could quote the text.
+- **The release workflow no longer pastes its tag input into a shell script (low).** `publish.yml` built a `run:`
+  script from the `workflow_dispatch` tag, so a crafted tag could run commands in the job that publishes to npm. The tag
+  now reaches the script as an environment variable, and a repo test fails on any `${{ }}` expression inside a `run:`
+  script.
+- **Anyone could flood the error-report endpoint (medium).** The Worker behind `telemetry.clawdcursor.com` had one rate
+  limit shared by every sender, so a single sender could use it up and keep everyone else's reports out, and fill the
+  database. Each sender now has its own limit, keyed on a hash of its address made in memory (the address is still never
+  stored), and the Worker stores at most a set number of events a day (`DAILY_EVENT_CAP`, 100,000 by default) and answers
+  429 above it. Deploying it needs `schema.sql` applied first (new `daily_counts` table). The client is unchanged.
+- **`relaunch_with_cdp` took a path as the app to start (low).** It passed `appName` straight to `Start-Process`
+  (Windows) or the app launcher, so a path, a UNC path on another machine or a `scheme:` URI was started, after the tool
+  had closed the app of that name. It now refuses anything but an application name, exactly as `open_app` does, before
+  it closes or starts anything.
+
 ## [2.3.0] - 2026-11-20
 
 ### Security

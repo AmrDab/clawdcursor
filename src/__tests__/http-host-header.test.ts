@@ -1,7 +1,8 @@
 /**
  * DNS rebinding (#426 review): a page on evil.example whose name is rebound to 127.0.0.1 is same-origin with the daemon
- * as far as the browser knows. It could GET / (the cookie with the token is set for it) and then GET /resume to read the
- * pause message. Every route now answers only to `Host: 127.0.0.1:<port>` or `localhost:<port>`.
+ * as far as the browser knows. It could GET / (the cookie with the token was set for it) and then GET /resume to read the
+ * pause message. Every route now answers only to `Host: 127.0.0.1:<port>` or `localhost:<port>`. And GET / itself no
+ * longer sets the cookie for anyone who asks: only for a one-time link from `clawdcursor dashboard` (dashboard-login.test.ts).
  */
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
@@ -58,18 +59,30 @@ describe('the Host header', () => {
       expect((await send('GET', '/health', host)).status, host).toBe(200);
       expect((await send('POST', '/mcp', host)).body).toEqual({ reached: 'mcp' });
     }
+    // A Bearer client is served the page (and the cookie) as before.
     const page = await send('GET', '/', `localhost:${port}`);
     expect(page.status).toBe(200);
     expect(String(page.headers['set-cookie'])).toContain('clawdcursor_token=');
   });
+
+  it('GET / with no token and no one-time link sets no cookie (security scan 2026-11: curl could read the token)', async () => {
+    for (const host of [`127.0.0.1:${port}`, `localhost:${port}`]) {
+      const page = await request(server).get('/').set('Host', host);
+      expect(page.status, host).toBe(401);
+      expect(page.headers['set-cookie'], host).toBeUndefined();
+      expect(page.text).not.toContain(token);
+      expect(page.text).toContain('clawdcursor dashboard');
+    }
+  });
 });
 
 describe('the route table', () => {
-  it('gates each route as before: /mcp, /resume and /stop need the token; / and /health do not', async () => {
+  it('gates each route: /mcp, /resume, /stop and /dashboard-link need the token, / a one-time link or the token; /health nothing', async () => {
     const host = `127.0.0.1:${port}`;
     for (const r of ROUTES) {
       const res = await request(server)[r.method.toLowerCase() as 'get' | 'post' | 'delete'](r.path).set('Host', host);
       expect(res.status === 401, `${r.method} ${r.path}`).toBe(r.auth !== 'none');
+      expect(res.headers['set-cookie'], `${r.method} ${r.path}`).toBeUndefined();
     }
   });
 

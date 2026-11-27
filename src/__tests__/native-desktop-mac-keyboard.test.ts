@@ -29,7 +29,8 @@ vi.mock('../platform/native-helper', () => ({ getNativeHelper: () => helper, cap
 vi.mock('../platform/mac-screen', () => ({ readMainScreenInfo: vi.fn(async () => null) }));
 
 const spawned: Array<{ cmd: string; args: string[]; stdin?: string }> = [];
-let osascriptFails = false;
+/** true: osascript fails with "osascript failed"; a string: with that message. */
+let osascriptFails: boolean | string = false;
 vi.mock('child_process', () => ({
   execFile: (cmd: string, args: string[], a3: unknown, a4?: (e: unknown, r?: unknown) => void) => {
     const cb = (typeof a3 === 'function' ? a3 : a4) as (e: unknown, r?: unknown) => void;
@@ -41,7 +42,7 @@ vi.mock('child_process', () => ({
     return {
       stdin: {
         on: () => {},
-        end: (data?: string) => { rec.stdin = data; queueMicrotask(() => (osascriptFails ? cb(new Error('osascript failed')) : cb(null, { stdout: '', stderr: '' }))); },
+        end: (data?: string) => { rec.stdin = data; queueMicrotask(() => (osascriptFails ? cb(new Error(typeof osascriptFails === 'string' ? osascriptFails : 'osascript failed')) : cb(null, { stdout: '', stderr: '' }))); },
       },
     };
   },
@@ -197,6 +198,18 @@ describe('the keyboard guard covers the MCP route too', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     await desktop().typeText('abc');
     expect(helper.type).toHaveBeenCalledWith('abc');
+  });
+
+  // Security scan (2026-11): the warning carried the first 100 characters of osascript's error, which can quote the program
+  // and so the typed text. Only osascript's error number is logged.
+  it('when osascript fails, the warning names the error number, not the typed text', async () => {
+    osascriptFails = 'Command failed: osascript\n-:52:76: execution error: System Events got an error: Can’t get "my password is hunter2". (-1728)';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await desktop().typeText('my password is hunter2');
+    const logged = warn.mock.calls.map(c => c.join(' ')).join('\n');
+    expect(logged).toContain('osascript error -1728');
+    expect(logged).not.toContain('hunter2');
+    expect(helper.type).toHaveBeenCalledWith('my password is hunter2');
   });
 
   it('when osascript fails and there is no helper, typing is an error, not a silent success', async () => {

@@ -42,6 +42,7 @@ import { screenJson } from '../core/untrusted-screen-content';
 import { isGuardRefusal } from '../core/control';
 import type { ToolDefinition, ToolResult, ToolContext } from './types';
 import { powershellExe, psOpts } from '../platform/ps-spawn';
+import { appNameRefusal } from '../platform/app-aliases';
 
 /**
  * Known Electron / WebView2 app fingerprints. Match is case-insensitive
@@ -210,12 +211,18 @@ export function getElectronBridgeTools(): ToolDefinition[] {
       safetyTier: 1,
       destructive: true,
       handler: async ({ appName, port }, ctx: ToolContext): Promise<ToolResult> => {
+        // The name reaches Start-Process -FilePath (Windows) or launchApp, as open_app's does: a path there runs that file,
+        // a UNC path a file on another machine, and `scheme:` goes to its protocol handler. The same name check as open_app,
+        // before anything is closed or started.
+        const name = String(appName ?? '');
+        if (!name.trim()) return { text: 'relaunch_with_cdp: `appName` is required', isError: true };
+        const notAName = appNameRefusal(name, 'relaunch_with_cdp');
+        if (notAName) return { text: `relaunch_with_cdp: ${notAName}`, isError: true };
         await ctx.ensureInitialized();
         if (!ctx.platform) {
           return { text: 'relaunch_with_cdp: platform adapter not initialized', isError: true };
         }
         const p = typeof port === 'number' ? port : 9222;
-        const name = String(appName);
         await ctx.platform.setWindowState('close', { processName: name }).catch(() => false);
         await new Promise(r => setTimeout(r, 600));
 

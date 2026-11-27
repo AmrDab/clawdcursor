@@ -164,6 +164,63 @@ describe('temp files', () => {
       predictable.test(l) && !sanctioned.test(l) ? [`${rel(f)}:${i + 1}`] : []));
     expect(offenders, 'Predictable temp-file path(s) in the OS temp dir. Use fs.mkdtemp() or a crypto.randomUUID() filename instead').toEqual([]);
   });
+
+  // The macOS adapter wrote screen captures to `/tmp/.clawdcursor-shot-${process.pid}-${Date.now()}.png` (security scan
+  // 2026-11): the scan above looks for tmpdir() and never saw a literal path. /tmp is shared by every user of the machine;
+  // os.tmpdir() is per-user on macOS, and fs.mkdtemp() makes an owner-only directory on every OS.
+  it('no production .ts names the shared /tmp itself', () => {
+    const literal = /['"`]\/tmp(\/|['"`])/;
+    const offenders = CODE.filter(x => literal.test(x.l)).map(x => `${x.f}:${x.n} ${x.l.trim()}`);
+    expect(offenders, 'A literal /tmp path. Use fs.mkdtemp(path.join(os.tmpdir(), ...)) and a crypto.randomUUID() filename instead').toEqual([]);
+  });
+
+  it('the /tmp scan sees the forms it is meant to catch', () => {
+    const literal = /['"`]\/tmp(\/|['"`])/;
+    for (const l of ["const tmp = `/tmp/.clawdcursor-shot-${process.pid}.png`;", "path.join('/tmp', 'x')", 'open("/tmp/x.png")']) expect(literal.test(l), l).toBe(true);
+    for (const l of ["path.join(os.tmpdir(), 'x')", "const dir = '/var/tmp2'", "'./tmp/x'"]) expect(literal.test(l), l).toBe(false);
+  });
+});
+
+describe('GitHub workflows', () => {
+  // publish.yml set TAG="${{ github.event.inputs.tag || github.ref_name }}" inside a run script (security scan 2026-11):
+  // Actions pastes an expression into the shell source before the shell runs, so a workflow_dispatch input could run
+  // commands in the job that holds the npm publish (OIDC) and release permissions. A value goes in through `env:` and is
+  // read as "$NAME".
+  const WORKFLOWS = path.join(ROOT, '.github', 'workflows');
+  const files = fs.readdirSync(WORKFLOWS).filter(f => /\.ya?ml$/.test(f));
+
+  /** The lines of every `run:` script: an inline value, or the block under `run: |` / `run: >`. */
+  function runScripts(yml: string): { n: number; text: string }[] {
+    const lines = yml.split('\n');
+    const out: { n: number; text: string }[] = [];
+    lines.forEach((line, i) => {
+      const m = /^(\s*)(?:-\s+)?run:\s*(.*)$/.exec(line);
+      if (!m) return;
+      if (!/^[|>]/.test(m[2])) { out.push({ n: i + 1, text: m[2] }); return; }
+      for (let j = i + 1; j < lines.length; j++) {
+        if (lines[j].trim() === '') continue;
+        if (lines[j].length - lines[j].trimStart().length <= m[1].length) break;
+        out.push({ n: j + 1, text: lines[j] });
+      }
+    });
+    return out;
+  }
+
+  it('finds the workflows and their run scripts', () => {
+    expect(files).toContain('publish.yml');
+    expect(runScripts(fs.readFileSync(path.join(WORKFLOWS, 'publish.yml'), 'utf8')).length).toBeGreaterThan(10);
+  });
+
+  it('no run script has a ${{ }} expression in it', () => {
+    const bad = files.flatMap(f => runScripts(fs.readFileSync(path.join(WORKFLOWS, f), 'utf8'))
+      .filter(x => x.text.includes('${{')).map(x => `${f}:${x.n} ${x.text.trim()}`));
+    expect(bad, 'Pass the value through env: and read it as "$NAME" in the script').toEqual([]);
+  });
+
+  it('the scan sees an expression in a block script and in an inline one', () => {
+    const yml = ['      - name: a', '        run: |', '          echo ok', '          TAG="${{ github.event.inputs.tag }}"', '      - run: echo ${{ github.head_ref }}', '        env:', '          X: ${{ github.ref }}'].join('\n');
+    expect(runScripts(yml).filter(x => x.text.includes('${{')).map(x => x.n)).toEqual([4, 5]);
+  });
 });
 
 describe('scripts/** encoding', () => {

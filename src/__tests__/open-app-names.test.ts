@@ -6,6 +6,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { appNameRefusal } from '../platform/app-aliases';
 import { getOrchestrationTools } from '../tools/orchestration';
+import { getElectronBridgeTools } from '../tools/electron_bridge';
 import { resolveInstalledWindowsApp, isAppShapedStartEntry } from '../platform/win-app-resolve';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -69,6 +70,49 @@ describe('open_app refuses a path before anything is launched, on every OS', () 
     const r = await mcp.handler({ name: n }, ctx);
     expect(r.isError).toBeFalsy();
     expect(launchApp).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Security scan (2026-11): relaunch_with_cdp passed `appName` unchecked to `Start-Process -FilePath` (Windows) and launchApp:
+// a path or a UNC path ran that file, after the tool had closed the app of that name. It now asks open_app's question first.
+describe('relaunch_with_cdp takes an application name too, checked before anything is closed or started', () => {
+  const launchApp = vi.fn(async (..._a: unknown[]) => ({ pid: 1 }));
+  const setWindowState = vi.fn(async () => true);
+  const ensureInitialized = vi.fn(async () => {});
+  const ctx = (platform: string) => ({ ensureInitialized, platform: { platform, launchApp, setWindowState } }) as unknown as ToolContext;
+  const tool = getElectronBridgeTools().find(t => t.name === 'relaunch_with_cdp')!;
+
+  it.each([...PATHS, ...URIS, ...ODD, '\\\\attacker\\share\\app.exe', '//attacker/share/app'])('refuses %j on every OS', async (p) => {
+    for (const platform of ['win32', 'darwin', 'linux']) {
+      launchApp.mockClear(); setWindowState.mockClear(); ensureInitialized.mockClear();
+      const r = await tool.handler({ appName: p, port: 9222 }, ctx(platform));
+      expect(r.isError, platform).toBe(true);
+      expect(r.text).toMatch(/^relaunch_with_cdp: relaunch_with_cdp takes an application name only/);
+      expect(setWindowState).not.toHaveBeenCalled();
+      expect(launchApp).not.toHaveBeenCalled();
+      expect(ensureInitialized).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([undefined, '', '   '])('an empty name (%j) is an error, not "undefined"', async (n) => {
+    launchApp.mockClear(); setWindowState.mockClear();
+    const r = await tool.handler({ appName: n }, ctx('linux'));
+    expect(r).toEqual({ text: 'relaunch_with_cdp: `appName` is required', isError: true });
+    expect(setWindowState).not.toHaveBeenCalled();
+  });
+
+  it.each(['discord', 'Slack', 'olk', 'ms-teams', 'Code'])('a name still relaunches: %s', async (n) => {
+    launchApp.mockClear(); setWindowState.mockClear();
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
+    try {
+      const call = tool.handler({ appName: n, port: 9333 }, ctx('linux'));
+      await vi.advanceTimersByTimeAsync(5_000);
+      const r = await call;
+      expect(r.isError).toBe(false);
+      expect(setWindowState).toHaveBeenCalledWith('close', { processName: n });
+      expect(launchApp).toHaveBeenCalledWith(n, { url: '--remote-debugging-port=9333' });
+    } finally { vi.useRealTimers(); vi.unstubAllGlobals(); }
   });
 });
 

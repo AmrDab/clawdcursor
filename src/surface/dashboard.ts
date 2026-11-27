@@ -5,26 +5,93 @@
  * All HTML, CSS, and JS are inline — no external files or frameworks.
  */
 
-import type { RequestHandler } from 'express';
+import type { RequestHandler, Response } from 'express';
 import { VERSION } from '../version';
+import { consumeDashboardNonce, hasToken, serverToken, DASHBOARD_LINK_TTL_MS } from './auth';
 
-/** GET /: the page, and the daemon's token as an httpOnly cookie its requests carry. */
-export function dashboardPage(getToken?: () => string): RequestHandler {
-  return (_req, res) => {
-    const token = getToken?.() ?? '';
-    if (token) {
-      res.cookie('clawdcursor_token', token, {
-        httpOnly: true,
-        sameSite: 'strict',
-        secure: false,
-        path: '/',
-      });
+/**
+ * GET /. The page needs the token, which its requests carry as an httpOnly cookie. A plain GET / no longer sets it: any
+ * local process or other OS user could have read it with curl.
+ *
+ * - `/?k=<nonce>` from `clawdcursor dashboard` (auth.ts mintDashboardNonce): the nonce is spent, the cookie is set, and
+ *   a redirect to `/` takes the nonce out of the address bar and the history.
+ * - the token, as the cookie or a Bearer header: the page (a Bearer client gets the cookie as before).
+ * - neither: a short page that sets nothing and says to run `clawdcursor dashboard`.
+ *
+ * No other site may frame any of it (clickjacking the kill switch or the pause answers).
+ */
+export function dashboardPage(getToken: () => string = serverToken): RequestHandler {
+  return (req, res) => {
+    res.set({
+      'X-Frame-Options': 'DENY',
+      'Content-Security-Policy': "frame-ancestors 'none'",
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+    });
+    const signedIn = hasToken(req, { diskTokenOk: false });
+    if (req.query.k !== undefined) {
+      const nonce = req.query.k;
+      if (typeof nonce === 'string' && consumeDashboardNonce(nonce)) {
+        setTokenCookie(res, getToken());
+        res.redirect(302, '/');
+        return;
+      }
+      if (signedIn) { res.redirect(302, '/'); return; }
+      signInPage(res, 'This link has expired or was already used.');
+      return;
     }
-    res.type('html').send(DASHBOARD_HTML);
+    if (signedIn) {
+      setTokenCookie(res, getToken());
+      res.type('html').send(DASHBOARD_HTML);
+      return;
+    }
+    signInPage(res, 'Open the dashboard from a terminal on this computer.');
   };
 }
 
-const DASHBOARD_HTML = `<!DOCTYPE html>
+function setTokenCookie(res: Response, token: string): void {
+  if (!token) return;
+  res.cookie('clawdcursor_token', token, {
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: false,
+    path: '/',
+  });
+}
+
+/** 401: no token, no cookie set. `why` is one of the two fixed sentences above, never request text. */
+function signInPage(res: Response, why: string): void {
+  res.status(401).type('html').send(SIGN_IN_HTML.replace('{{why}}', why));
+}
+
+const SIGN_IN_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clawd Cursor Dashboard</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background: #0d1117;
+         color: #e6edf3; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 16px; }
+  main { max-width: 460px; }
+  h1 { font-size: 1.2rem; }
+  p { color: #8b949e; line-height: 1.5; }
+  code { font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace; background: #21262d; color: #e6edf3;
+         padding: 2px 6px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Clawd Cursor Dashboard</h1>
+  <p>{{why}}</p>
+  <p>Run <code>clawdcursor dashboard</code>. It opens a one-time link to this page in your browser
+     (valid ${Math.round(DASHBOARD_LINK_TTL_MS / 1000)} seconds, good once).</p>
+</main>
+</body>
+</html>`;
+
+/** The page itself (exported for its tests). */
+export const DASHBOARD_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">

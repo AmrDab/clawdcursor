@@ -2,21 +2,59 @@
  * clawdcursor bug telemetry receiver (Cloudflare Worker + D1). A trust boundary: anyone can POST here, so every event is
  * checked field by field against the same lists the client uses (src/core/observability/telemetry-lists.ts). An event with
  * an unknown field, a wrong type or a value outside its list is dropped. The client's IP address and request headers are
- * never read or stored; the only time kept is the server's own receive time. Events older than 90 days are deleted daily.
+ * never stored; the address is read for one thing only, the rate limit per sender, as a hash in memory (senderKey). The
+ * only time kept is the server's own receive time. At most DAILY_EVENT_CAP events are stored per UTC day. Events older
+ * than 90 days are deleted daily.
  */
 
 import { HOSTS, FAILED, ERROR_CLASSES, HELPERS, PS_BRIDGE_STEP, EXIT_REASONS, ARCHS, APP_KINDS, NAMES } from '../../src/core/observability/telemetry-lists';
 import { RESULT_CODES } from '../../src/core/result-code-list';
 
-interface D1Statement { bind(...values: unknown[]): D1Statement; run(): Promise<unknown> }
+interface D1Statement { bind(...values: unknown[]): D1Statement; run(): Promise<unknown>; first<T = Record<string, unknown>>(): Promise<T | null> }
 interface D1Database { prepare(sql: string): D1Statement; batch(statements: D1Statement[]): Promise<unknown> }
 /** The Workers Rate Limiting binding (wrangler.toml). Optional: without it nothing is limited. */
 interface RateLimiter { limit(o: { key: string }): Promise<{ success: boolean }> }
-export interface Env { DB: D1Database; LIMITER?: RateLimiter }
+export interface Env {
+  DB: D1Database;
+  LIMITER?: RateLimiter;
+  /** wrangler.toml [vars]: events stored per UTC day across all senders. DEFAULT_DAILY_EVENT_CAP when unset or not a count. */
+  DAILY_EVENT_CAP?: string;
+}
 
 export const MAX_EVENTS = 50;
 export const MAX_BODY = 32 * 1024;
+export const DEFAULT_DAILY_EVENT_CAP = 100_000;
 const RETENTION_MS = 90 * 24 * 3600 * 1000;
+
+/**
+ * The rate-limit key of one sender: SHA-256 of a fixed prefix and its address (CF-Connecting-IP, set by Cloudflare). The
+ * limit used to be one shared key for everyone, so a single sender could spend the whole budget and starve every real
+ * client. The address and the key only pass through memory to the limiter: neither is stored or logged. (The hash keeps
+ * the raw address out of the limiter; it is not anonymisation, since addresses can be guessed and hashed one by one.)
+ */
+export const SENDER_KEY_PREFIX = 'clawdcursor-telemetry/rate-limit/v1:';
+export async function senderKey(request: Request): Promise<string> {
+  const address = request.headers.get('cf-connecting-ip') ?? '';
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(SENDER_KEY_PREFIX + address));
+  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function dailyEventCap(env: Env): number {
+  const n = Number(env.DAILY_EVENT_CAP);
+  return Number.isSafeInteger(n) && n > 0 ? n : DEFAULT_DAILY_EVENT_CAP;
+}
+
+/**
+ * Count this batch against today's cap: one point upsert on the day's counter row (daily_counts), not a count over the
+ * events table. True while the day, with this batch, is within the cap. The counter keeps counting refused events, so
+ * once over, the rest of the day is refused.
+ */
+async function withinDailyCap(env: Env, day: string, n: number): Promise<boolean> {
+  const row = await env.DB.prepare(
+    'INSERT INTO daily_counts (day, events) VALUES (?, ?) ON CONFLICT (day) DO UPDATE SET events = events + excluded.events RETURNING events',
+  ).bind(day, n).first<{ events: number }>();
+  return row !== null && typeof row.events === 'number' && row.events <= dailyEventCap(env);
+}
 
 type Rule = (v: unknown) => boolean;
 const oneOf = (...list: string[]): Rule => v => typeof v === 'string' && list.includes(v);
@@ -107,8 +145,9 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (new URL(request.url).pathname !== '/v1/events') return new Response(null, { status: 404 });
     if (request.method !== 'POST') return new Response(null, { status: 405 });
-    // One shared budget for the whole endpoint, so a flood cannot use up the D1 write quota. The client's address is never read.
-    if (env.LIMITER && !(await env.LIMITER.limit({ key: 'ingest' })).success) return new Response(null, { status: 429 });
+    // A budget per sender (senderKey), so one sender cannot use up everyone's. The daily cap below bounds what all senders
+    // together can write to D1.
+    if (env.LIMITER && !(await env.LIMITER.limit({ key: await senderKey(request) })).success) return new Response(null, { status: 429 });
     // Before reading: a body declared too big is never buffered. The check after the read catches one that is not declared.
     if (Number(request.headers.get('content-length')) > MAX_BODY) return new Response(null, { status: 413 });
     const raw = await request.arrayBuffer();
@@ -118,6 +157,7 @@ export default {
     if (events.length) {
       const now = Date.now();
       const day = new Date(now).toISOString().slice(0, 10);
+      if (!(await withinDailyCap(env, day, events.length))) return new Response(null, { status: 429 });
       const insert = env.DB.prepare('INSERT INTO events (received_at, day, event, install_id, version, os, tool, action, code, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
       await env.DB.batch(events.map(e => {
         const { event, id, v, os, tool, action, code, ...rest } = e;
@@ -129,6 +169,8 @@ export default {
 
   async scheduled(_event: unknown, env: Env): Promise<void> {
     // By day, which has an index: a delete on received_at would read every row.
-    await env.DB.prepare('DELETE FROM events WHERE day < ?').bind(new Date(Date.now() - RETENTION_MS).toISOString().slice(0, 10)).run();
+    const cutoff = new Date(Date.now() - RETENTION_MS).toISOString().slice(0, 10);
+    await env.DB.prepare('DELETE FROM events WHERE day < ?').bind(cutoff).run();
+    await env.DB.prepare('DELETE FROM daily_counts WHERE day < ?').bind(cutoff).run();
   },
 };
