@@ -42,6 +42,8 @@ describe('registerSkills', () => {
     expect(registered).toBeGreaterThanOrEqual(1);
     // SKILL.md landed in the present framework…
     expect(existsSync(join(fakeHome, '.claude', 'skills', 'clawdcursor', 'SKILL.md'))).toBe(true);
+    // …with the reference files its links point to.
+    expect(existsSync(join(fakeHome, '.claude', 'skills', 'clawdcursor', 'references', 'patterns.md'))).toBe(true);
     // …and an absent framework was NOT created.
     expect(existsSync(join(fakeHome, '.codex'))).toBe(false);
     expect(existsSync(join(fakeHome, '.openclaw'))).toBe(false);

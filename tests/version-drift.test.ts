@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync, readdirSync, statSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 
 // Single-source-of-truth guard. The McpServer constructor and onboarding
@@ -79,6 +79,20 @@ describe('version drift guard', () => {
       pluginSkill.equals(rootSkill),
       'skills/clawdcursor/SKILL.md is not byte-identical to root SKILL.md; run `npm run sync-version`',
     ).toBe(true);
+
+    // skills/clawdcursor/references/ must match root references/ file for file (sync-version copies them too),
+    // and every reference SKILL.md links to must exist.
+    const refNames = readdirSync(join(ROOT, 'references')).filter(n => n.endsWith('.md')).sort();
+    expect(readdirSync(join(ROOT, 'skills', 'clawdcursor', 'references')).filter(n => n.endsWith('.md')).sort()).toEqual(refNames);
+    for (const name of refNames) {
+      expect(
+        readFileSync(join(ROOT, 'skills', 'clawdcursor', 'references', name)).equals(readFileSync(join(ROOT, 'references', name))),
+        `skills/clawdcursor/references/${name} drifted; run \`npm run sync-version\``,
+      ).toBe(true);
+    }
+    for (const m of rootSkill.toString('utf-8').matchAll(/\]\((references\/[^)]+)\)/g)) {
+      expect(existsSync(join(ROOT, m[1])), `SKILL.md links to missing ${m[1]}`).toBe(true);
+    }
 
     // .claude-plugin/marketplace.json plugins[0].version must track package.json.
     // metadata.version ("1.0.0") is the marketplace-format version and is NOT checked here.
