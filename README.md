@@ -142,7 +142,7 @@ In tool terms:
 - **Acting by name:** pressing "Send" because it is called Send, not because it sits at a spot on the screen.
 - **OCR:** text recognition, reading the words in a picture of the screen. It runs on your computer.
 - **Playwright and CDP:** Playwright is a library that controls Chrome and Edge from the inside, over the Chrome DevTools Protocol (CDP), the browser's own debugging connection. Apps built on a browser engine (Electron or WebView2) can be reached the same way; `system detect_webview` finds them.
-- **Compact tools:** the six tools your AI sees with `--compact`. Without it there are 90 smaller tools, one per action. See [The tools](#the-tools).
+- **Compact tools:** the six tools your AI sees (the default). With the deprecated `--granular` there are 90 smaller tools, one per action. See [The tools](#the-tools).
 - **The pill and the three screen states:** while your AI is working, a pill on screen says what it is doing ("Typing in Edge"). An amber outline around the agent's window means background work, while you keep using the computer. An amber glow on the whole screen means it is using the mouse and keyboard. A blue glow on the whole screen means it needs you for a step. Clicks go through the pill, and it stays out of your AI's screenshots.
 
 ---
@@ -408,8 +408,8 @@ Earlier releases are in the [changelog](CHANGELOG.md).
 
 Two surfaces run the same code behind the same guards.
 
-- **Compact** (`--compact`, recommended): six tools, each with an `action` parameter. About 7,000 tokens of `tools/list`.
-- **Granular** (the default without `--compact`): 90 tools, one per action. About 19,000 tokens. Use it when a runtime needs every primitive as its own tool, or when you want your host to prompt per kind of action.
+- **Compact** (the default; `--compact` still accepted): six tools, each with an `action` parameter. About 7,000 tokens of `tools/list`.
+- **Granular** (`--granular` or `CLAWD_MCP_GRANULAR=1`, deprecated): 90 tools, one per action. About 19,000 tokens. Use it only when a runtime needs every primitive as its own tool, or when you want your host to prompt per kind of action. It will be removed in a future major release.
 
 (Token figures are the `tools/list` JSON of 2.0.0, characters ÷ 3.5.)
 
@@ -469,8 +469,8 @@ Every command:
 ```
 clawdcursor consent         Desktop-control consent (--accept / --revoke / --status)
 clawdcursor grant           Request macOS permissions (macOS only)
-clawdcursor mcp             stdio MCP server; your host starts this (--compact for the six tools)
-clawdcursor agent           HTTP MCP server on 127.0.0.1:3847, with the live log in a terminal (--port, --compact, --no-vision)
+clawdcursor mcp             stdio MCP server; your host starts this (six compound tools; --granular for the deprecated 90)
+clawdcursor agent           HTTP MCP server on 127.0.0.1:3847, with the live log in a terminal (--port, --granular, --no-vision)
 clawdcursor stop            Stop every running instance; agents stay stopped until resume
 clawdcursor resume          Continue the daemon's paused task or give control back after a stop (--end to end the task)
 clawdcursor doctor          Diagnose the install (version, consent, screen capture, accessibility, permissions)

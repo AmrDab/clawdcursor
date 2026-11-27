@@ -21,9 +21,8 @@
  * The granular surface stays available; agents pick which shape to consume.
  *
  * Selection:
- *   `clawdcursor mcp`             → granular tools (back-compat)
- *   `clawdcursor mcp --compact`   → compound tools (this file)
- *   `clawdcursor start --compact` → the HTTP /mcp endpoint serves them too (also CLAWD_MCP_COMPACT=1)
+ *   `clawdcursor mcp` / `clawdcursor agent`  → compound tools (this file), the default (`--compact` still accepted)
+ *   `--granular` (or CLAWD_MCP_GRANULAR=1)   → the granular tools (deprecated)
  *
  * Extending: a new granular tool gets a route under its compound in compact-routes.ts (and a cost class, cost-class.ts).
  */

@@ -119,8 +119,8 @@ clawdcursor never runs a model.
 - computer — raw keyboard and mouse (type, keys, scroll, drag); click x,y and screenshot are the last resort
 - batch — run a guarded sequence of the above in one call
 
-90 granular tools (one schema per action) are available by omitting `--compact`
-(granular is the default surface) — enumerate them with `tools/list` on either
+90 granular tools (one schema per action) are available with `--granular`
+(deprecated; compact is the default surface) — enumerate them with `tools/list` on either
 transport, if your runtime needs every primitive as a top-level tool.
 
 ## Safety
