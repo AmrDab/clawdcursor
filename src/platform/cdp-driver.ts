@@ -31,7 +31,7 @@
  *   const results = await cdp.querySelectorAll('button');
  */
 
-import { chromium, type Browser, type ElementHandle, type Frame, type Locator, type Page } from 'playwright';
+import { chromium, type Browser, type ElementHandle, type Frame, type Locator, type Page } from 'playwright-core';
 import { spawn } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';

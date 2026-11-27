@@ -47,11 +47,11 @@ function check() {
 
   // ── Optional dependencies ──
   try {
-    require('playwright');
-    console.log(`✅ playwright (browser automation)`);
+    require('playwright-core');
+    console.log(`✅ playwright-core (browser automation)`);
   } catch {
-    console.warn(`⚠️  playwright — not installed (browser/CDP features will be limited)`);
-    console.warn(`   Fix: npx playwright install chromium`);
+    console.warn(`⚠️  playwright-core — not installed (browser/CDP features will be limited)`);
+    console.warn(`   Fix: npm install -g clawdcursor (reinstall)`);
   }
 
   // ── macOS native build check ──

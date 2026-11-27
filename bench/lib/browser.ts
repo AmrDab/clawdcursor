@@ -3,7 +3,7 @@
  * page. It never joins the owner's browser session: a different profile directory is a different browser process.
  */
 import * as fs from 'fs';
-import { chromium } from 'playwright';
+import { chromium } from 'playwright-core';
 import * as path from 'path';
 import { profileDebugPort } from './ownership';
 import { killByCommandLine, pidsByCommandLine, startVisible, waitFor } from './proc';

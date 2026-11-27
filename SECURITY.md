@@ -84,7 +84,7 @@ With the variable unset nothing changes. The fence is a limit for tests and auto
 
 - "The agent did something I did not want" with tools working as documented: clicking Send, closing a window, opening a file, locking the machine through its menus. That is the agent's decision and the host's permission prompt, by design. (Tell us if a description or annotation misled the agent or the host; that part is ours.)
 - Anything that needs the attacker to already run code as you. clawdcursor does not defend against malware that already has your permissions, and the token file is readable by your own processes.
-- Issues in `@nut-tree-fork/nut-js`, `playwright`, `sharp` or other dependencies: report them upstream first; we track them but cannot patch them here alone.
+- Issues in `@nut-tree-fork/nut-js`, `playwright-core`, `sharp` or other dependencies: report them upstream first; we track them but cannot patch them here alone.
 - Style, or missing rate-limiting on a loopback-only port: file a normal issue or PR.
 
 ## Published advisories

@@ -24,7 +24,7 @@ vi.mock('child_process', async (orig) => ({
     return { unref() { /* detached */ } };
   },
 }));
-vi.mock('playwright', () => ({
+vi.mock('playwright-core', () => ({
   chromium: { connectOverCDP: vi.fn(async () => { throw new Error('ECONNREFUSED'); }) },
 }));
 

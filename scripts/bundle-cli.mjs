@@ -10,7 +10,7 @@
  *
  * Kept EXTERNAL (loaded from node_modules as before):
  *   - native addons: @nut-tree-fork/* (libnut), sharp (libvips)
- *   - packages that locate their own files/binaries at runtime: playwright,
+ *   - packages that locate their own files/binaries at runtime:
  *     playwright-core, clipboardy (fallback exes)
  * Lazy `await import()` sites stay lazy — esbuild keeps them as deferred
  * module initialisers, so platform code still loads only on the OS that
@@ -41,7 +41,7 @@ const result = await build({
   logLevel: 'warning',
   legalComments: 'none',
   external: [
-    '@nut-tree-fork/*', 'sharp', 'playwright', 'playwright-core', 'clipboardy',
+    '@nut-tree-fork/*', 'sharp', 'playwright-core', 'clipboardy',
   ],
 });
 if (result.errors.length) process.exit(1);

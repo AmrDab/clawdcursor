@@ -31,7 +31,7 @@ import { foregroundNow } from './control';
 import { keysOf } from '../platform/hard-keys';
 import { modifierOf, normalizeKey } from '../platform/keys';
 import type { UiElement } from '../platform/types';
-import type { Page } from 'playwright';
+import type { Page } from 'playwright-core';
 import { quoteScreenText } from './untrusted-screen-content';
 
 const LABEL = /\b(send|delete|remove|pay|buy|submit|close|discard)\b/i;
