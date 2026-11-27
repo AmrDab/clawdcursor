@@ -33,9 +33,9 @@
     "clawdcursor": "dist/surface/cli.js"
   },
   "files": [
-    "dist/",
-    "!dist/**/*.map",
-    "!dist/**/*.d.ts",
+    "dist/surface/cli.js",
+    "dist/index.js",
+    "dist/guides/",
     "scripts/verify-install.js",
     "scripts/postinstall-native.js",
     "scripts/sync-version.ts",
@@ -48,7 +48,6 @@
     "native/entitlements.plist",
     "README.md",
     "LICENSE",
-    "CHANGELOG.md",
     "SECURITY.md",
     "SKILL.md"
   ],
