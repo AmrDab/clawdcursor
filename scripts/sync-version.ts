@@ -248,7 +248,9 @@ for (const t of TARGETS) {
     for (const name of fs.readdirSync(srcDir).filter(n => n.endsWith('.md'))) {
       const src = fs.readFileSync(path.join(srcDir, name));
       const dst = path.join(dstDir, name);
-      if (!fs.existsSync(dst) || !src.equals(fs.readFileSync(dst))) {
+      let current: Buffer | null = null;
+      try { current = fs.readFileSync(dst); } catch { /* not copied yet */ }
+      if (!current || !src.equals(current)) {
         fs.writeFileSync(dst, src);
         changed++;
         touchedFiles.add(`skills/clawdcursor/references/${name}`);
