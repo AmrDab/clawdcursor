@@ -59,7 +59,7 @@ fs.rmSync(outDir, { recursive: true, force: true });
 fs.mkdirSync(stage, { recursive: true });
 
 // 1. Runtime files only — the same set npm publishes, minus install scripts.
-for (const rel of ['dist', 'scripts/mac', 'scripts/linux', 'README.md', 'LICENSE', 'SECURITY.md', 'SKILL.md']) copy(rel);
+for (const rel of ['dist', 'scripts/mac', 'scripts/linux', 'README.md', 'LICENSE', 'SECURITY.md', 'SKILL.md', 'references']) copy(rel);
 for (const f of fs.readdirSync(path.join(root, 'scripts')).filter(f => f.endsWith('.ps1'))) copy(`scripts/${f}`);
 copy('native/ClawdCursor.app');
 

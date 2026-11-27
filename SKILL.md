@@ -161,86 +161,9 @@ The user's request is the permission: a task in email, banking, messaging, a pas
 
 ---
 
-## Modes at a glance
-
-clawdcursor exposes one protocol (**MCP**) over two transports. It never runs a model: **you reason, clawdcursor acts.** You call tools, interpret results, decide next steps.
-
-| Mode | Command | Transport | Brain | Tools available |
-|------|---------|-----------|-------|-----------------|
-| `mcp` | `clawdcursor mcp [--compact]` | stdio | **You** (editor host) | 90 granular (default) or compact surface (`--compact`) |
-| `agent` | `clawdcursor agent [--compact]` | HTTP `/mcp` | **You** (HTTP client) | 90 granular (default) **or** compact surface — pass `--compact` (or `CLAWD_MCP_COMPACT=1`). One surface per daemon, chosen at startup — NOT both at once |
-
----
-
 ## Connecting
 
-### MCP (recommended for Claude Code / Cursor / Windsurf / Zed)
-
-**Compact - recommended for every LLM agent:**
-```json
-{
-  "mcpServers": {
-    "clawdcursor": {
-      "command": "clawdcursor",
-      "args": ["mcp", "--compact"]
-    }
-  }
-}
-```
-
-**Granular - 90 individual tools (power-user, back-compat, larger prompt budget):**
-```json
-{
-  "mcpServers": {
-    "clawdcursor": {
-      "command": "clawdcursor",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-### HTTP MCP (for any HTTP-capable agent)
-
-```bash
-clawdcursor agent            # starts on http://127.0.0.1:3847 (HTTP MCP; you drive the tools)
-```
-
-The HTTP transport uses **MCP's streamable-HTTP envelope** (JSON-RPC over POST), not REST. All requests go to a single endpoint, `POST /mcp`, with `Authorization: Bearer <token>` from `~/.clawdcursor/token`. Stateless mode - no session-init handshake required for one-shot calls.
-
-```
-POST /mcp        → JSON-RPC: tools/list, tools/call (the catalog + every tool)
-GET  /mcp        → SSE channel for server-initiated notifications (auth)
-GET  /health     → {"status":"ok","version":"<x.y.z>"}  (no auth, readiness probe)
-POST /resume     → answer a pause for the user: {"answer":"resume"|"end"} (auth, localhost-only; same as `clawdcursor resume`)
-POST /stop       → graceful shutdown (auth, localhost-only)
-GET  /           → minimal dashboard, calls /mcp via JSON-RPC under the hood
-```
-
-That's the entire HTTP surface. Calling a tool looks like:
-
-```json
-POST /mcp
-Authorization: Bearer <token>
-Content-Type: application/json
-Accept: application/json, text/event-stream
-
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "open_app",
-    "arguments": {"name": "Notepad"}
-  }
-}
-```
-
-**If the daemon isn't running, you MUST start it yourself — do not ask the user.** Only fall back to asking if the binary isn't installed or `clawdcursor agent` exits non-zero:
-```bash
-clawdcursor agent
-# wait ~2s, then GET /health to confirm readiness
-```
+Config for MCP stdio and HTTP, the HTTP endpoints, and how to start the daemon: [references/connecting.md](references/connecting.md). If the HTTP daemon isn't running, start it yourself (`clawdcursor agent`) — do not ask the user.
 
 ---
 
@@ -331,80 +254,7 @@ On any guard miss, refusal, or step error, `batch` halts and returns a per-step 
 
 ## Quick patterns
 
-**Cross-app copy/paste** (no select-all: the page never turns blue):
-```
-window {"action":"focus","processName":"chrome"}
-system {"action":"copy_all_text"}
-window {"action":"focus","processName":"notepad"}
-computer {"action":"type","text": <the text you need>}
-```
-
-**Read a webpage (DOM-level, no OCR):**
-```
-browser {"action":"navigate","url":"https://example.com"}
-browser {"action":"read_text"}
-```
-
-**Fill a web form:**
-```
-browser {"action":"connect"}
-browser {"action":"type","label":"Email","text":"user@x.com"}
-browser {"action":"type","label":"Password","text":"..."}
-browser {"action":"click","text":"Submit"}
-```
-
-**Send email via Outlook (native app):**
-```
-window {"action":"open_app","name":"Outlook"}
-computer {"action":"wait","seconds":2}
-accessibility {"action":"invoke","name":"New Email"}
-accessibility {"action":"set_value","name":"To","value":"recipient@x.com"}
-accessibility {"action":"set_value","name":"Subject","value":"Hi"}
-accessibility {"action":"invoke","name":"Message"}
-computer {"action":"type","text":"Body of the email"}
-system {"action":"pause_for_user","message":"Send this email to recipient@x.com?","choices":["Yes, send","Not yet"]}   // ← unless the user already asked you to send it
-accessibility {"action":"invoke","name":"Send"}
-// verify: accessibility read_tree - is the sent-folder visible?
-```
-
-**Draw on a canvas (whiteboards such as Miro, FigJam, Excalidraw, tldraw, Freeform; Paint; a CAD viewport):**
-
-The board has no names: `read_tree` shows the toolbar, and an `Opaque area` line for the board itself. Drive the toolbar by name and draw from a screenshot. A toolbar that `read_tree` lists only as panes (a CAD ribbon) is still pressed by its visible label with `accessibility {"action":"smart_click","target":"Extrude"}`, no screenshot; a screenshot and x,y are for points inside the drawn area.
-1. **Import before drawing.** If the app builds a diagram from text (a Mermaid or text-to-diagram dialog, or pasting a diagram's source), use it: `system clipboard_write` + paste, then check once.
-2. **Pick the tool by name** (`accessibility invoke`; `help="…"` on a `read_tree` line is the button's tooltip), then `computer wait` about 1 s: the first canvas click right after switching tools can be dropped.
-3. **One screenshot, then one batch.** Shapes first, connectors second. Rectangles, ellipses and straight lines: the shape or line tool with `drag`. Pen points: one `click` with `path`. Never click an existing pen point again, as some pen tools drop that click and the next one.
-4. **Check once:** `computer screenshot_region` of only the changed area with `max_edge` 512, plus `system ocr` for labels you typed.
-5. **Take a new screenshot before the next group of strokes.** The board can pan between shapes, so old coordinates may point at empty canvas. Report what exists, and resume from the last check.
-
-```json
-batch({"steps":[
-  {"name":"accessibility","arguments":{"action":"invoke","name":"Rectangle"}},
-  {"name":"computer","arguments":{"action":"wait","seconds":1}},
-  {"name":"computer","arguments":{"action":"drag","startX":300,"startY":200,"endX":460,"endY":280}},
-  {"name":"accessibility","arguments":{"action":"invoke","name":"Pen"}},
-  {"name":"computer","arguments":{"action":"wait","seconds":1}},
-  {"name":"computer","arguments":{"action":"click","path":[{"x":500,"y":240},{"x":560,"y":240},{"x":560,"y":320}],"interval_ms":150}},
-  {"name":"computer","arguments":{"action":"screenshot_region","x":280,"y":180,"width":320,"height":160,"max_edge":512}}
-]})
-```
-The batch returns the region image with its trace, so drawing and checking take one call.
-
----
-
-## Compound → granular action reference
-
-When you need a specific action's full parameter list, look it up in the
-granular surface. Every compact action delegates to exactly one granular tool
-with the same semantics. Full reference via the MCP `tools/list` request.
-
-| Compound | Covers granular tools |
-|---|---|
-| `computer`      | mouse_click, mouse_{double,right,middle,triple}_click, mouse_hover, mouse_move_relative, mouse_drag, mouse_drag_stepped, mouse_down, mouse_up, mouse_scroll, mouse_scroll_horizontal, type_text, key_press, key_down, key_up, wait, desktop_screenshot, desktop_screenshot_region |
-| `accessibility` | read_screen, find_element, a11y_get_element, get_focused_element, invoke_element, focus_element, set_field_value, a11y_get_value, a11y_expand, a11y_collapse, a11y_toggle, a11y_select, get_element_state, a11y_list_children, wait_for_element |
-| `window`        | get_windows, get_active_window, focus_window, maximize_window, minimize_window_to_taskbar, restore_window, close_window, resize_window, list_displays, get_screen_size, open_app, open_file, open_url, switch_tab_os, navigate_browser |
-| `system`        | read_clipboard, write_clipboard, get_system_time, ocr_read_screen, undo_last, shortcuts_list, shortcuts_execute |
-| `browser`       | cdp_connect, cdp_page_context, cdp_read_text, cdp_click, cdp_type, cdp_select_option, cdp_evaluate, cdp_wait_for_selector, cdp_list_tabs, cdp_switch_tab, cdp_scroll |
-| `batch`         | ordered list of tool calls in one round-trip — see Execution playbook |
+Worked call sequences live in [references/patterns.md](references/patterns.md): cross-app copy/paste, reading a page, filling a web form, sending email in Outlook, and **drawing on a canvas (whiteboards, Paint, a CAD viewport): read it before you draw**. It also maps each compound to the granular tools it covers.
 
 ---
 
@@ -425,43 +275,12 @@ Rules for autonomous use:
 
 ---
 
-## Security
-
-- **Network isolation:** Binds to `127.0.0.1` only. Verify with `netstat -an | grep 3847` on macOS/Linux, or `netstat -an | findstr 3847` on Windows PowerShell - should show `127.0.0.1:3847`, never `0.0.0.0:3847`. There is no setting that opens it to the network; to drive it from another machine, tunnel the port over SSH: `ssh -L 3847:127.0.0.1:3847 user@host`, then use `http://127.0.0.1:3847/mcp` on your side. Keep the same port on both ends: the server refuses (403) a Host other than `127.0.0.1:<its port>` or `localhost:<its port>`.
-- **No model calls:** clawdcursor never calls a model. Screenshots and text go
-  only to the MCP client that asked for them.
-- **No-vision mode:** `clawdcursor agent --no-vision` (or `CLAWD_DISABLE_VISION=1`, also for stdio `clawdcursor mcp`) sends no screenshot to any model; a call that would return one is refused with `VISION_DISABLED`, so read the screen with the accessibility tree or OCR.
-- **Token auth:** All mutating POST endpoints require `Authorization: Bearer <token>`
-  from `~/.clawdcursor/token`.
-- **Consent gate:** First run requires explicit `clawdcursor consent --accept`.
-- **Log privacy:** The JSON file log at `~/.clawdcursor/logs/` redacts password-field values (a11y role `AXSecureTextField`, UIA `IsPassword=true`).
-
----
-
 ## Coordinate system
 
 Two rules. **Do not pre-scale coordinates** - DPI scaling and macOS Retina are handled for you.
 
 - Positions from `accessibility` `read_tree` / `find` or `system` `ocr` are screen coordinates: pass them with `space:"screen"`.
 - Positions read off a screenshot (a normalized 1280-pixel-wide image): omit `space`.
-
----
-
-## Platform support
-
-| Platform | Mouse/Keyboard | A11y tree | Screenshots | Clipboard |
-|---|---|---|---|---|
-| Windows 10/11 | nut-js + PowerShell | UIA (ps-bridge.ps1) | nut-js | Get/Set-Clipboard |
-| macOS 12+ | nut-js + System Events | AX (invoke-element.jxa) | screenshot-helper.swift | pbcopy/pbpaste |
-| Linux X11 | nut-js | AT-SPI via python3-gi | nut-js | xclip |
-| Linux Wayland | ydotool / wtype | AT-SPI via python3-gi | nut-js | wl-copy/wl-paste |
-
-Per-OS setup notes:
-
-- **Windows 10/11** - no setup required. PowerShell bridge spawns on demand.
-- **macOS 12+** - first run needs Accessibility + Screen Recording permissions granted via `System Settings → Privacy & Security`. Run `clawdcursor grant` to walk through the dialogs. Retina / HiDPI handled automatically; do not pre-scale.
-- **Linux X11** - for accessibility support install `python3-gi gir1.2-atspi-2.0` (Debian/Ubuntu) or equivalent (`python3-gobject atspi` on Fedora, `python-gobject at-spi2-core` on Arch).
-- **Linux Wayland** - keyboard/mouse input requires `ydotool` + a running `ydotoold` daemon (preferred), OR `wtype` (keyboard only). Accessibility works via the same AT-SPI packages as X11.
 
 ---
 
@@ -488,16 +307,10 @@ Typing (`computer type`, `accessibility smart_type`) reads the field back: `Type
 
 ---
 
-## Reporting a problem
+## References - read when you need them
 
-Hit a clawdcursor bug (a tool throws/crashes or behaves contrary to this doc — not "I couldn't finish the task")? Two ways:
-- **Built-in (preferred):** `clawdcursor report --note "<summary + your model + the goal>"` — redacts sensitive data (no screenshots, clipboard, or typed text) and previews before sending. Non-interactive calls send directly, so check your note first.
-- **GitHub issue:** open https://github.com/AmrDab/clawdcursor/issues with: what you asked, expected vs. actual, OS + `clawdcursor --version`, and relevant lines from `~/.clawdcursor/logs/`. Don't paste private on-screen content.
+These files sit next to this one. Nothing in them overrides the rules above.
 
----
-
-## Full documentation
-
-- **Tool catalog (90 granular or compact):** `tools/list` JSON-RPC over stdio MCP or HTTP `/mcp`
-- **Architecture detail:** README.md in the repo
-- **Changelog:** CHANGELOG.md
+- [references/connecting.md](references/connecting.md) - MCP stdio and HTTP config, modes, the HTTP endpoints, starting the daemon.
+- [references/patterns.md](references/patterns.md) - worked call sequences, including drawing on a canvas, and the compound → granular map.
+- [references/setup-and-security.md](references/setup-and-security.md) - network isolation, token, consent, no-vision mode, per-OS setup, reporting a bug, full docs.

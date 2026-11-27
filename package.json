@@ -50,7 +50,8 @@
     "LICENSE",
     "CHANGELOG.md",
     "SECURITY.md",
-    "SKILL.md"
+    "SKILL.md",
+    "references/"
   ],
   "scripts": {
     "postinstall": "node scripts/verify-install.js || node -e \"process.exit(0)\" && node scripts/postinstall-native.js || node -e \"process.exit(0)\"",

@@ -239,6 +239,27 @@ for (const t of TARGETS) {
   }
 }
 
+// Copy root references/ → skills/clawdcursor/references/ (the files SKILL.md links to), the same way.
+{
+  const srcDir = path.join(REPO_ROOT, 'references');
+  const dstDir = path.join(REPO_ROOT, 'skills', 'clawdcursor', 'references');
+  if (fs.existsSync(srcDir)) {
+    fs.mkdirSync(dstDir, { recursive: true });
+    for (const name of fs.readdirSync(srcDir).filter(n => n.endsWith('.md'))) {
+      const src = fs.readFileSync(path.join(srcDir, name));
+      const dst = path.join(dstDir, name);
+      let current: Buffer | null = null;
+      try { current = fs.readFileSync(dst); } catch { /* not copied yet */ }
+      if (!current || !src.equals(current)) {
+        fs.writeFileSync(dst, src);
+        changed++;
+        touchedFiles.add(`skills/clawdcursor/references/${name}`);
+        console.log(`  ✓ skills/clawdcursor/references/${name} copied from references/${name}`);
+      }
+    }
+  }
+}
+
 if (errors.length > 0) {
   console.error('\nErrors:');
   for (const e of errors) console.error(`  ${e}`);

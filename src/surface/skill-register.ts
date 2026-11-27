@@ -77,12 +77,14 @@ export function registerSkills(folderName = 'clawdcursor'): SkillRegSummary {
           const dstMtime = fs.statSync(targetSkillFile).mtimeMs;
           if (srcMtime > dstMtime) {
             fs.copyFileSync(skillSource, targetSkillFile);
+            copySkillReferences(clawdCursorRoot, skillTarget);
             results.push({ name: `${name} skill`, ok: true, detail: 'Refreshed (SKILL.md updated)' });
           } else {
             results.push({ name: `${name} skill`, ok: true, detail: 'Registered (up to date)' });
           }
         } else {
           fs.copyFileSync(skillSource, targetSkillFile);
+          copySkillReferences(clawdCursorRoot, skillTarget);
           results.push({ name: `${name} skill`, ok: true, detail: 'Registered (SKILL.md copied)' });
         }
         registered++;
@@ -102,6 +104,7 @@ export function registerSkills(folderName = 'clawdcursor'): SkillRegSummary {
       try {
         fs.mkdirSync(skillTarget, { recursive: true });
         fs.copyFileSync(skillSource, targetSkillFile);
+        copySkillReferences(clawdCursorRoot, skillTarget);
         results.push({ name: `${name} skill`, ok: true, detail: 'Registered (SKILL.md copied)' });
         registered++;
       } catch {
@@ -140,4 +143,23 @@ export function ourSkillRegistrations(homeDir: string, folderName = 'clawdcursor
       return false;
     }
   });
+}
+
+/**
+ * Copy the files SKILL.md links to (references/*.md) next to a copied SKILL.md. A symlinked registration already has
+ * them; a copy needs them or its links lead nowhere. Best-effort: a missing reference never fails registration.
+ */
+export function copySkillReferences(packageRoot: string, skillTarget: string): void {
+  const srcDir = path.join(packageRoot, 'references');
+  const dstDir = path.join(skillTarget, 'references');
+  try {
+    if (!fs.existsSync(srcDir) || path.resolve(srcDir) === path.resolve(dstDir)) return;
+    if (fs.existsSync(skillTarget) && fs.lstatSync(skillTarget).isSymbolicLink()) return;
+    fs.mkdirSync(dstDir, { recursive: true });
+    for (const name of fs.readdirSync(srcDir)) {
+      if (name.endsWith('.md')) fs.copyFileSync(path.join(srcDir, name), path.join(dstDir, name));
+    }
+  } catch {
+    // best-effort
+  }
 }
