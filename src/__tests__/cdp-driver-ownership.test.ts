@@ -53,7 +53,7 @@ vi.mock('../platform', () => ({
   }),
 }));
 
-vi.mock('playwright', () => ({
+vi.mock('playwright-core', () => ({
   chromium: {
     connectOverCDP: vi.fn(async (endpoint: string) => {
       const port = Number(new URL(endpoint).port);

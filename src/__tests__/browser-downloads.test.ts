@@ -10,7 +10,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 const h = vi.hoisted(() => ({ browser: null as unknown }));
-vi.mock('playwright', () => ({ chromium: { connectOverCDP: vi.fn(async () => h.browser) } }));
+vi.mock('playwright-core', () => ({ chromium: { connectOverCDP: vi.fn(async () => h.browser) } }));
 
 import { CDPDriver, downloadsDir, freeDownloadPath, keptDownload } from '../platform/cdp-driver';
 import { AGENT_CDP_PORT } from '../platform/browser-config';

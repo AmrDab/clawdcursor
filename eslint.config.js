@@ -54,7 +54,7 @@ module.exports = [
       ...tsPlugin.configs.recommended.rules,
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
-      // Allow require() for lazy-loading (used for optional deps like playwright
+      // Allow require() for lazy-loading (used for optional deps like playwright-core
       // and to break startup import cycles). v0.9.x may tighten this once the
       // pipeline port is complete.
       '@typescript-eslint/no-require-imports': 'off',

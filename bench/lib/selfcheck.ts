@@ -12,7 +12,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { chromium, type Page } from 'playwright';
+import { chromium, type Page } from 'playwright-core';
 import { findBrowser, openBrowser } from './browser';
 import { resolveCli, startIsolated } from './isolated';
 import { buildNative, nativeArgs, openApp, openNativeFixture, readStateFile, type LiveFixture } from './live-fixtures';

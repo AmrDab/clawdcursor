@@ -14,7 +14,7 @@
  * the fixture's own self-test) and checks that the task's predicate holds afterwards, and a unit test checks that
  * every task spec carries exactly the counts of its script. `--selfcheck --write-oracles` writes them into the specs.
  */
-import type { Page } from 'playwright';
+import type { Page } from 'playwright-core';
 
 export type StepKind = 'focus' | 'read' | 'wait' | 'act' | 'verify';
 
