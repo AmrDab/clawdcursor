@@ -21,5 +21,8 @@
       "command": "npx",
       "args": ["-y", "clawdcursor@2.3.0", "mcp", "--compact"]
     }
+  },
+  "network": {
+    "hosts": ["registry.npmjs.org", "api.github.com", "telemetry.clawdcursor.com", "api.clawdcursor.com"]
   }
 }
