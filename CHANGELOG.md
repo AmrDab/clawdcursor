@@ -2,6 +2,15 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- **Agents finish the steps they used to leave for the user.** A new card in the skill, the server instructions, the `pause_for_user`
+  description and llms.txt tell the agent to read its final reply before sending it: a step it leaves for the user on
+  this computer (open, click, go to, install, restart, check that it works) is done with clawdcursor instead. The user
+  keeps only what only they can do (a password, a 2FA code, a CAPTCHA, the system's admin prompt, a decision that is
+  theirs), asked for with `pause_for_user` when the agent reaches it.
+
 ## [2.3.0] - 2026-11-20
 
 ### Security

@@ -62,6 +62,16 @@ metadata:
 
 ---
 
+> **Before your final reply: leave the user nothing you can do.**
+>
+> Read your reply once more before you send it. Does it tell the user to do something on this computer: open, click, go to, turn on, install, restart, copy, or check that it works? Each of those steps is yours. Do it now with clawdcursor, then report it as done. A settings page, a web dashboard, an installer, restarting an app and checking the result are all clawdcursor tasks.
+>
+> The user keeps only what only they can do: a password, a 2FA code, a CAPTCHA, the system's admin prompt, a decision that is theirs, or a step away from this computer. Ask for it with `pause_for_user` when you reach it, then finish the rest yourself. Never leave it as a list at the end of your reply ("Next steps for you: …", "You'll need to …", "Once you've done that, let me know").
+>
+> When the user asked *how* to do something rather than asking you to do it, answer, and offer to do it for them.
+
+---
+
 ## Start here - compact mode and the compound tools
 
 > **If you are an LLM reading this: YOU SHOULD BE USING COMPACT MODE.**
