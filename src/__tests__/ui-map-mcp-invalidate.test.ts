@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { projectToToolDefinition } from '../tools/projected/project-mcp';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { toToolDefinition } from '../tools/core-tools';
+import { buildCoreTools } from '../tools/core-tools';
 import { UIMapHolder } from '../core/sense/ui-map-holder';
 import type { UIMap } from '../core/sense/ui-map-types';
 import type { ToolContext } from '../tools/types';
@@ -34,9 +34,9 @@ describe('MCP path invalidates the shared UIMap holder on screen-changing tools'
     expect(holder.resolve(id, Date.now()).ok).toBe(true); // current before
 
     // 'key' has changesScreen:true; mock platform.keyPress is a no-op above.
-    const keyTool = buildUnifiedTools().find(t => t.name === 'key' && t.changesScreen)!;
+    const keyTool = buildCoreTools().find(t => t.name === 'key_press' && t.changesScreen)!;
     expect(keyTool).toBeDefined();
-    const def = projectToToolDefinition(keyTool);
+    const def = toToolDefinition(keyTool);
     await def.handler({ combo: 'a' }, ctxWith(holder));
 
     expect(holder.resolve(id, Date.now())).toEqual({ ok: false, reason: 'stale' }); // stale after

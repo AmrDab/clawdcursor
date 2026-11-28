@@ -104,7 +104,7 @@ const RULES: Rule[] = [
   { code: 'FOREGROUND_CHANGED', outcome: 'refused', test: /an AI assistant — nothing was sent|the app this agent runs in \(.*\) — nothing was sent/i,
     hint: 'the window in front is an AI assistant, not your target; focus your target window first',
     next: { mcp: 'window {"action":"list"}' } },
-  // smart_click: the point is in another app's window, such as a system dialog on top of the target (tools/click-owner.ts).
+  // smart_click: the point is in another app's window, such as a system dialog on top of the target (tools/hints.ts).
   { code: 'FOREGROUND_CHANGED', outcome: 'refused', test: /which is on top of .* — nothing was clicked/i,
     hint: 'a window of another app is on top of the target at that point, so nothing was clicked; bring the target to the front or close that window',
     next: { mcp: 'window {"action":"list"}' } },
@@ -195,7 +195,7 @@ const RULES: Rule[] = [
     test: /no (?:open )?window (?:matching|named)|no (?:open )?window (?:or running app )?(?:matches|belongs to)|no window has a title containing|no window for that process|window not found|no window found for process|no matching window|failed to focus: no matching/i,
     hint: 'no such window; list the windows to see what is open',
     next: { mcp: 'window {"action":"list"}' } },
-  // The invoke already pressed the visible label itself (project-mcp.ts pressVisibleLabel) and found none: smart_click was just tried.
+  // The invoke already pressed the visible label itself (core-tools.ts pressVisibleLabel) and found none: smart_click was just tried.
   { code: 'NOT_FOUND', outcome: 'failed', whole: true,
     test: /\binvoke\b[^\n]{0,80}missed — element not found[\s\S]*Its visible label was not found on screen either\./i,
     hint: 'no element has that name and no visible label matches it; read the window to see what it calls things', next: REREAD },

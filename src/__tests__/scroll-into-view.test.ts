@@ -7,8 +7,8 @@
  * element is off the active window"; smart_type said "Could not find element". The field was only below the fold.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { buildUnifiedTools } from '../tools/projected/tools';
-import type { AgentToolContext } from '../tools/projected/types';
+import { buildCoreTools } from '../tools/core-tools';
+import type { AgentToolContext } from '../tools/types';
 import { UIMapHolder } from '../core/sense/ui-map-holder';
 import type { UIMap, UIElement } from '../core/sense/ui-map-types';
 import { ensureVisible } from '../core/sense/ui-map-visible';
@@ -53,7 +53,7 @@ function setup(platformOver: Record<string, unknown> = {}, winOver: Record<strin
   } as unknown as AgentToolContext;
   return { platform, ctx, holder };
 }
-const tool = (name: string) => buildUnifiedTools().find(t => t.name === name)!;
+const tool = (name: string) => buildCoreTools().find(t => t.name === name)!;
 const ref = { element_id: 'el_73', snapshot_id: 'obs_2' };
 
 afterEach(() => setOwnUiPids(() => []));

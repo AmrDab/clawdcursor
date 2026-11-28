@@ -2,7 +2,7 @@
 // frame host as processId and the app as hostedProcessId, so the "another app on top" check must accept either, or every
 // smart_click in Calculator / Settings is refused (live 2026-11-17: window-at-point at Calculator's centre).
 import { describe, it, expect } from 'vitest';
-import { ownsPoint, foreignWindowRefusal, describeWindowAt } from '../tools/click-owner';
+import { ownsPoint, foreignWindowRefusal, describeWindowAt } from '../tools/hints';
 
 const FRAME = { processId: 34452, processName: 'ApplicationFrameHost', title: 'Calculator', hostedProcessId: 61248, hostedProcessName: 'CalculatorApp' };
 

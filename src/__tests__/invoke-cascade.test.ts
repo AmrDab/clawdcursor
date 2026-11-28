@@ -23,11 +23,11 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import type { PlatformAdapter, InvokeAction } from '../platform/types';
-import { buildUnifiedTools } from '../tools/projected/tools';
-import type { AgentToolContext, UnifiedTool } from '../tools/projected/types';
+import { buildCoreTools } from '../tools/core-tools';
+import type { AgentToolContext, CoreTool } from '../tools/types';
 
-function findTool(name: string): UnifiedTool {
-  const t = buildUnifiedTools().find(x => x.name === name);
+function findTool(name: string): CoreTool {
+  const t = buildCoreTools().find(x => x.name === name);
   if (!t) throw new Error(`tool ${name} not found`);
   return t;
 }

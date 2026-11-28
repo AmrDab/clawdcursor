@@ -19,13 +19,13 @@ const run = vi.fn();
 vi.mock('../platform/ps-runner', () => ({ psRunner: { run: (c: unknown) => run(c), start: vi.fn(), stop: vi.fn() } }));
 
 import { WindowsAdapter } from '../platform/windows';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 import { getA11yTools } from '../tools/a11y';
 import { classifyResult } from '../core/result-codes';
 import { comboSequence, splitCombo } from '../platform/keys';
-import type { AgentToolContext } from '../tools/projected/types';
+import type { AgentToolContext } from '../tools/types';
 
-const tool = (name: string) => buildUnifiedTools().find(t => t.name === name)!;
+const tool = (name: string) => buildCoreTools().find(t => t.name === name)!;
 const asCtx = (platform: object) => ({ platform, task: 't', screen: { physicalWidth: 1920, physicalHeight: 1080, dpiRatio: 1 } } as unknown as AgentToolContext);
 
 describe('19 — a tree read or an invoke that timed out is a failure, not an empty window or "not found"', () => {
@@ -70,21 +70,21 @@ describe('21 — click honours button:"middle" and count 3, and refuses what it 
   beforeEach(() => { clicks.length = 0; });
 
   it('a middle click is sent as a middle click, a triple as three', async () => {
-    const r = await tool('click').execute({ x: 10, y: 20, space: 'screen', button: 'middle', count: 3 }, asCtx(platform()));
+    const r = await tool('mouse_click').execute({ x: 10, y: 20, space: 'screen', button: 'middle', count: 3 }, asCtx(platform()));
     expect(r.success).toBe(true);
     expect(clicks).toEqual([[10, 20, { button: 'middle', count: 3 }]]);
     expect(r.text).toContain('Clicked middle x3');
   });
 
   it('with a path, every point gets the same button and count', async () => {
-    await tool('click').execute({ path: [{ x: 1, y: 2 }, { x: 3, y: 4 }], interval_ms: 0, space: 'screen', button: 'right', count: 2 }, asCtx(platform()));
+    await tool('mouse_click').execute({ path: [{ x: 1, y: 2 }, { x: 3, y: 4 }], interval_ms: 0, space: 'screen', button: 'right', count: 2 }, asCtx(platform()));
     expect(clicks.map(c => c[2])).toEqual([{ button: 'right', count: 2 }, { button: 'right', count: 2 }]);
   });
 
   it('a button or a count it cannot send is an error, never a left single click', async () => {
     for (const bad of [{ button: 'back' }, { count: 4 }, { count: 0 }, { count: 2.5 }]) {
       const p = platform();
-      const r = await tool('click').execute({ x: 1, y: 2, space: 'screen', ...bad }, asCtx(p));
+      const r = await tool('mouse_click').execute({ x: 1, y: 2, space: 'screen', ...bad }, asCtx(p));
       expect((r as { isError?: boolean }).isError).toBe(true);
       expect(p.mouseClick).not.toHaveBeenCalled();
     }
@@ -112,8 +112,8 @@ describe('22 — "ctrl + s" is ctrl+s and a trailing "+" is the plus key', () =>
   it('the key tool presses the one chord, not Ctrl and then "+s"', async () => {
     const keyPress = vi.fn(async () => {});
     const ctx = asCtx({ keyPress, takeInputWarning: () => undefined });
-    await tool('key').execute({ combo: 'ctrl + s' }, ctx);
-    await tool('key').execute({ combo: 'ctrl++' }, ctx);
+    await tool('key_press').execute({ combo: 'ctrl + s' }, ctx);
+    await tool('key_press').execute({ combo: 'ctrl++' }, ctx);
     expect(keyPress.mock.calls.map(c => (c as unknown[])[0])).toEqual(['ctrl+s', 'ctrl++']);
   });
 });

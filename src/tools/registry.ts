@@ -22,37 +22,7 @@ import type { ToolDefinition, ToolContext, ToolResult } from './types';
 import { toJsonSchema } from './types';
 import { stampCostClasses } from './cost-class';
 import { fenceTools } from '../core/fence';
-import { buildUnifiedTools } from './projected/tools';
-import { projectToToolDefinition } from './projected/project-mcp';
-
-/**
- * The tools built in projected/tools.ts that the MCP surface carries, in groups. The group order is their order in
- * tools/list (the schema snapshot pins it); inside a group they keep buildUnifiedTools() order.
- *
- * Mouse: click / drag / scroll take image-space coords (the latest screenshot's) when `space` is omitted, and
- * mouse_move_relative scales dx/dy from image space: the tools do it themselves (projected/tools.ts).
- * No OCR tool is projected. The MCP surface's OCR is `ocr_read_screen` (ocr.ts): JSON (elements[] + bounds +
- * coordinateSystem) for scope:"screen", `@x,y "text"` rows with the centre of each text for scope:"window".
- */
-const PROJECTED_GROUPS: readonly (readonly string[])[] = [
-  // window
-  ['list_windows', 'focus_window', 'maximize_window', 'minimize_window', 'restore_window', 'close_window', 'resize_window', 'list_displays'],
-  // keyboard
-  ['type', 'key', 'key_down', 'key_up', 'undo_last'],
-  // mouse
-  ['click', 'drag', 'scroll', 'mouse_move_relative', 'mouse_down', 'mouse_up'],
-  // accessibility / perception
-  ['read_screen', 'invoke_element', 'set_field_value', 'focus_element', 'a11y_get_value', 'a11y_expand', 'a11y_collapse',
-    'a11y_toggle', 'a11y_select', 'get_element_state', 'wait_for_element', 'verify', 'compile_ui', 'find_action_button',
-    'find_input_field'],
-  // CDP / browser
-  ['browser_connect', 'browser_read', 'browser_click', 'browser_type'],
-];
-
-function projectedTools(): ToolDefinition[] {
-  const unified = buildUnifiedTools();
-  return PROJECTED_GROUPS.flatMap(group => unified.filter(t => group.includes(t.name)).map(t => projectToToolDefinition(t)));
-}
+import { getCoreTools } from './core-tools';
 
 export type { ToolDefinition, ToolContext, ToolResult };
 export { toJsonSchema };
@@ -64,7 +34,7 @@ export { getCompactTools };
 let _granularCache: ToolDefinition[] | null = null;
 function granularTools(): ToolDefinition[] {
   if (_granularCache === null) {
-    const handWritten = [
+    const tools = [
       ...getDesktopTools(),
       ...getA11yTools(),
       ...getCdpTools(),
@@ -77,14 +47,12 @@ function granularTools(): ToolDefinition[] {
       ...getA11yDepthTools(),
       ...getElectronBridgeTools(),
       ...getAgentTools(),
+      ...getCoreTools(),
     ];
 
     // The fence (CLAWD_FENCE_PIDS, core/fence.ts): with it set, every handler is gated here, once. The MCP surface, the
     // compound tools and the steps of a batch all run these handlers. Unset, the list is returned as it is.
-    _granularCache = fenceTools([
-      ...handWritten,
-      ...projectedTools(),
-    ]);
+    _granularCache = fenceTools(tools);
   }
   return _granularCache;
 }

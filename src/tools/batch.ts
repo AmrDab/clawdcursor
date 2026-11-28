@@ -30,6 +30,8 @@ import { actedIn, actRecord } from '../core/control';
 import { effectLine } from '../core/effect';
 import { compactCall } from './compact-routes';
 import { classifyResult, renderResultLine, isActingAction } from '../core/result-codes';
+import { sleepUnlessStopped } from '../core/control';
+import { NAME_RULE, currentRoutineSession, saveRoutine, loadRoutine, listRoutines, fillVars, portableSteps, takeRecording, varsOf, type RoutineStep } from './routines';
 
 /** Resolve a step's tool by name from EITHER surface — a granular tool
  *  (`mouse_click`, `open_app`, …) or a compound tool (`computer`, `window`, …)
@@ -64,7 +66,7 @@ export interface BatchStep {
   /** Optional precondition; if it fails the batch halts here and reports back. */
   expect?: BatchGuard;
   /** Alias for `expect`, and wins over it. An `expect`
-   *  ASSERTION ARRAY belongs inside `arguments` instead — the projected tool
+   *  ASSERTION ARRAY belongs inside `arguments` instead — the core tool
    *  handlers verify it post-action. */
   precheck?: BatchGuard;
   /** Optional human label for the trace. */
@@ -90,6 +92,9 @@ export interface BatchResult {
 }
 
 const DEFAULT_MAX_STEPS = 12;
+/** A replayed step that found nothing did nothing: safe to try again once the app has had time to show it. */
+const RETRY_CODES = new Set(['NOT_FOUND', 'ELEMENT_HIDDEN']);
+const RETRY_WAITS_MS = [1000, 2000];
 
 /** A halting step's text whole, ending with the `[failed · CODE · hint · next]` line the same call made directly would have. */
 function withResultLine(text: string, isError: boolean, acting: boolean): string {
@@ -143,6 +148,8 @@ async function checkGuard(guard: BatchGuard, ctx: ToolContext): Promise<{ ok: bo
 export async function executeBatch(
   steps: BatchStep[],
   ctx: ToolContext,
+  /** A replay: a step that found nothing (NOT_FOUND, ELEMENT_HIDDEN) is tried again after 1 s, then 2 s: the app may still be loading. */
+  opts: { retryMisses?: boolean } = {},
 ): Promise<BatchResult> {
   const outcomes: StepOutcome[] = [];
   let completed = 0;
@@ -193,10 +200,18 @@ export async function executeBatch(
     const route = compactCall(tool.name, stepAction);
     // A read comes back whole; only an act's text is cut to a short summary.
     const acts = isActingAction(route.tool, route.action);
-    try {
-      res = await tool.handler(args, ctx);
-    } catch (e) {
-      res = { text: `threw: ${e instanceof Error ? e.message : String(e)}`, isError: true };
+    const run = async (): Promise<ToolResult> => {
+      try {
+        return await tool.handler(args, ctx);
+      } catch (e) {
+        return { text: `threw: ${e instanceof Error ? e.message : String(e)}`, isError: true };
+      }
+    };
+    res = await run();
+    for (const wait of opts.retryMisses ? RETRY_WAITS_MS : []) {
+      if (!res.isError || !RETRY_CODES.has(classifyResult(res.text || '', true, acts)?.code ?? '')) break;
+      if (await sleepUnlessStopped(wait)) break;   // cut short: the user stopped clawdcursor
+      res = await run();
     }
     // This step's own target (if it acted on a window at all), as the input guard verified it when the step ran.
     const target = actRecord(before);
@@ -237,21 +252,22 @@ export function getBatchTools(): ToolDefinition[] {
       description:
         'Run an ORDERED LIST of tool calls in one shot (collapses many round-trips into one). Each step is ' +
         '{ name, arguments, expect? } (`args` is accepted for `arguments`). `name`+`arguments` is a normal tool call (compound like ' +
-        '{"name":"computer","arguments":{"action":"type","text":"hi"}} or a granular tool). Optional `expect` ' +
+        '{"name":"computer","arguments":{"action":"type","text":"hi"}}). Optional `expect` ' +
         'is a precondition checked by RE-PERCEIVING before the step runs: {"window":"notepad"} (foreground ' +
         'window must match) or {"element":"Send"} (a11y element must be present). The batch HALTS on the first ' +
         'failed precondition, refusal, or step error and returns a per-step trace so you re-plan from real ' +
         'state. A step is refused exactly as a direct call would be (the user has stopped or paused clawdcursor, a dangerous key combo, an AI assistant window in front). ' +
-        'Do not batch past an irreversible step the user did not ask for: ask first with system pause_for_user.',
+        'Do not batch past an irreversible step the user did not ask for: ask first with system pause_for_user. ' +
+        'Routines: save_as saves a task that worked; replay runs a saved one in one call (see their parameters).',
       parameters: {
         steps: {
           type: 'array',
-          required: true,
-          description: 'Ordered steps to run. Each step is a normal tool call: { "name": "<tool>", "arguments": {...}, "expect"?: {"window"?,"element"?} } ("args" is accepted for "arguments"). (A JSON-encoded string of the same array is also accepted.)',
+          required: false,
+          description: 'Ordered steps to run (not with replay). Each step is a normal tool call: { "name": "<tool>", "arguments": {...}, "expect"?: {"window"?,"element"?} } ("args" is accepted for "arguments"). (A JSON-encoded string of the same array is also accepted.)',
           items: {
             type: 'object',
             properties: {
-              name: { type: 'string', description: 'Tool to call — a compound ("computer"/"window"/...) or a granular tool.' },
+              name: { type: 'string', description: 'Tool to call: "computer", "accessibility", "window", "system" or "browser".' },
               arguments: { type: 'object', description: 'Arguments for that tool, e.g. {"action":"type","text":"hi"}. May include an `expect` ASSERTION ARRAY (post-condition) — verified after the step by the tool itself.' },
               args: { type: 'object', description: 'Alias of `arguments`.' },
               expect: { type: 'object', description: 'Optional precondition re-checked by perceiving before the step: {"window":"..."} or {"element":"..."}. (`precheck` is an accepted alias.)' },
@@ -260,10 +276,29 @@ export function getBatchTools(): ToolDefinition[] {
           },
         },
         maxSteps: { type: 'number', description: `Most steps one batch may hold; a longer one is refused before step 1 (default ${DEFAULT_MAX_STEPS}).`, required: false },
+        save_as: { type: 'string', description: 'Save a routine under this name (letters, digits, - and _), so the next time is one call. Without steps: the calls of this session that changed something since the last save. With steps: saves those steps as they are and runs nothing. Put {{name}} in an argument for a value that changes between runs. The same name replaces the old one.', required: false },
+        description: { type: 'string', description: 'With save_as: what the routine does and in which app, e.g. "Export the open sheet as PDF in Excel".', required: false },
+        replay: { type: 'string', description: 'Run the saved routine of this name. A step whose element is not there yet is tried again; it halts at the first failure: carry on by hand from there.', required: false },
+        vars: { type: 'object', description: 'With replay: a value for each {{name}} in the routine, e.g. {"to":"a@b.com"}.', required: false },
       },
       category: 'orchestration',
       safetyTier: 0, // the batch itself is inert; the pill shows when a STEP acts (batchActs).
       handler: async (params, ctx: ToolContext): Promise<ToolResult> => {
+        const saveAs = typeof params.save_as === 'string' ? params.save_as.trim() : undefined;
+        const replay = typeof params.replay === 'string' ? params.replay.trim() : undefined;
+        // `steps: []` says no step ran (a log reader judges a batch with no step list as one that could have done anything).
+        const none = (text: string): ToolResult => ({ text, isError: true, steps: [] });
+        if (saveAs !== undefined && replay !== undefined) return none('batch: save_as and replay go in separate calls.');
+        if (saveAs !== undefined && !NAME_RULE.test(saveAs)) {
+          return none(`batch: save_as ${JSON.stringify(saveAs)} is not a routine name: use 1-60 letters, digits, - or _, starting with a letter or digit.`);
+        }
+        if (replay !== undefined) {
+          if (params.steps !== undefined && params.steps !== null) return none('batch: replay runs the saved steps; pass no steps with it.');
+          return { steps: [], ...await replayRoutine(replay, params.vars, params.maxSteps, ctx) };
+        }
+        if (saveAs !== undefined && (params.steps === undefined || params.steps === null)) {
+          return { steps: [], ...await saveRecording(saveAs, typeof params.description === 'string' ? params.description : '', ctx) };
+        }
         // `steps` arrives as a JSON string (constrained schema) or, from clients
         // that pass rich JSON, a real array. Accept both.
         let steps: BatchStep[];
@@ -291,6 +326,12 @@ export function getBatchTools(): ToolDefinition[] {
         if (steps.length > cap) {
           return { text: `batch: ${steps.length} steps is over the cap of ${cap} steps per batch, so none ran. Split it into batches of at most ${cap} steps.`, isError: true };
         }
+        // save_as with steps saves them and runs nothing: they are the steps that already worked (bench 2026-11-26: run
+        // again on saving, a click or a typed text happened twice and 3 tasks of 15 failed).
+        if (saveAs !== undefined) {
+          const text = await saveSteps(saveAs, typeof params.description === 'string' ? params.description : '', steps.map(s => ({ name: bareStepName(s.name), arguments: stepArgs(s) })), ctx);
+          return { text, isError: text.startsWith('Not saved'), steps: [] };
+        }
         const w0 = await window();
         const result = await executeBatch(steps, ctx);
         const effect = effectLine(w0, await window());
@@ -307,4 +348,57 @@ export function getBatchTools(): ToolDefinition[] {
       },
     },
   ];
+}
+
+// ─── Routines (routines.ts) ──────────────────────────────────
+
+async function saveSteps(name: string, description: string, steps: RoutineStep[], ctx: ToolContext): Promise<string> {
+  const { steps: kept, notes, refused } = await portableSteps(steps, ctx.platform);
+  if (refused.length) return `Not saved as "${name}": ${refused.join('; ')}.`;
+  if (!kept.length) return `Not saved as "${name}": no steps.`;
+  const file = saveRoutine(name, description, kept);
+  const vars = varsOf(kept);
+  return `Saved routine "${name}" (${kept.length} steps${vars.length ? `, vars ${vars.join(', ')}` : ''}) to ${file}. ` +
+    `Next time: batch with replay "${name}"${vars.length ? ' and vars' : ''}.${notes.length ? ` Changed to replay: ${notes.join('; ')}.` : ''}`;
+}
+
+async function saveRecording(name: string, description: string, ctx: ToolContext): Promise<ToolResult> {
+  const session = currentRoutineSession();
+  const steps = session ? takeRecording(session) : [];
+  if (!steps.length) {
+    return { text: `batch: nothing to save as "${name}": no call in this session changed anything since the last save. Pass the steps to save instead.`, isError: true };
+  }
+  const text = await saveSteps(name, description, steps, ctx);
+  const list = steps.map((s, i) => `  ${i + 1}. ${s.name}${typeof s.arguments?.action === 'string' ? `.${s.arguments.action}` : ''}`).join('\n');
+  return { text: `${text}\nSteps:\n${list}\nIf a step does not belong, save again with the steps you want.`, isError: text.startsWith('Not saved') };
+}
+
+async function replayRoutine(name: string, rawVars: unknown, rawMax: unknown, ctx: ToolContext): Promise<ToolResult> {
+  const routine = loadRoutine(name);
+  if (!routine) {
+    const known = listRoutines().map(r => r.name);
+    return { text: `batch: no routine named "${name}". ${known.length ? `Saved: ${known.join(', ')}.` : 'None is saved yet.'}`, isError: true };
+  }
+  let vars: Record<string, unknown> = {};
+  if (typeof rawVars === 'string') {
+    try { vars = JSON.parse(rawVars); } catch { return { text: 'batch: `vars` must be an object.', isError: true }; }
+  } else if (rawVars && typeof rawVars === 'object' && !Array.isArray(rawVars)) vars = rawVars as Record<string, unknown>;
+  const filled = fillVars(routine.steps, vars);
+  if ('missing' in filled) return { text: `batch: routine "${name}" needs vars ${filled.missing.join(', ')}; nothing ran.`, isError: true };
+  const cap = typeof rawMax === 'number' ? rawMax : Infinity;
+  if (filled.steps.length > cap) return { text: `batch: routine "${name}" has ${filled.steps.length} steps, over maxSteps ${cap}; nothing ran.`, isError: true };
+  const result = await executeBatch(filled.steps, ctx, { retryMisses: true });
+  const head = result.allDone
+    ? `Replayed routine "${name}".`
+    : `Replayed routine "${name}" up to step ${result.stoppedAt! + 1}: carry on by hand from there, then save it again if the app changed.`;
+  return {
+    text: `${head}\n${renderResult(result)}`,
+    isError: !result.allDone,
+    ...(result.image ? { image: result.image } : {}),
+    steps: result.steps.map(s => {
+      const a = filled.steps[s.i].arguments?.action;
+      return { tool: bareStepName(filled.steps[s.i].name), ...(typeof a === 'string' ? { action: a } : {}), status: s.status, text: s.text, pressedKeys: s.pressedKeys,
+        ...(s.app ? { app: s.app } : {}), ...(s.appPid ? { appPid: s.appPid } : {}), ...(s.appHandle ? { appHandle: s.appHandle } : {}) };
+    }),
+  };
 }

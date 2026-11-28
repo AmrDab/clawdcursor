@@ -9,7 +9,7 @@ const pause = { pending: null as null | { message: string } };
 vi.mock('../core/banner', () => ({ controlBanner: { overlayPids: () => overlay.pids } }));
 vi.mock('../core/pause-gate', () => ({ pauseGate: { current: () => pause.pending } }));
 
-import { ownUiRefusal, isPauseSafeCall } from '../core/own-ui-guard';
+import { ownUiRefusal, isPauseSafeCall } from '../tools/call-guards';
 import { classifyResult } from '../core/result-codes';
 
 beforeEach(() => { overlay.pids = [4242, 4243]; pause.pending = null; });

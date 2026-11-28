@@ -14,7 +14,7 @@ import type { ZodTypeAny } from 'zod';
 import { VERSION } from '../version';
 import type { ToolContext, ToolDefinition } from '../tools/registry';
 import type { ParameterDef } from '../tools/types';
-import { getAllTools, getCompactSurface } from '../tools/registry';
+import { getCompactSurface } from '../tools/registry';
 import { controlBanner } from '../core/banner';
 import { osKeysGuide } from '../platform/keys';
 import { enableHostAncestry } from '../core/ai-hosts';
@@ -22,7 +22,7 @@ import { actedIn, actRecord, withTurnBudget } from '../core/control';
 import { asPauseOwner, pauseGate } from '../core/pause-gate';
 import { logger } from '../core/observability/logger';
 import { COMPOUND_ROUTE_INDEX, compactCall } from '../tools/compact-routes';
-import { resultCallsAsProse } from '../tools/call-prose';
+import { resultCallsAsProse, OPAQUE_MARK } from '../tools/hints';
 
 const COMPOUND_TOOLS = new Set(Object.keys(COMPOUND_ROUTE_INDEX));
 /** A compound call's arguments that its schema does not list (keepUndeclaredArgs), for the call being run. */
@@ -32,12 +32,11 @@ import { SessionLog, outcomeOf } from './session-log';
 import { withSteps, watchChildProcesses } from '../core/observability/steps';
 import { inMcpSession } from '../core/verify/assertions';
 import { allowNames, setHost } from '../core/observability/telemetry';
-import { setGuideSurface } from '../core/guides/hint';
 import { classifyResult, renderResultLine, isJsonText, isActingAction, isUnverifiableAction } from '../core/result-codes';
 import { quoteScreenText } from '../core/untrusted-screen-content';
 import { refusalBefore, afterCall, forgetScreenIfActed, guardedCall } from '../tools/call-guards';
-import { OPAQUE_MARK } from '../tools/blind-hints';
 import { bareStepName } from '../tools/batch';
+import { noteCall, forgetSession, routinesLine, inRoutineSession, recordedCount } from '../tools/routines';
 
 // ── Typed SDK boundary (#115) ────────────────────────────────────────────────
 //
@@ -86,8 +85,6 @@ export interface McpTransportLike {
 }
 
 export interface CreateMcpServerOptions {
-  /** When true, expose the 6-compound surface instead of granular. */
-  compact?: boolean;
   /** Subsystem context every tool handler receives. */
   ctx: ToolContext;
 }
@@ -103,9 +100,9 @@ export interface McpServerHandle {
   sessionLog: SessionLog;
 }
 
-/** The tools a server serves: the 6 compounds, or the granular surface where every action is its own tool. */
-export function servedTools(compact: boolean | undefined): ToolDefinition[] {
-  return compact ? getCompactSurface() : getAllTools();
+/** The tools a server serves: the 6 compound tools. The granular tools behind them are internal. */
+export function servedTools(): ToolDefinition[] {
+  return getCompactSurface();
 }
 
 /** A compact (tool, action), or a granular tool reached through its compound route, that changes something. */
@@ -135,7 +132,7 @@ export function batchActs(steps: unknown): boolean {
 let sessionSeq = 0;
 
 export async function createMcpServer(options: CreateMcpServerOptions): Promise<McpServerHandle> {
-  const { compact, ctx } = options;
+  const { ctx } = options;
   // Dynamic import: the SDK is ESM and our build is CJS. The specifier cast is
   // a moduleResolution:"node" limitation (see the #115 note above); the VALUE
   // is immediately narrowed to the structural contract.
@@ -150,8 +147,8 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
   // integrating agent (Claude Code, Cursor, Windsurf, Zed, OpenClaw) HOW to
   // use clawdcursor cheaply. Without it, agents drive the raw GUI tools with
   // their own premium model, the expensive path.
-  // The one tool that asks the user, named the way this surface names it (compact: a compound tool and its action).
-  const pauseTool = compact ? 'the system tool, action pause_for_user' : 'the pause_for_user tool';
+  // The one tool that asks the user: a compound tool and its action.
+  const pauseTool = 'the system tool, action pause_for_user';
   const instructions =
       // Owner 2026-11-17: the agent should know, without being told to use clawdcursor, that no task asked of it is out of
       // reach (the 0.5-era rules a 2026-02 skill scan cut and the 2.x "FALLBACK layer" line replaced).
@@ -162,21 +159,19 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       // Live runs (audit 2026-11-19, and the 2026-11-19 terminal runs): the first call often went to a bare `window`, which
       // the host does not have, because it lists the tools with its own prefix.
       'The tool names in this text are short: call each tool by the full name your host lists for it (hosts add a prefix). ' +
-      (compact
-        // Compact tools carry no per-tool cost prefix, so name the actions.
-        ? 'TO SEE: (1) accessibility read_tree lists the window\'s elements by name; ' +
-          '(2) system copy_all_text gives the exact text of a page (find returns only the lines with one value); ' +
-          '(3) system ocr reads the screen when read_tree is empty. ' +
-          'TO ACT: (1) accessibility invoke with name clicks an element, set_value types into a field; ' +
-          '(2) if the name is not found, accessibility smart_click with target = the visible label; ' +
-          '(3) only for a target with no name and no text: computer screenshot, then computer click with x,y from that image. '
-        : 'To minimize tokens, follow the cost-class prefix on each tool — ' +
-          '[act] < [inspect] < [perceive-text] < [perceive-image]. ' +
-          'For perception always escalate in this order: ' +
-          '(1) read the accessibility tree ([perceive-text], cheapest — start here); ' +
-          '(2) use OCR ([perceive-text]) when the tree is empty or sparse; ' +
-          '(3) capture a screenshot ([perceive-image]) only as a last resort when both fail. ' +
-          'Prefer named-target actions (by a11y name) over pixel coordinates. ') +
+      // The compound tools carry no per-tool cost prefix, so name the actions.
+      'TO SEE: (1) accessibility read_tree lists the window\'s elements by name; ' +
+      '(2) system copy_all_text gives the exact text of a page (find returns only the lines with one value); ' +
+      '(3) system ocr reads the screen when read_tree is empty. ' +
+      'TO ACT: (1) accessibility invoke with name clicks an element, set_value types into a field; ' +
+      '(2) if the name is not found, accessibility smart_click with target = the visible label; ' +
+      '(3) only for a target with no name and no text: computer screenshot, then computer click with x,y from that image. ' +
+      // Routines (tools/routines.ts): the second time a task is asked, one call instead of the whole exploration. Early in
+      // the text: hosts cut long instructions (Claude Code at about 4,000 characters; bench 2026-11-26: placed last, no agent saved).
+      'Repeat work: when a task is done and it took 3 or more calls that changed something, save it before you report back: batch with ' +
+      'save_as (a short name) and description (what it does, in which app); it costs one call and makes the next run one call. When a saved ' +
+      'routine fits the task, run it first with batch replay (vars for its {{names}}), and do the steps by hand only from where it halts. ' +
+      routinesLine() +
       // The OS is read once, here, when the server starts: the agent knows from its first message which keys to send.
       osKeysGuide() +
       'A surface with no names and no text (a drawing canvas, whiteboard, CAD viewport or map; read_tree says "Opaque area") ' +
@@ -195,7 +190,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'Drive UI symbolically: compile_ui / find_button / find_field return a stable ' +
       '{element_id, snapshot_id} you pass to invoke/set_value — it survives layout shifts, so ' +
       'prefer it over pixel coordinates. ' +
-      `When a result shows keys from a guide, press them instead of hunting with the mouse; the rest of that guide is ${compact ? 'the system tool, action shortcuts_list' : 'the shortcuts_list tool'}, with context. ` +
+      `When a result shows keys from a guide, press them instead of hunting with the mouse; the rest of that guide is the system tool, action shortcuts_list, with context. ` +
       'Pass `expect` on consequential actions so a failed one ' +
       'reports a DEVIATION instead of a hollow success. Each action result and error ends with one line: ' +
       '[confirmed | unverified | refused · CODE · hint · next | failed · CODE · hint · next] — follow its next call instead of guessing. ' +
@@ -205,26 +200,27 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'https://clawdcursor.com/llms.txt.';
 
   const server = new McpServer({ name: 'clawdcursor', version: VERSION }, { instructions });
-  setGuideSurface(compact);   // the app-guide hint names the tool as this surface spells it
 
   // Local record of this session (tool / action / blind-vs-vision / ok — no
   // content). Feeds `clawdcursor report` and the vision-streak nudge below.
-  const sessionLog = new SessionLog({ version: VERSION, surface: compact ? 'compact' : 'granular' });
+  const sessionLog = new SessionLog({ version: VERSION, surface: 'compact' });
   watchChildProcesses();  // each child process a call starts is one of its steps (steps.ts)
-  const VISION_STREAK_HINT = (n: number) => compact
-    ? `[clawdcursor] ${n === 1 ? 'A screenshot before any text was read.' : `${n} screenshots in a row with no text read.`} Cheaper and exact: accessibility compile_ui or smart_read (names + positions), system copy_all_text (exact page text); act by name with accessibility invoke / smart_click — coordinate clicks are the fallback.`
-    : `[clawdcursor] ${n === 1 ? 'A screenshot before any text was read.' : `${n} screenshots in a row with no text read.`} Cheaper and exact: compile_ui / smart_read (names + positions), copy_all_text (exact page text); act by name with invoke_element / smart_click — coordinate clicks are the fallback.`;
+  const VISION_STREAK_HINT = (n: number) =>
+    `[clawdcursor] ${n === 1 ? 'A screenshot before any text was read.' : `${n} screenshots in a row with no text read.`} Cheaper and exact: accessibility compile_ui or smart_read (names + positions), system copy_all_text (exact page text); act by name with accessibility invoke / smart_click — coordinate clicks are the fallback.`;
   // The last blind read found nothing to act on in the window (an empty tree, an opaque area): the advice above cannot be followed there.
-  const CANVAS_HINT = compact
-    ? '[clawdcursor] The last text read found nothing to act on in the drawn area, so a screenshot is right for picks INSIDE it: send all remaining strokes in ONE batch (computer click with path, drag_path), then ONE computer screenshot_region of only the changed area with max_edge 512. A toolbar button, field or dialog button with a visible label is pressed with accessibility smart_click target "<label>", no screenshot.'
-    : '[clawdcursor] The last text read found nothing to act on in the drawn area, so a screenshot is right for picks INSIDE it: send all remaining strokes in ONE batch (mouse_click with path, mouse_drag_stepped), then ONE desktop_screenshot_region of only the changed area with max_edge 512. A toolbar button, field or dialog button with a visible label is pressed with smart_click target "<label>", no screenshot.';
+  const CANVAS_HINT =
+    '[clawdcursor] The last text read found nothing to act on in the drawn area, so a screenshot is right for picks INSIDE it: send all remaining strokes in ONE batch (computer click with path, drag_path), then ONE computer screenshot_region of only the changed area with max_edge 512. A toolbar button, field or dialog button with a visible label is pressed with accessibility smart_click target "<label>", no screenshot.';
   // A CAD run (2026-11-16) made 73 coordinate clicks, ~58 on labelled buttons, and 7 accessibility calls: after 3 coordinate clicks with no
   // click by name since, say once that a label is pressed by name. A batch is act-other and is not counted.
-  const COORD_CLICK_HINT = compact
-    ? '[clawdcursor] 3 clicks by coordinates and none by name. A button, tab, menu or field with a visible label: smart_click {"target":"<label>"} presses it with no screenshot; keep x,y for points with no label, like inside a canvas.'
-    : '[clawdcursor] 3 clicks by coordinates and none by name. A button, tab, menu or field with a visible label: smart_click {"target":"<label>"} presses it with no screenshot; keep x,y for points with no label, like inside a canvas.';
+  const COORD_CLICK_HINT =
+    '[clawdcursor] 3 clicks by coordinates and none by name. A button, tab, menu or field with a visible label: smart_click {"target":"<label>"} presses it with no screenshot; keep x,y for points with no label, like inside a canvas.';
   let coordClicks = 0;
   let coordNudged = false;
+  // Bench 2026-11-26: with the advice in the instructions only, no agent saved a routine in 45 tasks. Said once, in the
+  // result of the call that makes the recording worth saving, it is read when it matters.
+  const SAVE_HINT_AT = 3;
+  let saveHinted = false;
+  const SAVE_HINT = '[clawdcursor] This session has changed something 3 times. When the task is done, save it before you report back: the batch tool with save_as (a short name) and description. The next time, the batch tool with replay runs it in one call.';
   let blindFoundNothing = false;
   let nudgedThisStreak = false;
   const clientInfo = () => (server as unknown as { server?: { getClientVersion?: () => { name?: string; version?: string } | undefined } })
@@ -270,7 +266,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
     })();
     return consentPrompt;
   };
-  const tools = servedTools(compact);
+  const tools = servedTools();
   // Bug telemetry sends a tool or action name only when it is one of these (telemetry.ts), and the host only by an allowlist.
   allowNames(tools.flatMap(t => [t.name, ...(t.parameters.action?.enum ?? [])]));
   // When this session started: when its agent connected (initialized). `expect` / `verify` file_changed_since_start
@@ -285,7 +281,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
   const lowClose = server as unknown as { server?: { onclose?: () => void } };
   if (lowClose.server) {
     const prior = lowClose.server.onclose;
-    lowClose.server.onclose = () => { prior?.(); pauseGate.withdrawFor(sessionId); };
+    lowClose.server.onclose = () => { prior?.(); pauseGate.withdrawFor(sessionId); forgetSession(sessionId); };
   }
 
   for (const tool of tools) {
@@ -315,13 +311,12 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // hint and a safe next call (result-codes.ts). Not on JSON results (they carry their own status) or a batch
         // (its report has a status per step).
         const callAction = typeof params?.action === 'string' ? params.action : undefined;
-        // Every call a hint names goes out as prose for this surface ("the browser tool, action page_context"), never as a
-        // call-shaped text the host has no tool of that name for (call-prose.ts).
-        const surface = compact ? 'compact' : 'granular';
+        // Every call a hint names goes out as prose ("the browser tool, action page_context"), never as a
+        // call-shaped text the host has no tool of that name for (hints.ts).
         const withOutcome = (text: string, isError: boolean): string => {
-          if (tool.name === 'batch' || isJsonText(text)) return resultCallsAsProse(text, surface);
+          if (tool.name === 'batch' || isJsonText(text)) return resultCallsAsProse(text);
           const c = classifyResult(text, isError, isActingCall(tool.name, callAction, isUnverifiableAction), 'mcp', isActingCall(tool.name, callAction));
-          return resultCallsAsProse(c ? `${text}\n${renderResultLine(c)}` : text, surface);
+          return resultCallsAsProse(c ? `${text}\n${renderResultLine(c)}` : text);
         };
         // Consent gate (non-fatal): until the user accepts one-time consent,
         // every tool returns a clear, host-VISIBLE prompt instead of the server
@@ -363,7 +358,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // double-clicked (#294).
         const refused = await refusalBefore(call, ctx, () => {
           if ((tool.safetyTier ?? 0) >= 1 && !COMPOUND_TOOLS.has(tool.name)) controlBanner.touch();
-          if (tool.name === 'batch' && batchActs(params?.steps)) controlBanner.touch();
+          if (tool.name === 'batch' && (batchActs(params?.steps) || typeof params?.replay === 'string')) controlBanner.touch();
         });
         if (refused) return refuse(refused.guard, refused.why);
         const started = Date.now();
@@ -373,10 +368,10 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         const releasePill = controlBanner.hold();  // the call has control until it returns, waits included
         sessionLog.running(tool.name, action, clientInfo());
         // withTurnBudget: the call's waits for the user (control.ts) end before a host's 60 s call limit.
-        const run = await withSteps(tool.name, action, () => inMcpSession(sessionStartedAt ?? started, () => withTurnBudget(() => asPauseOwner(sessionId, () => tool.handler(params, ctx)))));  // where the call's time went
+        const run = await withSteps(tool.name, action, () => inMcpSession(sessionStartedAt ?? started, () => withTurnBudget(() => asPauseOwner(sessionId, () => inRoutineSession(sessionId, () => tool.handler(params, ctx))))));  // where the call's time went
         releasePill();
         if (!run.ok) {
-          // A handler throw (e.g. projected tools' toolContextToAgent when the
+          // A handler throw (e.g. core tools' toolContextToAgent when the
           // platform adapter failed to init) must NOT propagate to the MCP SDK
           // — in stdio mode an unhandled rejection can corrupt the JSON-RPC
           // stream. Convert to a clean isError result.
@@ -402,6 +397,14 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         const batchRefused = result.isError && steps?.[steps.length - 1]?.outcome === 'refused';
         const outcome = batchRefused ? 'refused' : outcomeOf(!!result.isError, result.text ?? '');
         const blindBefore = sessionLog.summary.blind;
+        // What a routine saved later would replay: calls that changed something, and a batch's steps that ran.
+        if (!result.isError || tool.name === 'batch') noteCall(sessionId, tool.name, params ?? {}, result.steps?.map(s => s.status));
+        if (!saveHinted && !params?.replay && recordedCount(sessionId) >= SAVE_HINT_AT) {
+          saveHinted = true;
+          result = { ...result, text: `${result.text}
+
+${SAVE_HINT}` };
+        }
         const cls = sessionLog.record(tool.name, action, !result.isError, Date.now() - started,
           result.isError ? result.text : undefined, clientInfo(),
           { outcome, space: typeof params?.space === 'string' ? params.space : undefined,

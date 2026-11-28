@@ -142,7 +142,7 @@ In tool terms:
 - **Acting by name:** pressing "Send" because it is called Send, not because it sits at a spot on the screen.
 - **OCR:** text recognition, reading the words in a picture of the screen. It runs on your computer.
 - **Playwright and CDP:** Playwright is a library that controls Chrome and Edge from the inside, over the Chrome DevTools Protocol (CDP), the browser's own debugging connection. Apps built on a browser engine (Electron or WebView2) can be reached the same way; `system detect_webview` finds them.
-- **Compact tools:** the six tools your AI sees with `--compact`. Without it there are 90 smaller tools, one per action. See [The tools](#the-tools).
+- **Compact tools:** the six tools your AI sees. See [The tools](#the-tools).
 - **The pill and the three screen states:** while your AI is working, a pill on screen says what it is doing ("Typing in Edge"). An amber outline around the agent's window means background work, while you keep using the computer. An amber glow on the whole screen means it is using the mouse and keyboard. A blue glow on the whole screen means it needs you for a step. Clicks go through the pill, and it stays out of your AI's screenshots.
 
 ---
@@ -166,7 +166,7 @@ What is enforced, whatever your AI sends:
 - **Pause and Resume on the pill** (Windows, macOS). Pause holds every act of the agent, background ones included, until you press Resume. Resume continues without a step in the chat.
 - **Three screen states.** An amber outline around the agent's window: it is working in the background, and you keep using the computer. An amber glow on the whole screen: it is using the mouse and keyboard. A blue glow on the whole screen, and no outline: it needs you for a step. The pill says which of the first two it is: "running in background" or "requires foreground".
 - **It waits while you use the computer** (Windows, macOS). It never types or moves the mouse while your hands are on it. It waits until you have been idle for 1 s. If you take over mid-action, nothing more is sent, and it carries on by itself once you are idle again: no Resume click needed. Background acts, by name or by window message, do not wait. Linux cannot read idle time, so nothing waits there.
-- **The pause card.** For a sign-in or a 2FA code your AI hands that one step to you with `system pause_for_user`: a card on screen says what is needed and can offer choices or a text box, and your AI continues when you click Resume, or as soon as its `done_when` condition shows on screen. While the card is up, no other tool call runs. A choice or a typed reply on the card comes only from you: your AI cannot click its own card or the pill. On the granular surface an agent can also end a pause with `resume_task`; that is reported as unverified, never as your answer.
+- **The pause card.** For a sign-in or a 2FA code your AI hands that one step to you with `system pause_for_user`: a card on screen says what is needed and can offer choices or a text box, and your AI continues when you click Resume, or as soon as its `done_when` condition shows on screen. While the card is up, no other tool call runs. A choice or a typed reply on the card comes only from you: your AI cannot click its own card or the pill.
 - **No typing into AI assistant windows.** Input is refused when the window in front is an AI assistant your AI did not focus or open on purpose, or is no longer the window it was working in.
 - **Password values are never read.** Password field values are never returned by tree, find or value reads on Windows, macOS and Linux. A screenshot or OCR can still show whatever is visible on screen.
 - **A short list of keys that are never sent**, because they lock the machine or end the session. Windows: `Win+L`, `Ctrl+Alt+Del`. macOS: `Ctrl+Cmd+Q`, `Cmd+Shift+Q`, anything with Power or Eject. Linux: `Super+L`, `Ctrl+Alt+Del`, `Ctrl+Alt+Backspace`, `Ctrl+Alt+F1`&ndash;`F12`, SysRq, Power. Every other shortcut is allowed.
@@ -177,7 +177,7 @@ What is enforced, whatever your AI sends:
 What is not enforced by Clawd Cursor:
 
 - **There is no built-in policy engine.** Clawd Cursor does not decide which actions your AI may take, and nothing is refused for being "destructive". Your AI and your MCP host's approval prompts decide. (The policy gate of 1.x was removed in 2.0 because a click by coordinates went around it.)
-- **Per-action approval is your host's job.** The tools carry `readOnlyHint` / `destructiveHint` annotations for hosts that prompt. Approving a Clawd Cursor tool in a host means approving desktop control with your rights, not one narrow action. On the compact surface all six tools are marked destructive, because each covers many actions; the granular surface has one hint per action.
+- **Per-action approval is your host's job.** The tools carry `readOnlyHint` / `destructiveHint` annotations for hosts that prompt. Approving a Clawd Cursor tool in a host means approving desktop control with your rights, not one narrow action. All six tools are marked destructive, because each covers many actions.
 - **If your host auto-approves tool calls, nothing asks before an irreversible action.** Your AI is instructed to ask on the pause card before sending, deleting, paying or closing unsaved work that you did not ask for, but that is an instruction, not a check. For agents you do not fully trust, or for unattended runs, use a host with approval prompts, or, from 2.1, turn on confirm mode ([#373](https://github.com/AmrDab/clawdcursor/issues/373)): with `CLAWD_CONFIRM=1` in the server's environment (in the Claude Desktop extension, the "Ask before Send / Delete / Pay / Close" setting), a click or key that would send, delete, pay or close waits on the pause card until you click Resume. Its limits are in [SECURITY.md](SECURITY.md).
 - **An agent with its own shell** on your machine is not confined by Clawd Cursor at all.
 
@@ -205,7 +205,7 @@ An app guide lists one app's keyboard shortcuts for your OS, a few workflows and
 2.0.0 sent nothing. **From 2.1**, Clawd Cursor sends anonymous error reports by default, so bugs get found and fixed. Every value is a number or comes from a fixed list, and tool and action names are Clawd Cursor's own.
 
 - **With every report:** a random install id made on your computer (not derived from your hardware or accounts), the Clawd Cursor version and your OS family.
-- **`start`, when the server starts:** OS major version, CPU architecture, Node.js major version, which AI app started it (from a fixed list: Claude Code, Claude Desktop, Cursor, Codex and others; anything else is "other"), and compact or granular tools.
+- **`start`, when the server starts:** OS major version, CPU architecture, Node.js major version, which AI app started it (from a fixed list: Claude Code, Claude Desktop, Cursor, Codex and others; anything else is "other"), and compact or granular tools (always compact from 3.0).
 - **`call_failed`, when a call fails, times out or reads nothing:** the tool and action name, the result code (`NOT_FOUND`, `TIMEOUT`, ...), the outcome, how long it took, and whether the app was a browser, an Electron app or a native app.
 - **`slow_call`, when a call takes over 10 seconds:** the tool and action name, how long it took, and its slow internal steps (Clawd Cursor's own helper programs, by name, with their time).
 - **`exit`, when the server exits during a call, or was killed or crashed:** the exit reason (from a fixed list: `sigterm`, `host_gone`, ...), and the tool and action that were cut off and how long they had run.
@@ -406,12 +406,9 @@ Earlier releases are in the [changelog](CHANGELOG.md).
 
 ## The tools
 
-Two surfaces run the same code behind the same guards.
+Six tools, each with an `action` parameter: about 8,000 tokens of `tools/list`. From 3.0 they are the only surface; `--compact` is still accepted and does nothing.
 
-- **Compact** (`--compact`, recommended): six tools, each with an `action` parameter. About 7,000 tokens of `tools/list`.
-- **Granular** (the default without `--compact`): 90 tools, one per action. About 19,000 tokens. Use it when a runtime needs every primitive as its own tool, or when you want your host to prompt per kind of action.
-
-(Token figures are the `tools/list` JSON of 2.0.0, characters ÷ 3.5.)
+(Token figure: the `tools/list` JSON, characters ÷ 3.5.)
 
 | Tool | Actions |
 |---|---|
@@ -420,13 +417,15 @@ Two surfaces run the same code behind the same guards.
 | `window` | `list`, `active`, `focus`, `maximize`, `minimize`, `restore`, `close`, `resize`, `list_displays`, `screen_size`, `open_app`, `open_file`, `open_url`, `switch_tab`, `navigate` |
 | `browser` | `navigate`, `connect`, `page_context`, `read_text`, `click`, `type`, `select_option`, `evaluate`, `wait_for`, `list_tabs`, `switch_tab`, `scroll` |
 | `computer` | `click`, `double_click`, `right_click`, `middle_click`, `triple_click`, `hover`, `move`, `move_relative`, `scroll`, `scroll_horizontal`, `drag`, `drag_path`, `mouse_down`, `mouse_up`, `type`, `key`, `key_press`, `key_down`, `key_up`, `wait`, `screenshot`, `screenshot_region`, `zoom` |
-| `batch` | `{steps:[…]}`: several calls in one round trip. Each step is `{name, arguments, expect?}` and is refused exactly as a direct call would be; the batch halts with a per-step trace on a refusal, an error or a failed `expect`. |
+| `batch` | `{steps:[…]}`: several calls in one round trip. Each step is `{name, arguments, expect?}` and is refused exactly as a direct call would be; the batch halts with a per-step trace on a refusal, an error or a failed `expect`. `{save_as, description}` saves a task that worked as a routine; `{replay, vars}` runs it in one call the next time (see below). |
 
 ```js
 accessibility({ action: "invoke", name: "Send" })    // click by name
 computer({ action: "key", combo: "mod+s" })          // Cmd+S on macOS, Ctrl+S elsewhere
 window({ action: "open_app", name: "Outlook" })
 ```
+
+**Routines.** When a task worked and may be asked again, your AI saves it with `batch {save_as, description}`: the calls of that session that changed something, or the steps it passes (saved, not run again). The next session's instructions list the saved routines, and `batch {replay, vars}` runs one in a single call, `{{name}}` placeholders filled from `vars`. A step whose element is not there yet is tried again; the replay halts at the first failure, and your AI carries on by hand from there. Routines are JSON files in `~/.clawdcursor/routines/`, on your computer only, and hold what was typed.
 
 The full guide for agents is [SKILL.md](SKILL.md); it ships in the npm package and the Claude Code plugin. [clawdcursor.com/llms.txt](https://clawdcursor.com/llms.txt) is a shorter summary of it: install, the tool surface and the safety rules. Every parameter is in [schema.snapshot.json](schema.snapshot.json).
 
@@ -469,8 +468,8 @@ Every command:
 ```
 clawdcursor consent         Desktop-control consent (--accept / --revoke / --status)
 clawdcursor grant           Request macOS permissions (macOS only)
-clawdcursor mcp             stdio MCP server; your host starts this (--compact for the six tools)
-clawdcursor agent           HTTP MCP server on 127.0.0.1:3847, with the live log in a terminal (--port, --compact, --no-vision)
+clawdcursor mcp             stdio MCP server; your host starts this
+clawdcursor agent           HTTP MCP server on 127.0.0.1:3847, with the live log in a terminal (--port, --no-vision)
 clawdcursor stop            Stop every running instance; agents stay stopped until resume
 clawdcursor resume          Continue the daemon's paused task or give control back after a stop (--end to end the task)
 clawdcursor doctor          Diagnose the install (version, consent, screen capture, accessibility, permissions)
@@ -500,7 +499,7 @@ clawdcursor doctor --setup                               # pick the default runn
 ```
 
 - **Your subscription, no API key.** `task` runs your installed Claude Code (`claude -p`) or Codex (`codex exec`) on
-  your own sign-in. The agent gets one MCP server, this clawdcursor (`mcp --compact`, or `--granular`), and none of its
+  your own sign-in. The agent gets one MCP server, this clawdcursor (`mcp`), and none of its
   built-in tools, settings, plugins or skills. `--with claude|codex` picks one; by default it is the one `doctor --setup`
   chose, else the installed and signed-in CLI, Claude Code first. `--model` names a model.
 - **API keys are optional:** `--with anthropic` (`ANTHROPIC_API_KEY`, or a key stored by `doctor --setup`) and
@@ -536,7 +535,7 @@ CLAWDCURSOR_ADDONS_DIR=$PWD/packages clawdcursor task "..."   # use them from th
 | Directory | What lives here |
 |---|---|
 | `src/core/` | Reading the screen (accessibility snapshots, the UI compiler), verification, and the Stop / pause / AI-assistant guards. |
-| `src/tools/` | The granular tools, the five compound tools and `batch`. |
+| `src/tools/` | The five compound tools and `batch`, the handlers behind their actions, and routines. |
 | `src/platform/` | The `PlatformAdapter` for Windows, macOS, Linux and Wayland; OCR; the CDP driver; the hard key list. |
 | `src/surface/` | CLI, MCP server (stdio and HTTP), dashboard, doctor, consent. |
 | `packages/` | The optional developer add-ons: `clawdcursor-agent` (`task`, `logs`) and `clawdcursor-doctor` (`doctor --setup`). |

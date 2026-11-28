@@ -11,7 +11,6 @@ describe('the MCP server the agent gets', () => {
   it('is the running core itself, on the compact surface, told its run id', () => {
     expect(entry).toEqual({ command: '/usr/bin/node', args: ['/opt/clawdcursor/dist/surface/cli.js', 'mcp', '--compact'],
       env: { CLAWDCURSOR_RUN_ID: '2026-11-15T07-00-43-532Z' } });
-    expect(mcpEntry({ node: 'n', coreEntry: 'c', runId: 'r', granular: true }).args).toEqual(['c', 'mcp']);
   });
   it('is the only server in Claude Code\'s --mcp-config', () => {
     const cfg = JSON.parse(claudeMcpConfig(entry));

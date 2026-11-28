@@ -31,7 +31,7 @@
 import { getTool } from './registry';
 import { controlBanner } from '../core/banner';
 import { getBatchTools } from './batch';
-import { rewriteOutsideData } from './hint-rewrite';
+import { rewriteOutsideData } from './hints';
 import type { ToolDefinition, ToolContext, ToolResult } from './types';
 import { expectRefusal, checkExpect } from '../core/sense/reactive-check';
 import { EXPECT_SCHEMA } from '../core/verify/assertions';
@@ -292,7 +292,7 @@ async function dispatchCompound(
 
   const forwarded: Record<string, unknown> = { ...point };
   for (const [k, v] of Object.entries(args)) {
-    // `shot` is checked by the MCP wrapper / batch (screen-guard.ts), not by the granular tool.
+    // `shot` is checked by the MCP wrapper / batch (call-guards.ts), not by the granular tool.
     if (k === 'action' || k === 'shot') continue;
     if (k === 'coordinate' && 'x' in point) continue;
     const mapped = route.argRemap?.[k] ?? k;
@@ -367,7 +367,7 @@ async function dispatchCompound(
   // it came through — accessibility invoke/set_value act (the compound is tier
   // 0, so blind-mode actions never lit it), while system ocr/clipboard reads
   // don't. mcp-server leaves compounds to this check.
-  // A malformed `expect` is refused before acting, as the projected delegates do — after the action, the caller is told
+  // A malformed `expect` is refused before acting, as the core-tool delegates do — after the action, the caller is told
   // "nothing ran" about an action that ran, and retries it.
   const expectHere = args.expect !== undefined && args.expect !== null && !granular.honorsExpect && !!ctx.platform;
   if (expectHere) {
@@ -400,7 +400,7 @@ async function dispatchCompound(
 [!] ${compoundName} ${actionName} ignored ${ignored.length === 1 ? 'an argument' : 'arguments'} it does not accept: ${hints.join('; ')}`;
   }
 
-  // `expect` is checked for every action: projected delegates check it themselves; for the rest the same check runs
+  // `expect` is checked for every action: core-tool delegates check it themselves; for the rest the same check runs
   // here, after the action — so it is never accepted and silently dropped. Last, so its verdict ends the text.
   if (expectHere) {
     const checked = await checkExpect(args.expect, { text: result.text ?? '', success: !result.isError }, ctx.platform!);

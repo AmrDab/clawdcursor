@@ -55,7 +55,7 @@ describe('the agent is told its OS and modifier in the server instructions', () 
   });
 
   it.each(OSES)('the instructions a server started on %s sends carry that OS\'s line, and only that one', async (platform) => {
-    await onPlatform(platform, () => createMcpServer({ ctx: {} as ToolContext, compact: true }));
+    await onPlatform(platform, () => createMcpServer({ ctx: {} as ToolContext }));
     expect(capturedInstructions).toContain(osKeysGuide(platform));
     for (const other of OSES.filter(o => o !== platform)) expect(capturedInstructions).not.toContain(osKeysGuide(other).slice(0, 40));
   });

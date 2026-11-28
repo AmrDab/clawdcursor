@@ -1,20 +1,20 @@
 /**
- * Tests for src/tools/projected/project-mcp.ts (Step 2 of the re-projection refactor).
+ * Tests for the wrapper in src/tools/core-tools.ts that turns each core tool into a ToolDefinition.
  *
  * Tests:
- *   1. jsonSchemaToParamDefs: correctly converts a UnifiedTool.inputSchema
+ *   1. jsonSchemaToParamDefs: correctly converts a CoreTool.inputSchema
  *      into a Record<string, ParameterDef> (type, description, required, enum).
  *
- *   2. projectToToolDefinition: projecting a representative System B tool (read_screen)
+ *   2. toToolDefinition: projecting a representative System B tool (read_screen)
  *      yields a structurally valid ToolDefinition (name, description, parameters,
  *      category, safetyTier, handler).
  *
- *   3. Name mapping: the type → type_text mapping is applied (mcpName from TOOL_META).
+ *   3. One name: each core tool is published under its own name (type_text, not type).
  *
  *   4. Handler integration: calling the projected handler with a mock ToolContext
  *      returns a valid ToolResult (text present, isError boolean) without throwing.
  *
- *   5. unifiedToToolResult: success→isError false, failure→isError true.
+ *   5. toToolResult: success→isError false, failure→isError true.
  *
  *   6. toolContextToAgent: async construction from a mock ToolContext resolves
  *      to a well-shaped AgentToolContext.
@@ -62,12 +62,11 @@ vi.mock('../platform/ocr-engine', () => {
 import {
   jsonSchemaToParamDefs,
   toolContextToAgent,
-  unifiedToToolResult,
-  projectToToolDefinition,
-} from '../tools/projected/project-mcp';
-import { buildUnifiedTools } from '../tools/projected/tools';
-import { TOOL_META } from '../tools/projected/tool-meta';
-import type { UnifiedTool, UnifiedToolResult } from '../tools/projected/types';
+  toToolResult,
+  toToolDefinition,
+} from '../tools/core-tools';
+import { buildCoreTools } from '../tools/core-tools';
+import type { CoreTool, CoreToolResult } from '../tools/types';
 import type { ToolContext } from '../tools/types';
 
 // ── Mock helpers ──────────────────────────────────────────────────────────────
@@ -158,7 +157,7 @@ function makeMockToolContext(overrides: Partial<ToolContext> = {}): ToolContext 
 
 describe('jsonSchemaToParamDefs', () => {
   it('converts a simple string property', () => {
-    const schema: UnifiedTool['inputSchema'] = {
+    const schema: CoreTool['inputSchema'] = {
       type: 'object',
       properties: {
         name: { type: 'string', description: 'The name' },
@@ -175,7 +174,7 @@ describe('jsonSchemaToParamDefs', () => {
   });
 
   it('marks optional properties correctly', () => {
-    const schema: UnifiedTool['inputSchema'] = {
+    const schema: CoreTool['inputSchema'] = {
       type: 'object',
       properties: {
         requiredProp: { type: 'string', description: 'req' },
@@ -190,7 +189,7 @@ describe('jsonSchemaToParamDefs', () => {
   });
 
   it('maps JSON Schema "number" type to ParameterDef "number"', () => {
-    const schema: UnifiedTool['inputSchema'] = {
+    const schema: CoreTool['inputSchema'] = {
       type: 'object',
       properties: {
         count: { type: 'number', description: 'Count' },
@@ -202,7 +201,7 @@ describe('jsonSchemaToParamDefs', () => {
   });
 
   it('maps JSON Schema "boolean" type to ParameterDef "boolean"', () => {
-    const schema: UnifiedTool['inputSchema'] = {
+    const schema: CoreTool['inputSchema'] = {
       type: 'object',
       properties: {
         flag: { type: 'boolean', description: 'A flag' },
@@ -214,7 +213,7 @@ describe('jsonSchemaToParamDefs', () => {
   });
 
   it('preserves string enum values', () => {
-    const schema: UnifiedTool['inputSchema'] = {
+    const schema: CoreTool['inputSchema'] = {
       type: 'object',
       properties: {
         direction: {
@@ -230,7 +229,7 @@ describe('jsonSchemaToParamDefs', () => {
   });
 
   it('handles empty properties gracefully', () => {
-    const schema: UnifiedTool['inputSchema'] = {
+    const schema: CoreTool['inputSchema'] = {
       type: 'object',
       properties: {},
       additionalProperties: false,
@@ -240,7 +239,7 @@ describe('jsonSchemaToParamDefs', () => {
   });
 
   it('preserves numeric maximum constraint', () => {
-    const schema: UnifiedTool['inputSchema'] = {
+    const schema: CoreTool['inputSchema'] = {
       type: 'object',
       properties: {
         ms: { type: 'number', description: 'Wait ms', maximum: 5000 },
@@ -252,23 +251,23 @@ describe('jsonSchemaToParamDefs', () => {
   });
 });
 
-describe('unifiedToToolResult', () => {
+describe('toToolResult', () => {
   it('maps success=true to isError=false', () => {
-    const r: UnifiedToolResult = { success: true, text: 'ok' };
-    const result = unifiedToToolResult(r);
+    const r: CoreToolResult = { success: true, text: 'ok' };
+    const result = toToolResult(r);
     expect(result.text).toBe('ok');
     expect(result.isError).toBe(false);
   });
 
   it('maps success=false to isError=true', () => {
-    const r: UnifiedToolResult = { success: false, text: 'boom' };
-    const result = unifiedToToolResult(r);
+    const r: CoreToolResult = { success: false, text: 'boom' };
+    const result = toToolResult(r);
     expect(result.isError).toBe(true);
   });
 
   it('has no image field', () => {
-    const r: UnifiedToolResult = { success: true, text: 'no pic' };
-    const result = unifiedToToolResult(r);
+    const r: CoreToolResult = { success: true, text: 'no pic' };
+    const result = toToolResult(r);
     expect(result.image).toBeUndefined();
   });
 });
@@ -305,24 +304,24 @@ describe('toolContextToAgent', () => {
   });
 });
 
-describe('projectToToolDefinition', () => {
+describe('toToolDefinition', () => {
   // Use read_screen as a representative tool (blind + hybrid + vision, same name in both systems).
-  let readScreenTool: UnifiedTool;
-  let typeTool: UnifiedTool;
+  let readScreenTool: CoreTool;
+  let typeTool: CoreTool;
 
   beforeEach(() => {
-    const blindTools = buildUnifiedTools();
+    const blindTools = buildCoreTools();
     const found = blindTools.find(t => t.name === 'read_screen');
-    if (!found) throw new Error('read_screen not found in buildUnifiedTools("blind")');
+    if (!found) throw new Error('read_screen not found in buildCoreTools("blind")');
     readScreenTool = found;
 
-    const foundType = blindTools.find(t => t.name === 'type');
-    if (!foundType) throw new Error('type not found in buildUnifiedTools("blind")');
+    const foundType = blindTools.find(t => t.name === 'type_text');
+    if (!foundType) throw new Error('type not found in buildCoreTools("blind")');
     typeTool = foundType;
   });
 
   it('produces a structurally valid ToolDefinition for read_screen', () => {
-    const def = projectToToolDefinition(readScreenTool);
+    const def = toToolDefinition(readScreenTool);
 
     expect(def.name).toBe('read_screen');
     expect(def.description.length).toBeGreaterThan(0);
@@ -331,62 +330,28 @@ describe('projectToToolDefinition', () => {
   });
 
   it('handler calls succeed and return a valid ToolResult', async () => {
-    const def = projectToToolDefinition(readScreenTool);
+    const def = toToolDefinition(readScreenTool);
     const ctx = makeMockToolContext();
 
     // Must not throw — the system B execute() wraps errors internally.
     await expect(def.handler({}, ctx)).resolves.toBeTruthy();
   });
 
-  it('the projection publishes the TOOL_META MCP name (type → type_text; the full rename table is checked below)', () => {
-    expect(projectToToolDefinition(typeTool).name).toBe('type_text');
+  it('publishes the tool under its one name', () => {
+    expect(toToolDefinition(typeTool).name).toBe('type_text');
   });
 
   it('handler does not throw for the type tool', async () => {
-    const def = projectToToolDefinition(typeTool);
+    const def = toToolDefinition(typeTool);
     const ctx = makeMockToolContext();
 
     await expect(def.handler({ text: 'hello world' }, ctx)).resolves.toBeTruthy();
   });
 
-  it('throws when passed a tool name not in TOOL_META', () => {
-    const fakeTool: UnifiedTool = {
-      name: '__nonexistent_tool__',
-      description: 'test',
-      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-      changesScreen: false,
-      async execute() { return { success: true, text: 'x' }; },
-    };
-    expect(() => projectToToolDefinition(fakeTool)).toThrow(
-      'no TOOL_META entry for System B tool "__nonexistent_tool__"',
-    );
-  });
-
-  it('metadata fields match TOOL_META for read_screen', () => {
-    const def = projectToToolDefinition(readScreenTool);
+  it("carries the spec's metadata for read_screen", () => {
+    const def = toToolDefinition(readScreenTool);
     expect(def.category).toBe('perception');
     expect(def.safetyTier).toBe(0);
-  });
-});
-
-describe('name mapping completeness', () => {
-  it('all expected name-change pairs are correct', () => {
-    const expectedRenames: Array<{ sysbName: string; mcpName: string }> = [
-      { sysbName: 'list_windows',    mcpName: 'get_windows'      },
-      { sysbName: 'click',           mcpName: 'mouse_click'      },
-      { sysbName: 'drag',            mcpName: 'mouse_drag'       },
-      { sysbName: 'scroll',          mcpName: 'mouse_scroll'     },
-      { sysbName: 'type',            mcpName: 'type_text'        },
-      { sysbName: 'key',             mcpName: 'key_press'        },
-      { sysbName: 'browser_connect', mcpName: 'cdp_connect'      },
-      { sysbName: 'browser_read',    mcpName: 'cdp_page_context' },
-      { sysbName: 'browser_click',   mcpName: 'cdp_click'        },
-      { sysbName: 'browser_type',    mcpName: 'cdp_type'         },
-    ];
-
-    for (const { sysbName, mcpName } of expectedRenames) {
-      expect(TOOL_META[sysbName]?.mcpName).toBe(mcpName);
-    }
   });
 });
 
@@ -394,12 +359,12 @@ describe('name mapping completeness', () => {
 
 import { UIMapHolder } from '../core/sense/ui-map-holder';
 
-describe('projected handler — MCP route parity', () => {
-  const keyTool = () => buildUnifiedTools().find(t => t.name === 'key')!;
-  const invokeTool = () => buildUnifiedTools().find(t => t.name === 'invoke_element')!;
+describe('core tool handler — MCP route parity', () => {
+  const keyTool = () => buildCoreTools().find(t => t.name === 'key_press')!;
+  const invokeTool = () => buildCoreTools().find(t => t.name === 'invoke_element')!;
 
   it('honors a caller-supplied expect assertion array (DEVIATION on failure, not silent drop)', async () => {
-    const def = projectToToolDefinition(keyTool());
+    const def = toToolDefinition(keyTool());
     const ctx = makeMockToolContext();
     // app_running("nope") fails against the empty listWindows stub.
     const r = await def.handler({ combo: 'a', expect: [{ type: 'app_running', name: 'nope' }] }, ctx);
@@ -408,7 +373,7 @@ describe('projected handler — MCP route parity', () => {
   }, 15_000);
 
   it('verifies a passing expect and reports the check', async () => {
-    const def = projectToToolDefinition(keyTool());
+    const def = toToolDefinition(keyTool());
     const ctx = makeMockToolContext();
     (ctx.platform as any).listWindows = vi.fn().mockResolvedValue([
       { processId: 9, processName: 'notepad', title: 'Untitled - Notepad', bounds: { x: 0, y: 0, width: 800, height: 600 }, isMinimized: false },
@@ -419,7 +384,7 @@ describe('projected handler — MCP route parity', () => {
   });
 
   it('does NOT invalidate the holder when a screen-changing call failed without acting (rejected ref)', async () => {
-    const def = projectToToolDefinition(invokeTool());
+    const def = toToolDefinition(invokeTool());
     const holder = new UIMapHolder();
     const spy = vi.spyOn(holder, 'invalidate');
     const ctx = makeMockToolContext({ uiMaps: holder } as Partial<ToolContext>);
@@ -429,7 +394,7 @@ describe('projected handler — MCP route parity', () => {
   });
 
   it('DOES invalidate the holder after a successful screen-changing call', async () => {
-    const def = projectToToolDefinition(keyTool());
+    const def = toToolDefinition(keyTool());
     const holder = new UIMapHolder();
     const spy = vi.spyOn(holder, 'invalidate');
     const ctx = makeMockToolContext({ uiMaps: holder } as Partial<ToolContext>);

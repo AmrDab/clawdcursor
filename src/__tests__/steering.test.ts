@@ -27,11 +27,11 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createMcpServer } from '../surface/mcp-server';
 import type { ToolContext } from '../tools/registry';
 import { getCompactTools, toCompactNames, renameJsonAdvice } from '../tools/compact';
-import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, isSparseTree } from '../tools/blind-hints';
+import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, isSparseTree } from '../tools/hints';
 import { classifyResult, isUnverifiableAction } from '../core/result-codes';
 import { quoteScreenText } from '../core/untrusted-screen-content';
 import { sameApp, walkAncestors } from '../core/ai-hosts';
-import { expandReadBack } from '../tools/projected/tools';
+import { expandReadBack } from '../tools/core-tools';
 import { SMART_MISS_NEXT } from '../tools/smart';
 import { EXPECT_DESCRIPTION } from '../core/verify/assertions';
 import type { UiElement } from '../platform/types';
@@ -42,7 +42,7 @@ const ctx = (): ToolContext => ({
   ensureInitialized: async () => {},
 });
 async function connect(compact: boolean) {
-  const { server } = await createMcpServer({ compact, ctx: ctx() });
+  const { server } = await createMcpServer({ ctx: ctx() });
   const [a, b] = InMemoryTransport.createLinkedPair();
   await (server as any).connect(a);
   const client = new Client({ name: 'steering-test', version: '0' });

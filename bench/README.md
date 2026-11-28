@@ -104,6 +104,8 @@ Options of a live run:
 | `--include-manual` | also the manual-verify tasks (open Designcenter with a part loaded first) |
 | `--out <dir>` | results directory: new or empty (default: a new folder under the temp directory). A directory that holds anything is refused, so an earlier run's logs cannot be read back. |
 | `--repeats N` | run each task N times per model (1 to 9, default 1) |
+| `--routines-dir <dir>` | keep the routines each task saves in `<dir>/<model>/<task>` (`CLAWDCURSOR_ROUTINES_DIR`), outside the temp home: run the bench twice with the same dir to compare a first run with a second that can replay |
+| `--save-routines` | add one line to the prompt asking the agent to replay a fitting routine and to save the task when done (measures replay; without it, nothing asks) |
 | `--update-baseline` | write `bench/baseline/<os>.json` from this run |
 | `--baseline <file>` | compare with another baseline |
 

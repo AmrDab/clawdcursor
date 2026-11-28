@@ -2,8 +2,8 @@
  * MCP schema snapshot helpers.
  *
  * The snapshot is what an agent receives, taken from the real server: createMcpServer (the path `clawdcursor mcp` and
- * the daemon use) answers `initialize` and `tools/list` over the SDK's in-memory transport, for the compact and the
- * granular surface. Nothing initializes the platform: the context is a stub and no tool is called.
+ * the daemon use) answers `initialize` and `tools/list` over the SDK's in-memory transport (the 6 compound tools, the only
+ * surface). Nothing initializes the platform: the context is a stub and no tool is called.
  *
  * The instructions name the OS's shortcut keys, so each surface is captured once per OS (process.platform set for the
  * duration of the capture). A field that is the same on every OS is stored once; one that differs goes under `perOs`.
@@ -33,7 +33,7 @@ const stubContext = (): ToolContext => ({
 });
 
 /** What `initialize` and `tools/list` return for one surface on one OS (serverInfo.version and the protocol version left out). */
-async function captureOnce(compact: boolean, os: Os): Promise<Record<string, unknown>> {
+async function captureOnce(os: Os): Promise<Record<string, unknown>> {
   const { createMcpServer } = await import('../surface/mcp-server');
   const { resetToolCaches } = await import('../tools/registry');
   const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js' as string) as {
@@ -43,11 +43,13 @@ async function captureOnce(compact: boolean, os: Os): Promise<Record<string, unk
 
   const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
   const sessionLogEnv = process.env.CLAWDCURSOR_SESSION_LOG;
+  const routinesEnv = process.env.CLAWDCURSOR_ROUTINES_DIR;
   Object.defineProperty(process, 'platform', { ...platform, value: os });
   process.env.CLAWDCURSOR_SESSION_LOG = '0';  // no session file for a server nobody calls
+  process.env.CLAWDCURSOR_ROUTINES_DIR = path.join(__dirname, 'no-routines');  // this computer's saved routines are not part of the surface
   try {
     resetToolCaches();   // the tool lists are built on this OS, not reused from the OS captured before it
-    const { server } = await createMcpServer({ compact, ctx: stubContext() });
+    const { server } = await createMcpServer({ ctx: stubContext() });
     const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
     await server.connect(serverSide as never);
     const replies = new Map<number, (m: JsonRpcMessage) => void>();
@@ -75,6 +77,8 @@ async function captureOnce(compact: boolean, os: Os): Promise<Record<string, unk
     Object.defineProperty(process, 'platform', platform);
     if (sessionLogEnv === undefined) delete process.env.CLAWDCURSOR_SESSION_LOG;
     else process.env.CLAWDCURSOR_SESSION_LOG = sessionLogEnv;
+    if (routinesEnv === undefined) delete process.env.CLAWDCURSOR_ROUTINES_DIR;
+    else process.env.CLAWDCURSOR_ROUTINES_DIR = routinesEnv;
   }
 }
 
@@ -93,15 +97,15 @@ export function mergeByOs(byOs: Record<Os, Record<string, unknown>>): Record<str
   return { ...shared, perOs };
 }
 
-async function captureSurface(compact: boolean): Promise<Record<string, unknown>> {
+async function captureSurface(): Promise<Record<string, unknown>> {
   const byOs = {} as Record<Os, Record<string, unknown>>;
-  for (const os of OSES) byOs[os] = await captureOnce(compact, os);
+  for (const os of OSES) byOs[os] = await captureOnce(os);
   return mergeByOs(byOs);
 }
 
 /** Serialized snapshot string — deterministic across runs and across the OS it runs on. */
 export async function currentSnapshot(): Promise<string> {
-  const payload = { version: 2, surfaces: { compact: await captureSurface(true), granular: await captureSurface(false) } };
+  const payload = { version: 2, surfaces: { compact: await captureSurface() } };
   return JSON.stringify(payload, null, 2) + '\n';
 }
 

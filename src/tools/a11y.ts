@@ -9,11 +9,9 @@ import type { ToolDefinition, ToolContext } from './types';
 import type { UiElement } from '../platform/types';
 import { isBrowserProcess } from '../platform/browser-config';
 import { windowTextIncludes } from '../platform/window-text';
-import { narrowedScopeNote } from './scope-note';
+import { narrowedScopeNote, wakeForNameSearch, onTopOfLine, SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, CUT_VALUE_NEXT_STEP, cdpBrowserPid, cdpStepFor, nameMissHint, shownValue, shownHelp } from './hints';
 import { untrusted } from '../core/miss-text';
-import { wakeForNameSearch, onTopOfLine } from './name-search-help';
 import { copyAllText } from '../platform/copy-all-text';
-import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, CUT_VALUE_NEXT_STEP, cdpBrowserPid, cdpStepFor, nameMissHint, shownValue, shownHelp } from './blind-hints';
 import { wrapUntrustedScreenContent, screenJson } from '../core/untrusted-screen-content';
 
 /**
@@ -224,7 +222,7 @@ function elementLabel(el: UiElement): string {
   return '';
 }
 
-/** `value`: the element's value as its line shows it (blind-hints.ts shownValue), where the caller lists values. */
+/** `value`: the element's value as its line shows it (hints.ts shownValue), where the caller lists values. */
 function elementLine(el: UiElement, value: string): string {
   return `[${el.controlType}] "${elementLabel(el)}"` +
     (el.automationId ? ` id:${el.automationId}` : '') +

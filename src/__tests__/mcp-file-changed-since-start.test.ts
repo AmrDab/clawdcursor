@@ -61,11 +61,12 @@ describe('file_changed_since_start over MCP', () => {
       await new Promise(r => setTimeout(r, 20));
       await fs.writeFile(written, 'x');
       const verify = async (path: string) => {
-        const r = await client.callTool({ name: 'verify', arguments: { assertions: [{ type: 'file_changed_since_start', path }] } });
+        // An `expect` on any compound action is checked after it, measured from when the session started.
+        const r = await client.callTool({ name: 'system', arguments: { action: 'system_time', expect: [{ type: 'file_changed_since_start', path }] } });
         return { isError: !!r.isError, text: (r.content as Array<{ text?: string }>).map(c => c.text ?? '').join('\n') };
       };
       const ok = await verify(written);
-      expect(ok.text).toMatch(/after the session started/);
+      expect(ok.text).toMatch(/verified 1 check/);
       expect(ok.isError).toBe(false);
       const no = await verify(old);
       expect(no.isError).toBe(true);

@@ -25,7 +25,7 @@ export interface CoreContext {
   dataDir: string;
 }
 
-export interface TaskOptions { task: string; with?: string; model?: string; granular?: boolean }
+export interface TaskOptions { task: string; with?: string; model?: string }
 export interface TaskResult { exitCode: number; verdict: 'PASS' | 'FAIL' | null; runId: string | null; runFile: string | null; session: string | null; finalText: string; reason?: string }
 export interface TaskIo { out?(line: string): void; color?: boolean }
 
@@ -74,7 +74,7 @@ export async function runTask(opts: TaskOptions, ctx: CoreContext, io: TaskIo = 
   const started = Date.now();
   const runId = newRunId(new Date(started));
   const log = openRunLog(ctx.dataDir, runId);
-  const entry = mcpEntry({ node: ctx.node, coreEntry: ctx.coreEntry, runId, granular: opts.granular });
+  const entry = mcpEntry({ node: ctx.node, coreEntry: ctx.coreEntry, runId });
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdcursor-task-'));   // an empty cwd: no CLAUDE.md / AGENTS.md of the owner's
   const who = runner === 'claude' || runner === 'codex' ? runner : 'model';
 
@@ -96,7 +96,7 @@ export async function runTask(opts: TaskOptions, ctx: CoreContext, io: TaskIo = 
     if (line) out(`${p.dim(elapsed(Date.now() - started))}  ${line}`);
   };
 
-  out(`${p.bold('clawdcursor task')} · ${runner}${model ? ` · ${model}` : ''} · ${opts.granular ? 'granular' : 'compact'} tools · run ${runId}`);
+  out(`${p.bold('clawdcursor task')} · ${runner}${model ? ` · ${model}` : ''} · run ${runId}`);
   out(p.dim(`task: ${opts.task}`));
 
   // Ctrl-C: let the agent stop (it got the same Ctrl-C on a shared console, or SIGINT here), then stop its whole tree.
@@ -132,7 +132,7 @@ export async function runTask(opts: TaskOptions, ctx: CoreContext, io: TaskIo = 
         command = codexTaskCommand({ exe, model, entry, workDir, lastMessagePath, task: opts.task });
       }
       log.write({ type: 'run', id: runId, task: opts.task, runner, model: model ?? null, command: displayCommand(command), coreVersion: ctx.coreVersion,
-        surface: opts.granular ? 'granular' : 'compact' });
+        surface: 'compact' });
       const parseLine = runner === 'claude' ? claudeEvents : codexEvents;
       exitCode = await runCli(command, {
         cwd: workDir,
@@ -151,7 +151,7 @@ export async function runTask(opts: TaskOptions, ctx: CoreContext, io: TaskIo = 
       }
     } else {
       log.write({ type: 'run', id: runId, task: opts.task, runner, model, baseUrl: baseUrl ?? null, coreVersion: ctx.coreVersion,
-        surface: opts.granular ? 'granular' : 'compact' });
+        surface: 'compact' });
       const emit = (ev: TraceEvent) => { log.write({ type: 'event', src: 'api', data: withoutImages(ev) }); show(ev); };
       const r = await runApi({ kind: runner, model: model!, apiKey, baseUrl, entry, task: opts.task, emit, signal: abort.signal });
       finalText = r.text;

@@ -3,10 +3,10 @@
  * reply are points (a click at the tree's (6,68) with space:"screen" lands at point (6,68)): the reply now says which on macOS.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { buildUnifiedTools } from '../tools/projected/tools';
-import type { AgentToolContext } from '../tools/projected/types';
+import { buildCoreTools } from '../tools/core-tools';
+import type { AgentToolContext } from '../tools/types';
 
-const click = buildUnifiedTools().find(t => t.name === 'click')!;
+const click = buildCoreTools().find(t => t.name === 'mouse_click')!;
 function ctx(platform: string, screen: AgentToolContext['screen']): AgentToolContext {
   return {
     platform: { platform, getActiveWindow: async () => null, mouseClick: vi.fn(async () => undefined) },

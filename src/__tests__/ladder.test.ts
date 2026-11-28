@@ -133,8 +133,8 @@ describe('viaLadder, a platform without the Windows pieces (today\'s path)', () 
 
 describe('the callers go through the ladder', () => {
   it('a by-name click with no pattern, on a native window in the background, is a window message: no click at the bounds', async () => {
-    const { buildUnifiedTools } = await import('../tools/projected/tools');
-    const tool = buildUnifiedTools().find(t => t.name === 'invoke_element')!;
+    const { buildCoreTools } = await import('../tools/core-tools');
+    const tool = buildCoreTools().find(t => t.name === 'invoke_element')!;
     const { log, notes, platform } = windows({ deliver: { success: true, verified: false } });
     const mouseClick = async () => { log.push('click'); };
     const p = {
@@ -152,8 +152,8 @@ describe('the callers go through the ladder', () => {
 
 describe('set_field_value on a field the direct set ignored, Windows ladder', () => {
   it('a background native window gets the value by WM_SETTEXT: nothing is clicked or typed, the foreground is not touched', async () => {
-    const { buildUnifiedTools } = await import('../tools/projected/tools');
-    const tool = buildUnifiedTools().find(t => t.name === 'set_field_value')!;
+    const { buildCoreTools } = await import('../tools/core-tools');
+    const tool = buildCoreTools().find(t => t.name === 'set_field_value')!;
     const w = windows();
     let shown = '';
     const input = { name: 'City', controlType: 'Edit', processId: 7, bounds: { x: 60, y: 8, width: 200, height: 22 } };

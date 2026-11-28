@@ -4,7 +4,7 @@
  * wrong name: it now says how many elements there are and which names are close.
  */
 import { describe, it, expect } from 'vitest';
-import { nameMissHint } from '../tools/blind-hints';
+import { nameMissHint } from '../tools/hints';
 import { wrapUntrustedScreenContent } from '../core/untrusted-screen-content';
 
 const freeform = ['Show sidebar', 'Go Back', 'Content Hub', 'Insert Text Box', 'Insert Shape', 'Insert Sticky Note',

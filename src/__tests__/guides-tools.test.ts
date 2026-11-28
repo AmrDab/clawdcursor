@@ -5,7 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { getShortcutTools } from '../tools/shortcuts';
 import { getExtraTools } from '../tools/extras';
-import { guideHint, resetGuideHints, setGuideSurface } from '../core/guides/hint';
+import { guideHint, resetGuideHints } from '../core/guides/hint';
 import { __setGuidePathsForTests, loadGuides } from '../core/guides/store';
 import { renderGuide } from '../core/guides/render';
 import { toCompactNames } from '../tools/compact';
@@ -79,7 +79,7 @@ describe('shortcuts_list with a guide', () => {
 describe('guide hint', () => {
   it('one line, once per app per session, from a process name, a url or a window title', () => {
     expect(guideHint({ names: ['notepad'] })).toBe('');
-    expect(guideHint({ url: 'https://mail.google.com/mail/u/0/' }, 'win32')).toBe('guide: Gmail keys (Windows): compose c · go_to_inbox g i · send* ctrl+Return · find_in_page ctrl+f · mark_unread shift+u (* = hard to undo). All 5 shortcuts, 1 workflows and tips: the shortcuts_list tool, context gmail');
+    expect(guideHint({ url: 'https://mail.google.com/mail/u/0/' }, 'win32')).toBe('guide: Gmail keys (Windows): compose c · go_to_inbox g i · send* ctrl+Return · find_in_page ctrl+f · mark_unread shift+u (* = hard to undo). All 5 shortcuts, 1 workflows and tips: the system tool, action shortcuts_list, context gmail');
     expect(guideHint({ url: 'https://mail.google.com/' })).toBe('');
     resetGuideHints();
     expect(guideHint({ names: ['x'], title: 'Inbox - Gmail - Google Chrome' })).toContain('guide: Gmail');
@@ -88,12 +88,7 @@ describe('guide hint', () => {
 });
 
 describe('guide hint: the pointer to the full guide', () => {
-  afterEach(() => setGuideSurface(false));
-
-  it('is prose naming the tool of the surface, never a call to copy; the compact rewrite leaves it as written', () => {
-    expect(guideHint({ url: 'https://mail.google.com/' })).toContain('tips: the shortcuts_list tool, context gmail');
-    resetGuideHints();
-    setGuideSurface(true);
+  it('is prose naming the tool and action, never a call to copy; the compact rewrite leaves it as written', () => {
     const h = guideHint({ url: 'https://mail.google.com/' });
     expect(h).toContain('tips: the system tool, action shortcuts_list, context gmail');
     expect(toCompactNames(h, 'system')).toBe(h);
@@ -107,7 +102,7 @@ describe('guide hint: the keys', () => {
     __setGuidePathsForTests(paths()); resetGuideHints();
   };
   const url = { url: 'https://mail.google.com/' };
-  const rest = 'All 5 shortcuts, 1 workflows and tips: the shortcuts_list tool, context gmail';
+  const rest = 'All 5 shortcuts, 1 workflows and tips: the system tool, action shortcuts_list, context gmail';
 
   it('essentials in their order, resolved per OS: mod, a skipped key, * on a consequential one', () => {
     put({ essentials: ['send', 'find_in_page', 'compose'] });

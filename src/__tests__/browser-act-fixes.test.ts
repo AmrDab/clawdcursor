@@ -5,10 +5,10 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { CDPDriver } from '../platform/cdp-driver';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 import { getCdpTools } from '../tools/cdp';
 
-const agentTool = (n: string) => buildUnifiedTools().find(t => t.name === n)!;
+const agentTool = (n: string) => buildCoreTools().find(t => t.name === n)!;
 const URL = 'https://app.example/';
 
 /** A locator whose evaluate answers "is it a field itself" with `isField`, and holds `inner` as the field inside it. */
@@ -52,7 +52,7 @@ describe('browser type: a trailing newline presses Enter (#12)', () => {
 
   it('types the text without the newline, then presses Enter, and says so', async () => {
     const { cdp, ctx } = ctxWith({ value: 'pizza', readable: true });
-    const r = await agentTool('browser_type').execute({ selector: '#q', text: 'pizza\n' }, ctx);
+    const r = await agentTool('cdp_type').execute({ selector: '#q', text: 'pizza\n' }, ctx);
     expect(cdp.typeInField).toHaveBeenCalledWith('#q', 'pizza', undefined);
     expect(cdp.pressKey).toHaveBeenCalledWith('Enter');
     expect(r.success).toBe(true);
@@ -61,14 +61,14 @@ describe('browser type: a trailing newline presses Enter (#12)', () => {
 
   it('text without a newline presses nothing', async () => {
     const { cdp, ctx } = ctxWith({ value: 'pizza', readable: true });
-    const r = await agentTool('browser_type').execute({ selector: '#q', text: 'pizza' }, ctx);
+    const r = await agentTool('cdp_type').execute({ selector: '#q', text: 'pizza' }, ctx);
     expect(cdp.pressKey).not.toHaveBeenCalled();
     expect(r.text).not.toContain('Enter');
   });
 
   it('a field that did not take the text is not submitted', async () => {
     const { cdp, ctx } = ctxWith({ value: '', readable: true });
-    const r = await agentTool('browser_type').execute({ selector: '#q', text: 'pizza\r\n' }, ctx);
+    const r = await agentTool('cdp_type').execute({ selector: '#q', text: 'pizza\r\n' }, ctx);
     expect(cdp.pressKey).not.toHaveBeenCalled();
     expect(r.success).toBe(false);
     expect(r.text).toContain('Enter was NOT pressed');
@@ -159,7 +159,7 @@ describe('browser click text: exact, then prefix, then substring; visible and en
 
   it('browser_click reports the element it hit', async () => {
     const cdp = { isConnected: async () => true, clickByText: async () => ({ success: true, method: 'js.clickByText', clicked: '<button> "Search"' }) };
-    const r = await agentTool('browser_click').execute({ text: 'search' }, { platform: {}, cdp } as any);
+    const r = await agentTool('cdp_click').execute({ text: 'search' }, { platform: {}, cdp } as any);
     expect(r.text).toContain(`hit "<button> 'Search'"`);
   });
 });
@@ -172,7 +172,7 @@ describe('a selector that matches nothing is an error (#15)', () => {
   });
 
   it('browser read with a selector fails instead of returning the miss as content', async () => {
-    const r = await agentTool('browser_read').execute({ selector: '#nope' }, { platform: {}, cdp: missing() } as any);
+    const r = await agentTool('cdp_page_context').execute({ selector: '#nope' }, { platform: {}, cdp: missing() } as any);
     expect(r.success).toBe(false);
     expect(r.text).toContain('element not found');
   });
@@ -201,7 +201,7 @@ describe('browser connect takes a port (#29)', () => {
 
   it('with a port: connects to that port and launches nothing', async () => {
     const { cdp, ctx } = ctxFor(async () => true);
-    const r = await agentTool('browser_connect').execute({ port: 9222 }, ctx);
+    const r = await agentTool('cdp_connect').execute({ port: 9222 }, ctx);
     expect(cdp.connect).toHaveBeenCalledWith(9222);
     expect(cdp.ensureConnected).not.toHaveBeenCalled();
     expect(r.success).toBe(true);
@@ -209,7 +209,7 @@ describe('browser connect takes a port (#29)', () => {
 
   it('a port nothing answers on fails and does not fall back to the agent browser', async () => {
     const { cdp, ctx } = ctxFor(async () => false);
-    const r = await agentTool('browser_connect').execute({ port: 9222 }, ctx);
+    const r = await agentTool('cdp_connect').execute({ port: 9222 }, ctx);
     expect(r.success).toBe(false);
     expect(r.text).toContain('port 9222');
     expect(cdp.ensureConnected).not.toHaveBeenCalled();
@@ -217,14 +217,14 @@ describe('browser connect takes a port (#29)', () => {
 
   it('a bad port is refused', async () => {
     const { cdp, ctx } = ctxFor(async () => true);
-    const r = await agentTool('browser_connect').execute({ port: 70000 }, ctx);
+    const r = await agentTool('cdp_connect').execute({ port: 70000 }, ctx);
     expect(r.success).toBe(false);
     expect(cdp.connect).not.toHaveBeenCalled();
   });
 
   it('without a port: today\'s behaviour', async () => {
     const { cdp, ctx } = ctxFor(async () => true);
-    await agentTool('browser_connect').execute({}, ctx);
+    await agentTool('cdp_connect').execute({}, ctx);
     expect(cdp.ensureConnected).toHaveBeenCalled();
     expect(cdp.connect).not.toHaveBeenCalled();
   });

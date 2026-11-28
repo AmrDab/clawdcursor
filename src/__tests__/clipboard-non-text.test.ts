@@ -18,9 +18,9 @@ vi.mock('sharp', () => ({ default: vi.fn() }));
 
 import { clipboardInfoHoldsNonText } from '../platform/mac-clipboard';
 import { pasteChoice, NON_TEXT_KEYS_MAX } from '../tools/paste-guard';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 import { classifyResult } from '../core/result-codes';
-import type { AgentToolContext } from '../tools/projected/types';
+import type { AgentToolContext } from '../tools/types';
 import { makeMockPlatform } from './helpers/mock-platform';
 
 describe('clipboardInfoHoldsNonText (osascript clipboard info)', () => {
@@ -62,7 +62,7 @@ describe('pasteChoice', () => {
 });
 
 describe('the type tool with an image on the clipboard', () => {
-  const typeTool = buildUnifiedTools().find(t => t.name === 'type')!;
+  const typeTool = buildCoreTools().find(t => t.name === 'type_text')!;
   const LONG = 'Lorem ipsum dolor sit amet, '.repeat(6);
   function ctxWith(nonText: boolean | undefined): AgentToolContext {
     const platform = makeMockPlatform();

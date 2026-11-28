@@ -23,7 +23,7 @@ vi.mock('../platform/ps-runner', () => ({
 }));
 
 import { WindowsAdapter } from '../platform/windows';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 
 describe('an unverified keyboard set-value reaches the agent as such', () => {
   it('the adapter passes the bridge\'s unverified flag in data', async () => {
@@ -45,7 +45,7 @@ describe('an unverified keyboard set-value reaches the agent as such', () => {
   });
 
   it('set_field_value says it was not verified', async () => {
-    const tool = buildUnifiedTools().find(t => t.name === 'set_field_value')!;
+    const tool = buildCoreTools().find(t => t.name === 'set_field_value')!;
     const ctx = { platform: { platform: 'win32', findElements: async () => [], getFocusedElement: async () => null,
       invokeElement: async () => ({ success: true, data: { unverified: true } }) } } as never;
     const r = await tool.execute({ name: 'Name', value: 'hello', processId: 7 }, ctx);

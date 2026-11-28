@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { CDPDriver } from '../platform/cdp-driver';
 import { classifyResult } from '../core/result-codes';
 import { getCdpTools } from '../tools/cdp';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 
 type Has = {
   texts?: string[]; plain?: string[]; selectors?: Record<string, string>; labels?: string[]; options?: string[];
@@ -317,7 +317,7 @@ describe('iframe text reaches the caller fenced as untrusted page content', () =
   // cdp_read_text is the browser tool's read_text; page_context is the agent loop's browser_read, projected as cdp_page_context.
   const tool = (name: string) => getCdpTools().find(t => t.name === name)!;
   const pageContext = (d: CDPDriver, args: Record<string, unknown> = {}) =>
-    buildUnifiedTools().find(t => t.name === 'browser_read')!.execute(args, { cdp: d } as never);
+    buildCoreTools().find(t => t.name === 'cdp_page_context')!.execute(args, { cdp: d } as never);
   const fenced = (text: string) => /^<untrusted-screen-content>\n[\s\S]*\n<\/untrusted-screen-content>$/.test(text);
 
   it('read_text: a same-origin iframe\'s text, and a forged closing delimiter in it, stay inside one block', async () => {
@@ -354,16 +354,16 @@ describe('iframe text reaches the caller fenced as untrusted page content', () =
 });
 
 describe('the browser tools take frame', () => {
-  const agentTool = (name: string) => buildUnifiedTools().find(t => t.name === name)!;
+  const agentTool = (name: string) => buildCoreTools().find(t => t.name === name)!;
   const cdpTool = (name: string) => getCdpTools().find(t => t.name === name)!;
 
   it('click (cdp_click) refuses a cross-origin-only match, then clicks it when frame names the iframe', async () => {
     const ad = fakeFrame(`${ADS}/slot`, { texts: ['Claim'] });
     const d = driverOn(fakeFrame(`${APP}/`), ad);
-    const no = await agentTool('browser_click').execute({ text: 'Claim' }, { cdp: d } as never);
+    const no = await agentTool('cdp_click').execute({ text: 'Claim' }, { cdp: d } as never);
     expect(no.success).toBe(false);
     expect(classifyResult(no.text, true, true)?.code).toBe('CROSS_ORIGIN_FRAME');
-    const yes = await agentTool('browser_click').execute({ text: 'Claim', frame: ADS }, { cdp: d } as never);
+    const yes = await agentTool('cdp_click').execute({ text: 'Claim', frame: ADS }, { cdp: d } as never);
     expect(yes).toMatchObject({ success: true });
     expect(yes.text).toContain(`in iframe "${ADS}"`);
     expect(ad.clicked).toEqual(['Claim']);
@@ -372,7 +372,7 @@ describe('the browser tools take frame', () => {
   it('type (cdp_type), select_option and wait_for pass frame to the driver', async () => {
     const form = fakeFrame(`${ADS}/form`, { selectors: { '#email': '', '#plan': '' }, options: ['pro'] });
     const d = driverOn(fakeFrame(`${APP}/`), form);
-    const typed = await agentTool('browser_type').execute({ selector: '#email', text: 'a@b.c', frame: ADS }, { cdp: d } as never);
+    const typed = await agentTool('cdp_type').execute({ selector: '#email', text: 'a@b.c', frame: ADS }, { cdp: d } as never);
     expect(typed.success).toBe(true);
     expect(typed.text).toContain('read back ✓');   // read back in the iframe it was typed into
     const picked = await cdpTool('cdp_select_option').handler({ selector: '#plan', value: 'pro', frame: ADS }, { cdp: d } as never);

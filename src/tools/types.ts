@@ -138,7 +138,7 @@ export interface ToolDefinition {
    * from cost-class.ts (`src/__tests__/cost-class-coverage.test.ts` enforces it).
    */
   costClass?: ToolCostClass;
-  /** The handler checks an `expect` argument (the projected tools do). Others would silently ignore one. */
+  /** The handler checks an `expect` argument (the core tools do). Others would silently ignore one. */
   honorsExpect?: boolean;
   handler: (params: Record<string, any>, ctx: ToolContext) => Promise<ToolResult>;
 }
@@ -198,4 +198,51 @@ export function toImage(ctx: ToolContext, x: number, y: number): { x: number; y:
   const f = getLastFrame();
   const s = f ? f.scale : (ctx.getMouseScaleFactor() || 1);
   return { x: Math.round((x - (f?.originX ?? 0)) / s), y: Math.round((y - (f?.originY ?? 0)) / s) };
+}
+
+// ─── Core tools (core-tools.ts) ──────────────────────────────────────────────
+
+/** What a core tool's execute() sees, per call (core-tools.ts toolContextToAgent builds it from the ToolContext). */
+export interface AgentToolContext {
+  platform: import('../platform/types').PlatformAdapter;
+  /** Screen size, for coordinate math and the coordinate breadcrumb in results. */
+  screen: { logicalWidth: number; logicalHeight: number; physicalWidth: number; physicalHeight: number; dpiRatio: number };
+  /** Optional CDP driver — when present, the browser_* tools drive the
+   *  browser via the DOM (selectors, not pixels). Null when the daemon didn't wire CDP. */
+  cdp?: import('../platform/cdp-driver').CDPDriver | null;
+  /** Session-scoped UIMap cache for safe el_NN element refs. */
+  uiMaps?: import('../core/sense/ui-map-holder').UIMapHolder;
+  /** Test-only platform override consumed by imageScale() (defaults to
+   *  process.platform in production). Lets coordinate-scaling tests pin the
+   *  OS branch deterministically instead of depending on the CI runner's OS. */
+  _platform?: string;
+  /** Image → mouse factor of the latest screenshot, when known: imageScale() uses it as is. */
+  imageToMouse?: number;
+}
+
+/** A core tool: its one name, metadata, a JSON-Schema input and an execute() against the PlatformAdapter. */
+export interface CoreTool {
+  name: string;
+  category: ToolDefinition['category'];
+  /** 0 = reads only, 1 = sends input / changes something. */
+  safetyTier: 0 | 1;
+  /** `true`: a tool that is destructive by itself. */
+  destructive?: boolean;
+  description: string;
+  inputSchema: {
+    type: 'object';
+    properties: Record<string, unknown>;
+    required?: string[];
+    additionalProperties?: boolean;
+  };
+  /** True when this tool plausibly changes what's on screen. */
+  changesScreen: boolean;
+  execute: (args: Record<string, unknown>, ctx: AgentToolContext) => Promise<CoreToolResult>;
+}
+
+export interface CoreToolResult {
+  success: boolean;
+  text: string;
+  /** Label of the target element, if known. */
+  targetLabel?: string;
 }

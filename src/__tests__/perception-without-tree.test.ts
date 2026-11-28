@@ -6,9 +6,9 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { imageCost, imageScale } from '../platform/coord-scale';
-import { drawnControlsLine, opaqueArea, opaqueAreaLine, shownHelp, SPARSE_NEXT_STEP } from '../tools/blind-hints';
+import { drawnControlsLine, opaqueArea, opaqueAreaLine, shownHelp, SPARSE_NEXT_STEP } from '../tools/hints';
 import { toCompactNames } from '../tools/compact';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 import { stopControl, __setControlDirForTests } from '../core/control';
 import type { UiElement } from '../platform/types';
 
@@ -86,7 +86,7 @@ describe('tooltips on element lines (#359)', () => {
   });
 
   it('read_tree lists them', async () => {
-    const t = buildUnifiedTools().find(x => x.name === 'read_screen')!;
+    const t = buildCoreTools().find(x => x.name === 'read_screen')!;
     const tree = Array.from({ length: 12 }, (_, i) => el(`B${i}`, 'Button', i * 50, 0, 40, 40, i === 0 ? { help: 'Insert a sticky note' } : {}));
     const platform = { getUiTree: vi.fn(async () => tree), getActiveWindow: vi.fn(async () => null), listWindows: vi.fn(async () => []) };
     const r = await t.execute({}, { platform, screen: {} } as any);
@@ -117,7 +117,7 @@ describe('a window that names things but has nothing to press', () => {
   });
 
   it('read_tree adds it after the opaque line, and not to a window with something to press', async () => {
-    const t = buildUnifiedTools().find(x => x.name === 'read_screen')!;
+    const t = buildCoreTools().find(x => x.name === 'read_screen')!;
     const run = async (tree: UiElement[]) => (await t.execute({}, { platform: { getUiTree: vi.fn(async () => tree), getActiveWindow: vi.fn(async () => null), listWindows: vi.fn(async () => []) }, screen: {} } as any)).text;
     expect(await run(cad)).toContain('\n→ Nothing here to press by name');
     expect(await run([...cad, el('OK', 'Button', 400, 500, 80, 30)])).not.toContain('Nothing here to press by name');
@@ -137,7 +137,7 @@ describe('the opaque-area line points at labels outside the area', () => {
 
 describe('click with a path (#355)', () => {
   afterEach(() => __setControlDirForTests(null));
-  const click = () => buildUnifiedTools().find(x => x.name === 'click')!;
+  const click = () => buildCoreTools().find(x => x.name === 'mouse_click')!;
   const ctxWith = (mouseClick: (...a: unknown[]) => Promise<void>) => ({
     platform: { mouseClick: vi.fn(mouseClick), getActiveWindow: vi.fn(async () => null) },
     screen: { physicalWidth: 2560, physicalHeight: 1440, logicalWidth: 2560, logicalHeight: 1440, dpiRatio: 1 },

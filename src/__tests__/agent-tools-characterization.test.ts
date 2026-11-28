@@ -1,5 +1,5 @@
 /**
- * Characterization tests for System B (buildUnifiedTools / agent-loop tool catalog).
+ * Characterization tests for System B (buildCoreTools / agent-loop tool catalog).
  *
  * These tests LOCK DOWN the observable behavior of the agent-loop tool catalog
  * so that the planned MCP re-projection refactor cannot silently regress the
@@ -9,7 +9,7 @@
  * refactor, that is a regression, not a test to be deleted.
  *
  * Pinned behaviors:
- *  1. buildUnifiedTools() catalog composition
+ *  1. buildCoreTools() catalog composition
  *  2. a smushed "x,y" click: the split warning reaches the result (coerceCoord itself: coerce-coord.test.ts)
  *  3. coordBreadcrumb: click result text contains the "(x,y) → screen (x,y)" pattern
  *     (the scaling itself: coord-scale.test.ts)
@@ -56,8 +56,8 @@ vi.mock('../platform/ocr-engine', () => {
 
 // ── Imports after mocks ──────────────────────────────────────────────────────
 
-import { buildUnifiedTools } from '../tools/projected/tools';
-import type { AgentToolContext } from '../tools/projected/types';
+import { buildCoreTools } from '../tools/core-tools';
+import type { AgentToolContext } from '../tools/types';
 import { makeMockPlatform } from './helpers/mock-platform';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -87,7 +87,7 @@ function makeCtx(overrides: Partial<AgentToolContext> = {}): AgentToolContext {
   };
 }
 
-function findTool(tools: ReturnType<typeof buildUnifiedTools>, name: string) {
+function findTool(tools: ReturnType<typeof buildCoreTools>, name: string) {
   const t = tools.find(x => x.name === name);
   if (!t) throw new Error(`tool "${name}" not found in catalog`);
   return t;
@@ -97,15 +97,15 @@ function findTool(tools: ReturnType<typeof buildUnifiedTools>, name: string) {
 // 1. Tool set composition (flat catalog — mode-agnostic)
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('1. buildUnifiedTools() — flat catalog composition', () => {
+describe('1. buildCoreTools() — flat catalog composition', () => {
 
   it('includes granular click tool', () => {
-    const tools = buildUnifiedTools();
-    expect(tools.map(t => t.name)).toContain('click');
+    const tools = buildCoreTools();
+    expect(tools.map(t => t.name)).toContain('mouse_click');
   });
 
   it('does NOT include compound mouse/keyboard/window tools (vision-only — not used in thin loop)', () => {
-    const tools = buildUnifiedTools();
+    const tools = buildCoreTools();
     const names = tools.map(t => t.name);
     expect(names).not.toContain('mouse');
     expect(names).not.toContain('keyboard');
@@ -113,14 +113,14 @@ describe('1. buildUnifiedTools() — flat catalog composition', () => {
 
   // x,y or `path` (#355): neither is required by the schema, the tool refuses a call with neither.
   it('click takes x,y or a path of points', () => {
-    const tools = buildUnifiedTools();
-    const click = findTool(tools, 'click');
+    const tools = buildCoreTools();
+    const click = findTool(tools, 'mouse_click');
     expect(click.inputSchema.required).toBeUndefined();
     expect(Object.keys(click.inputSchema.properties as object)).toEqual(expect.arrayContaining(['x', 'y', 'path', 'interval_ms']));
   });
 
   it('includes the perception tool read_screen', () => {
-    const tools = buildUnifiedTools();
+    const tools = buildCoreTools();
     const names = tools.map(t => t.name);
     expect(names).toContain('read_screen');
   });
@@ -134,8 +134,8 @@ describe('2. coerceCoord — smushed coordinate handling', () => {
 
   it('smushed click: click tool reads the warning and appends it to result.text', async () => {
     const ctx = makeCtx();
-    const tools = buildUnifiedTools();
-    const clickTool = findTool(tools, 'click');
+    const tools = buildCoreTools();
+    const clickTool = findTool(tools, 'mouse_click');
     // Pass smushed coordinate: x="390, 79", y not meaningful (will be overridden by split)
     const result = await clickTool.execute({ x: '390, 79' as any, y: 0 }, ctx);
     expect(result.success).toBe(true);
@@ -154,8 +154,8 @@ describe('3. coordBreadcrumb — click result contains image→screen breadcrumb
 
   it('screen-space click: result text contains the "(x,y)" and screen dimensions', async () => {
     const ctx = makeCtx();
-    const tools = buildUnifiedTools();
-    const clickTool = findTool(tools, 'click');
+    const tools = buildCoreTools();
+    const clickTool = findTool(tools, 'mouse_click');
     const result = await clickTool.execute({ x: 100, y: 200 }, ctx);
     expect(result.success).toBe(true);
     // Should contain the coords
@@ -169,8 +169,8 @@ describe('3. coordBreadcrumb — click result contains image→screen breadcrumb
   it('image-space click: result text contains "image (x,y) → screen (sx,sy)" with scale', async () => {
     // physicalWidth=2560, LLM_TARGET_WIDTH=1280 → imageScale=2
     const ctx = makeCtx();
-    const tools = buildUnifiedTools();
-    const clickTool = findTool(tools, 'click');
+    const tools = buildCoreTools();
+    const clickTool = findTool(tools, 'mouse_click');
     const result = await clickTool.execute({ x: 100, y: 200, space: 'image' }, ctx);
     expect(result.success).toBe(true);
     // Breadcrumb must show original image coords AND the scaled screen coords
@@ -184,8 +184,8 @@ describe('3. coordBreadcrumb — click result contains image→screen breadcrumb
 
   it('screen-space click: no "→ screen" breadcrumb (scale is 1, no transformation needed)', async () => {
     const ctx = makeCtx();
-    const tools = buildUnifiedTools();
-    const clickTool = findTool(tools, 'click');
+    const tools = buildCoreTools();
+    const clickTool = findTool(tools, 'mouse_click');
     // Screen space with scale=1: no transformation arrow should appear
     const result = await clickTool.execute({ x: 100, y: 200, space: 'screen' }, ctx);
     expect(result.success).toBe(true);
@@ -207,7 +207,7 @@ describe('6. resolveAgentPid — active-window pid fallback', () => {
       title: 'TestApp', processName: 'test.exe', processId: 42,
       bounds: { x: 0, y: 0, width: 1920, height: 1080 },
     });
-    const tools = buildUnifiedTools();
+    const tools = buildCoreTools();
     // Note: invoke_element does NOT call resolveAgentPid (uses processId from args directly)
     // But a11y_expand DOES use resolveAgentPid
     const expandTool = findTool(tools, 'a11y_expand');
@@ -225,7 +225,7 @@ describe('6. resolveAgentPid — active-window pid fallback', () => {
   it('a11y_expand: getActiveWindow throws → tool still returns a result (no hang)', async () => {
     const ctx = makeCtx();
     (ctx.platform.getActiveWindow as any).mockRejectedValue(new Error('platform error'));
-    const tools = buildUnifiedTools();
+    const tools = buildCoreTools();
     const expandTool = findTool(tools, 'a11y_expand');
     // Should not throw
     const result = await expandTool.execute({ name: 'SomeMenu' }, ctx);
@@ -239,7 +239,7 @@ describe('6. resolveAgentPid — active-window pid fallback', () => {
 
   it('a11y_toggle: explicit processId overrides active-window fallback', async () => {
     const ctx = makeCtx();
-    const tools = buildUnifiedTools();
+    const tools = buildCoreTools();
     const toggleTool = findTool(tools, 'a11y_toggle');
     await toggleTool.execute({ name: 'DarkMode', processId: 77 }, ctx);
     expect(ctx.platform.invokeElement).toHaveBeenCalledWith(
@@ -264,7 +264,7 @@ describe('7. type tool — keys for short text, verified paste for long text, re
 
   it('short text is typed as keystrokes: the clipboard is never touched', async () => {
     const ctx = makeCtx();
-    const typeTool = findTool(buildUnifiedTools(), 'type');
+    const typeTool = findTool(buildCoreTools(), 'type_text');
     const result = await typeTool.execute({ text: 'Hello World' }, ctx);
     expect(result.success).toBe(true);
     expect(result.text).toContain('(keys)');
@@ -275,7 +275,7 @@ describe('7. type tool — keys for short text, verified paste for long text, re
 
   it('a trailing newline types the rest, then presses Return', async () => {
     const ctx = makeCtx();
-    const typeTool = findTool(buildUnifiedTools(), 'type');
+    const typeTool = findTool(buildCoreTools(), 'type_text');
     await typeTool.execute({ text: 'dashboard.stripe.com/webhooks\n' }, ctx);
     expect(ctx.platform.typeText).toHaveBeenCalledWith('dashboard.stripe.com/webhooks');
     expect((ctx.platform.keyPress as any).mock.calls.map((c: unknown[]) => c[0])).toEqual(['Return']);
@@ -283,7 +283,7 @@ describe('7. type tool — keys for short text, verified paste for long text, re
 
   it('long text is pasted: clipboard write + mod+v, not typeText', async () => {
     const ctx = makeCtx();
-    const typeTool = findTool(buildUnifiedTools(), 'type');
+    const typeTool = findTool(buildCoreTools(), 'type_text');
     const result = await typeTool.execute({ text: LONG }, ctx);
     expect(result.text).toContain('(paste, clipboard restored)');
     expect(ctx.platform.writeClipboard).toHaveBeenCalledWith(LONG);
@@ -295,7 +295,7 @@ describe('7. type tool — keys for short text, verified paste for long text, re
     const ctx = makeCtx();
     await ctx.platform.writeClipboard('my-prior-content');
     (ctx.platform.writeClipboard as any).mockClear();
-    await findTool(buildUnifiedTools(), 'type').execute({ text: LONG }, ctx);
+    await findTool(buildCoreTools(), 'type_text').execute({ text: LONG }, ctx);
     const writeCalls = (ctx.platform.writeClipboard as any).mock.calls;
     expect(writeCalls[0][0]).toBe(LONG);
     expect(writeCalls[1][0]).toBe('my-prior-content');
@@ -303,7 +303,7 @@ describe('7. type tool — keys for short text, verified paste for long text, re
 
   it('type tool: empty text returns success without any I/O', async () => {
     const ctx = makeCtx();
-    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: '' }, ctx);
+    const result = await findTool(buildCoreTools(), 'type_text').execute({ text: '' }, ctx);
     expect(result.success).toBe(true);
     expect(result.text).toContain('0 chars');
     expect(ctx.platform.writeClipboard).not.toHaveBeenCalled();
@@ -314,7 +314,7 @@ describe('7. type tool — keys for short text, verified paste for long text, re
     const ctx = makeCtx();
     await ctx.platform.writeClipboard("the user's own clipboard");
     (ctx.platform.writeClipboard as any).mockImplementation(async () => { /* Set-Clipboard timed out — nothing written */ });
-    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: LONG + '\n' }, ctx);
+    const result = await findTool(buildCoreTools(), 'type_text').execute({ text: LONG + '\n' }, ctx);
     const keys = (ctx.platform.keyPress as any).mock.calls.map((c: unknown[]) => c[0]);
     expect(keys).not.toContain('mod+v');
     expect(keys).toEqual(['Return']);
@@ -325,7 +325,7 @@ describe('7. type tool — keys for short text, verified paste for long text, re
   it('long text: falls back to typeText when the clipboard write throws', async () => {
     const ctx = makeCtx();
     (ctx.platform.writeClipboard as any).mockRejectedValue(new Error('clipboard denied'));
-    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: LONG }, ctx);
+    const result = await findTool(buildCoreTools(), 'type_text').execute({ text: LONG }, ctx);
     expect(result.success).toBe(true);
     expect(ctx.platform.typeText).toHaveBeenCalledWith(LONG);
     expect(result.text).toContain('(keys)');
@@ -334,14 +334,14 @@ describe('7. type tool — keys for short text, verified paste for long text, re
   it('read back: the field shows the text → "read back ✓"', async () => {
     const ctx = makeCtx();
     (ctx.platform as any).getFocusedElement = vi.fn(async () => ({ name: 'Search', controlType: 'Edit', value: 'Hello World', bounds: { x: 0, y: 0, width: 1, height: 1 } }));
-    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 'Hello World' }, ctx);
+    const result = await findTool(buildCoreTools(), 'type_text').execute({ text: 'Hello World' }, ctx);
     expect(result.text.startsWith('Typed 11 chars (keys, read back ✓): "Hello World"')).toBe(true);
   });
 
   it('read back: autocomplete swapped the text → Return is NOT pressed (live: an address bar)', async () => {
     const ctx = makeCtx();
     (ctx.platform as any).getFocusedElement = vi.fn(async () => ({ name: 'Address and search bar', controlType: 'Edit', value: 'https://glama.ai/mcp/servers/x', bounds: { x: 0, y: 0, width: 1, height: 1 } }));
-    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 'https://github.com/login/device\n' }, ctx);
+    const result = await findTool(buildCoreTools(), 'type_text').execute({ text: 'https://github.com/login/device\n' }, ctx);
     expect(result.success).toBe(false);
     expect(result.text).toMatch(/field shows different text.*Return not pressed/);
     expect(ctx.platform.keyPress).not.toHaveBeenCalledWith('Return');
@@ -352,7 +352,7 @@ describe('7. type tool — keys for short text, verified paste for long text, re
   it('a password field: what was typed is never echoed in the result (live macOS run echoed it)', async () => {
     const ctx = makeCtx();
     (ctx.platform as any).getFocusedElement = vi.fn(async () => ({ name: 'Password', controlType: 'Edit', secure: true, value: '', bounds: { x: 0, y: 0, width: 1, height: 1 } }));
-    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 's3cret-PW\n' }, ctx);
+    const result = await findTool(buildCoreTools(), 'type_text').execute({ text: 's3cret-PW\n' }, ctx);
     expect(result.success).toBe(true);
     expect(result.text).toMatch(/^Typed 10 chars \(keys\) into a password field \(not echoed\)/);
     expect(result.text).not.toContain('s3cret');
@@ -360,7 +360,7 @@ describe('7. type tool — keys for short text, verified paste for long text, re
 
   it('chars are counted as a person counts them: an emoji is one', async () => {
     const ctx = makeCtx();
-    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 'café 日本語 😀' }, ctx);
+    const result = await findTool(buildCoreTools(), 'type_text').execute({ text: 'café 日本語 😀' }, ctx);
     expect(result.text).toMatch(/^Typed 10 chars/);
   });
 
@@ -368,7 +368,7 @@ describe('7. type tool — keys for short text, verified paste for long text, re
     for (const el of [{ secure: true, value: '' }, { value: '' }, null]) {
       const ctx = makeCtx();
       (ctx.platform as any).getFocusedElement = vi.fn(async () => el);
-      const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 'hunter2\n' }, ctx);
+      const result = await findTool(buildCoreTools(), 'type_text').execute({ text: 'hunter2\n' }, ctx);
       expect(result.success).toBe(true);
       expect(ctx.platform.keyPress).toHaveBeenCalledWith('Return');
       expect(result.text).not.toMatch(/read back/);
@@ -378,7 +378,7 @@ describe('7. type tool — keys for short text, verified paste for long text, re
   it('read back before a submit: an inline autocomplete suffix after the typed text blocks Return', async () => {
     const ctx = makeCtx();
     (ctx.platform as any).getFocusedElement = vi.fn(async () => ({ name: 'Address', controlType: 'Edit', value: 'github.com/login/device/extra-suggestion', bounds: { x: 0, y: 0, width: 1, height: 1 } }));
-    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 'github.com/login/device\n' }, ctx);
+    const result = await findTool(buildCoreTools(), 'type_text').execute({ text: 'github.com/login/device\n' }, ctx);
     expect(result.success).toBe(false);
     expect(ctx.platform.keyPress).not.toHaveBeenCalledWith('Return');
   });
@@ -386,7 +386,7 @@ describe('7. type tool — keys for short text, verified paste for long text, re
   it('read back without a submit: the text inside a longer value is NOT ✓ (the whole field must be what was typed); the reply names the value', async () => {
     const ctx = makeCtx();
     (ctx.platform as any).getFocusedElement = vi.fn(async () => ({ name: 'Doc', controlType: 'Document', value: 'before Hello World after', bounds: { x: 0, y: 0, width: 1, height: 1 } }));
-    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 'Hello World' }, ctx);
+    const result = await findTool(buildCoreTools(), 'type_text').execute({ text: 'Hello World' }, ctx);
     expect(result.text).not.toContain('read back ✓');
     expect(result.text).toMatch(/the field now holds [\s\S]*before Hello World after[\s\S]* \(not only what was typed\)/);
   });
@@ -394,7 +394,7 @@ describe('7. type tool — keys for short text, verified paste for long text, re
   it('where typing is not private (the text would be visible to other processes) short text is pasted instead', async () => {
     const ctx = makeCtx();
     (ctx.platform as any).typingIsPrivate = () => false;
-    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 'hunter2' }, ctx);
+    const result = await findTool(buildCoreTools(), 'type_text').execute({ text: 'hunter2' }, ctx);
     expect(result.text).toContain('(paste');
     expect(ctx.platform.typeText).not.toHaveBeenCalled();
   });
@@ -402,7 +402,7 @@ describe('7. type tool — keys for short text, verified paste for long text, re
   it('non-ASCII, newlines and tabs are pasted as literal text, even short (keys would press Return/Tab; some OSes refuse non-ASCII keys)', async () => {
     for (const text of ['café 日本語', 'line1\nline2', 'a\tb', '😀']) {
       const ctx = makeCtx();
-      const result = await findTool(buildUnifiedTools(), 'type').execute({ text }, ctx);
+      const result = await findTool(buildCoreTools(), 'type_text').execute({ text }, ctx);
       expect(result.text).toContain('(paste');
       expect(ctx.platform.typeText).not.toHaveBeenCalled();
       expect(ctx.platform.writeClipboard).toHaveBeenCalledWith(text);
@@ -413,14 +413,14 @@ describe('7. type tool — keys for short text, verified paste for long text, re
     const ctx = makeCtx();
     (ctx.platform as any).typingIsPrivate = () => false;
     (ctx.platform.writeClipboard as any).mockRejectedValue(new Error('wl-copy missing'));
-    await expect(findTool(buildUnifiedTools(), 'type').execute({ text: 'hunter2' }, ctx)).rejects.toThrow();
+    await expect(findTool(buildCoreTools(), 'type_text').execute({ text: 'hunter2' }, ctx)).rejects.toThrow();
     expect(ctx.platform.typeText).not.toHaveBeenCalled();
   });
 
   it('a reformatting field before a submit: Return not pressed, and the result says what the field shows', async () => {
     const ctx = makeCtx();
     (ctx.platform as any).getFocusedElement = vi.fn(async () => ({ name: 'Phone', controlType: 'Edit', value: '(555) 123-4567', bounds: { x: 0, y: 0, width: 1, height: 1 } }));
-    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: '5551234567\n' }, ctx);
+    const result = await findTool(buildCoreTools(), 'type_text').execute({ text: '5551234567\n' }, ctx);
     expect(result.success).toBe(false);
     expect(result.text).toMatch(/if it is right, press Return/);
     expect(result.text).toMatch(/\(555\) 123-4567/);
@@ -430,7 +430,7 @@ describe('7. type tool — keys for short text, verified paste for long text, re
   it('a submit held while the focus is not on a text field says where the focus is, not that a suggestion took over', async () => {
     const ctx = makeCtx();
     (ctx.platform as any).getFocusedElement = vi.fn(async () => ({ name: 'Who is using Chrome?', controlType: 'Pane', value: 'Who is using Chrome?', bounds: { x: 0, y: 0, width: 1, height: 1 } }));
-    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 'example.com\n' }, ctx);
+    const result = await findTool(buildCoreTools(), 'type_text').execute({ text: 'example.com\n' }, ctx);
     expect(result.success).toBe(false);
     expect(result.text).toContain("the focus is on Pane 'Who is using Chrome?', not a text field — Return not pressed");
     expect(result.text).not.toMatch(/suggestion|autocomplete/);
@@ -441,7 +441,7 @@ describe('7. type tool — keys for short text, verified paste for long text, re
     for (const controlType of ['Edit', 'Document', 'ComboBox']) {
       const ctx = makeCtx();
       (ctx.platform as any).getFocusedElement = vi.fn(async () => ({ name: 'Address', controlType, value: 'example.com/more', bounds: { x: 0, y: 0, width: 1, height: 1 } }));
-      const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 'example.com\n' }, ctx);
+      const result = await findTool(buildCoreTools(), 'type_text').execute({ text: 'example.com\n' }, ctx);
       expect(result.text, controlType).toContain('an autocomplete suggestion');
       expect(result.text, controlType).not.toContain('not a text field');
     }
@@ -450,7 +450,7 @@ describe('7. type tool — keys for short text, verified paste for long text, re
   it('a refused keystroke (a system dialog owns the keyboard) throws: nothing typed, and the clipboard untouched', async () => {
     const ctx = makeCtx();
     (ctx.platform.typeText as any).mockRejectedValue(new Error('A system dialog owns the keyboard: "X"'));
-    await expect(findTool(buildUnifiedTools(), 'type').execute({ text: 'secret' }, ctx)).rejects.toThrow(/system dialog/);
+    await expect(findTool(buildCoreTools(), 'type_text').execute({ text: 'secret' }, ctx)).rejects.toThrow(/system dialog/);
     expect(ctx.platform.writeClipboard).not.toHaveBeenCalled();
   });
 });

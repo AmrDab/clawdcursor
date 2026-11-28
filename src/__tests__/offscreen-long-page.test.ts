@@ -7,10 +7,10 @@
  */
 import { describe, it, expect } from 'vitest';
 import { toUiElement } from '../platform/mac-ax';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 import { UIMapHolder } from '../core/sense/ui-map-holder';
 import { focusStayedOnPage } from '../tools/smart';
-import type { AgentToolContext } from '../tools/projected/types';
+import type { AgentToolContext } from '../tools/types';
 import type { PlatformAdapter } from '../platform/types';
 
 describe('macOS: an element with no area is offscreen', () => {
@@ -26,7 +26,7 @@ describe('macOS: an element with no area is offscreen', () => {
   });
 });
 
-const tool = (name: string) => buildUnifiedTools().find(t => t.name === name)!;
+const tool = (name: string) => buildCoreTools().find(t => t.name === name)!;
 function ctx(tree: object[]): AgentToolContext {
   const adapter = {
     getActiveWindow: async () => ({ processId: 9, processName: 'Google Chrome', title: 'Bench Reading', bounds: { x: 80, y: 60, width: 1000, height: 900 } }),

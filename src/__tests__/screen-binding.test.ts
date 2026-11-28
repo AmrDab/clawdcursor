@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { recordShot, checkImagePointer, latestShotId, __resetShotsForTests } from '../core/screen-binding';
-import { isImagePointerCall, isFullScreenshotCall } from '../tools/screen-guard';
+import { isImagePointerCall, isFullScreenshotCall } from '../tools/call-guards';
 import { classifyResult } from '../core/result-codes';
 
 const host = { processId: 1, title: 'Claude', handle: 100 };
@@ -61,7 +61,7 @@ describe('checkImagePointer', () => {
   });
 
   it('an untitled window that was in front at capture (frameless app: never in a window list) is on the screenshot', async () => {
-    const { noteScreenshot } = await import('../tools/screen-guard');
+    const { noteScreenshot } = await import('../tools/call-guards');
     const frameless = { processId: 10, title: '', handle: 555 };
     const ctx = { platform: { listWindows: async () => [host, notepad], getActiveWindow: async () => frameless } } as any;
     await noteScreenshot(ctx);

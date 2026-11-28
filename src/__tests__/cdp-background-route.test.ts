@@ -3,10 +3,10 @@
  * connection to is a page act (DOM fill / click). It never goes through UIA, which takes the foreground in Chromium.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 
-const setField = buildUnifiedTools().find(t => t.name === 'set_field_value')!;
-const invoke = buildUnifiedTools().find(t => t.name === 'invoke_element')!;
+const setField = buildCoreTools().find(t => t.name === 'set_field_value')!;
+const invoke = buildCoreTools().find(t => t.name === 'invoke_element')!;
 const NOTE = 'CDP page act, focus not moved';
 
 function ctxWith(opts: { connected?: boolean; pid?: number | null; typeOk?: boolean; clickOk?: boolean } = {}) {

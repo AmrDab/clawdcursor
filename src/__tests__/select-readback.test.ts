@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { selectOption, selectedResult } from '../platform/select-option';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 import { classifyResult } from '../core/result-codes';
 
 // The waits between steps (src/sleep.ts) run on fake time: a call is driven to its end at once.
@@ -47,7 +47,7 @@ describe('select on an item: the result is what the item reads afterwards', () =
         invokeElement: vi.fn(async () => ({ success: true, ...(selected === undefined ? {} : { data: { selected } }) })),
         getActiveWindow: vi.fn(async () => null), findElements: vi.fn(async () => []),
       };
-      const agent = await settled(buildUnifiedTools().find(t => t.name === 'a11y_select')!.execute({ name: 'High', processId: 1 }, { platform } as any));
+      const agent = await settled(buildCoreTools().find(t => t.name === 'a11y_select')!.execute({ name: 'High', processId: 1 }, { platform } as any));
       expect(agent.text).toMatch(text);
       expect(agent.success).toBe(!isError);
     });

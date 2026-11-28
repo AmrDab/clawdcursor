@@ -32,10 +32,10 @@ vi.mock('../platform/ocr-engine', () => {
 });
 
 import { parseAssertions, validateExpect } from '../core/verify/assertions';
-import { projectToToolDefinition } from '../tools/projected/project-mcp';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { toToolDefinition } from '../tools/core-tools';
+import { buildCoreTools } from '../tools/core-tools';
 import type { ToolContext } from '../tools/types';
-import type { AgentToolContext } from '../tools/projected/types';
+import type { AgentToolContext } from '../tools/types';
 
 const NOTEPAD = { processId: 9, processName: 'notepad', title: 'Untitled - Notepad', bounds: { x: 0, y: 0, width: 800, height: 600 }, isMinimized: false };
 
@@ -70,7 +70,7 @@ function makeToolCtx(platform = makePlatform()): ToolContext {
   } as unknown as ToolContext;
 }
 
-const tool = (name: string) => buildUnifiedTools().find(t => t.name === name)!;
+const tool = (name: string) => buildCoreTools().find(t => t.name === name)!;
 
 describe('parseAssertions — accepts the JSON-encoded array string the schema advertises', () => {
   it('parses a JSON-encoded array string', () => {
@@ -97,7 +97,7 @@ describe('projected MCP handler — expect is checked BEFORE the action', () => 
   beforeEach(() => { platform = makePlatform(); });
 
   it('a malformed string expect rejects WITHOUT executing (key)', async () => {
-    const def = projectToToolDefinition(tool('key'));
+    const def = toToolDefinition(tool('key_press'));
     const r = await def.handler({ combo: 'Escape', expect: 'window_title_contains:Identity' }, makeToolCtx(platform));
     expect(r.isError).toBe(true);
     expect(r.text).toMatch(/expect rejected \(nothing executed\)/);
@@ -105,7 +105,7 @@ describe('projected MCP handler — expect is checked BEFORE the action', () => 
   });
 
   it('a malformed string expect rejects WITHOUT executing (invoke_element by name)', async () => {
-    const def = projectToToolDefinition(tool('invoke_element'));
+    const def = toToolDefinition(tool('invoke_element'));
     const r = await def.handler({ name: 'Switch', expect: 'window_title_contains:Identity' }, makeToolCtx(platform));
     expect(r.isError).toBe(true);
     expect(r.text).toMatch(/nothing executed/);
@@ -114,7 +114,7 @@ describe('projected MCP handler — expect is checked BEFORE the action', () => 
   });
 
   it('a JSON-encoded array string expect executes and verifies', async () => {
-    const def = projectToToolDefinition(tool('key'));
+    const def = toToolDefinition(tool('key_press'));
     const r = await def.handler({ combo: 'Escape', expect: '[{"type":"app_running","name":"notepad"}]' }, makeToolCtx(platform));
     expect(r.isError).toBe(false);
     expect(platform.keyPress).toHaveBeenCalledTimes(1);

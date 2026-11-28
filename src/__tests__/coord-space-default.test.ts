@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildUnifiedTools } from '../tools/projected/tools';
-import type { AgentToolContext } from '../tools/projected/types';
+import { buildCoreTools } from '../tools/core-tools';
+import type { AgentToolContext } from '../tools/types';
 import type { PlatformAdapter } from '../platform/types';
 
 function ctx(over: Partial<AgentToolContext> = {}): AgentToolContext {
@@ -19,7 +19,7 @@ function ctx(over: Partial<AgentToolContext> = {}): AgentToolContext {
   } as unknown as AgentToolContext;
 }
 
-const getDrag = () => buildUnifiedTools().find(t => t.name === 'drag')!;
+const getDrag = () => buildCoreTools().find(t => t.name === 'mouse_drag')!;
 
 // Omitting space means image space, the MCP default; space:"screen" passes coordinates through.
 describe('drag coordinate space', () => {

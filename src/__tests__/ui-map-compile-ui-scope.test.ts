@@ -18,12 +18,12 @@ vi.mock('../platform/ocr-engine', () => {
   return { OcrEngine, ocrEngine: () => new OcrEngine() };
 });
 
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 import { UIMapHolder } from '../core/sense/ui-map-holder';
-import type { AgentToolContext } from '../tools/projected/types';
+import type { AgentToolContext } from '../tools/types';
 import type { PlatformAdapter } from '../platform/types';
 
-const tool = () => buildUnifiedTools().find(t => t.name === 'compile_ui')!;
+const tool = () => buildCoreTools().find(t => t.name === 'compile_ui')!;
 
 const notepad = { processId: 9, processName: 'notepad', title: 'Untitled', bounds: { x: 0, y: 0, width: 800, height: 600 }, isMinimized: false };
 const calc = { processId: 42, processName: 'Calculator', title: 'Calculator', bounds: { x: 1000, y: 300, width: 230, height: 400 }, isMinimized: false };

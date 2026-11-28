@@ -1,6 +1,6 @@
 /**
  * The compact surface's route table: every compound action and the granular tool it runs (compact.ts builds the compound
- * tools from it). Pure data with no imports, so the guards (call-guards.ts, screen-guard.ts) and the MCP server can read
+ * tools from it). Pure data with no imports, so the guards (call-guards.ts) and the MCP server can read
  * a call's route without importing the compound tools.
  */
 

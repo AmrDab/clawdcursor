@@ -9,7 +9,7 @@
  *
  * So:
  *  - STOPPED is a file shared by every clawdcursor process, set by any stop (the pill, `clawdcursor stop`, the daemon's
- *    /stop) and outliving a restart. While it is set, own-ui-guard refuses every call except asking the user, and every act
+ *    /stop) and outliving a restart. While it is set, the own-UI guard (tools/call-guards.ts) refuses every call except asking the user, and every act
  *    in the input layers is refused (pointer-guard.ts). Only the user's Resume on a pause prompt, `clawdcursor resume` or
  *    starting the daemon clears it. An agent confined to the tools cannot; one with a shell of its own is not confined.
  *  - every synthetic key, type, click, drag and scroll is refused when the window in front is not the one the agent was
@@ -484,7 +484,7 @@ function stopCheck(): void {
 /**
  * A read or an act by element goes to the process it names or, with none named, to the window in front. Neither may
  * be clawdcursor's own UI. The built-in pill never takes the front outside a pause (and then every call is refused,
- * own-ui-guard.ts), so the window in front is only read when a host app named its own UI (CLAWD_OWN_UI_PIDS): its
+ * tools/call-guards.ts), so the window in front is only read when a host app named its own UI (CLAWD_OWN_UI_PIDS): its
  * window is in front right after the user clicked it, and "invoke Yes" with no process would press the user's button.
  */
 async function notOwnUi(processId?: number): Promise<void> {

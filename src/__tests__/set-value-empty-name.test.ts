@@ -3,7 +3,7 @@
  * and types into it — live 2026-10-20 that was the browser's address bar, reported as `Set "" = 31 chars`.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 
 function platform() {
   return {
@@ -22,7 +22,7 @@ describe('set_value with no field name types nothing', () => {
   for (const name of [undefined, '', '   ']) {
     it(`agent loop / compact route (name ${JSON.stringify(name)})`, async () => {
       const p = platform();
-      const tool = buildUnifiedTools().find(t => t.name === 'set_field_value')!;
+      const tool = buildCoreTools().find(t => t.name === 'set_field_value')!;
       const r = await tool.execute({ name, value: 'https://example.com' }, { platform: p } as any);
       expect(r.success).toBe(false);
       expect(p.typeText).not.toHaveBeenCalled();
@@ -32,7 +32,7 @@ describe('set_value with no field name types nothing', () => {
 
   it('a named field still falls back to the keyboard when it has no settable value', async () => {
     const p = platform();
-    const tool = buildUnifiedTools().find(t => t.name === 'set_field_value')!;
+    const tool = buildCoreTools().find(t => t.name === 'set_field_value')!;
     const r = await tool.execute({ name: 'Address and search bar', value: 'abc' }, { platform: p } as any);
     expect(r.success).toBe(true);
     expect(p.typeText).toHaveBeenCalledWith('abc');

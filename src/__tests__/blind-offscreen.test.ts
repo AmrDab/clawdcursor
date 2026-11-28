@@ -11,15 +11,15 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import type { PlatformAdapter, UiElement } from '../platform/types';
-import { buildUnifiedTools } from '../tools/projected/tools';
-import type { AgentToolContext, UnifiedTool } from '../tools/projected/types';
+import { buildCoreTools } from '../tools/core-tools';
+import type { AgentToolContext, CoreTool } from '../tools/types';
 import { captureSnapshot } from '../core/sense/snapshot';
 import { compileUIMap } from '../core/sense/ui-map';
 import { renderUIMap } from '../core/sense/ui-map-render';
 import { getA11yDepthTools } from '../tools/a11y_depth';
 
-function tool(name: string): UnifiedTool {
-  const t = buildUnifiedTools().find(x => x.name === name);
+function tool(name: string): CoreTool {
+  const t = buildCoreTools().find(x => x.name === name);
   if (!t) throw new Error(`tool ${name} not found`);
   return t;
 }

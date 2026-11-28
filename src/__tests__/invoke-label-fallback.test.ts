@@ -1,7 +1,7 @@
 /**
  * Live 2026-11-17 (Siemens Designcenter): ribbon buttons are not in the UIA tree, `invoke "Circle"` missed, and the agent
  * clicked x,y off a screenshot instead of following the hint. An invoke BY NAME that found no element of that name now
- * presses the visible label itself, with the real smart_click handler (project-mcp.ts pressVisibleLabel).
+ * presses the visible label itself, with the real smart_click handler (core-tools.ts pressVisibleLabel).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 

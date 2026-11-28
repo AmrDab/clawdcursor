@@ -59,7 +59,7 @@ describe('the daemon startup', () => {
     fs.writeFileSync(file, JSON.stringify({ type: 'session', started: 'x', pid: dead }) + '\n' + JSON.stringify({ t: 'y', tool: 'window', ok: true }) + '\n');
 
     const port = await freePort();
-    await serveMcp({ transport: 'http', compact: false, banner: false, port, accept: true });
+    await serveMcp({ transport: 'http', banner: false, port, accept: true });
     await until(() => fs.readFileSync(file, 'utf8').includes('detectedAtNextStart'));
 
     const token = fs.readFileSync(TOKEN_PATH, 'utf8').trim();
@@ -67,7 +67,7 @@ describe('the daemon startup', () => {
     const res = await fetch(`http://127.0.0.1:${port}/mcp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'logs_recent', arguments: {} } }),
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'batch', arguments: { steps: [{ name: 'logs_recent' }] } } }),
     });
     expect(res.status).toBe(200);
     const body = await res.json() as { result: { content: Array<{ text: string }> } };

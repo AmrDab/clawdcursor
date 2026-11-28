@@ -46,7 +46,7 @@ const ctx = (): ToolContext => ({
 });
 
 async function listTools(compact: boolean) {
-  const { server } = await createMcpServer({ compact, ctx: ctx() });
+  const { server } = await createMcpServer({ ctx: ctx() });
   const [a, b] = InMemoryTransport.createLinkedPair();
   await (server as any).connect(a);
   const client = new Client({ name: 'portability-test', version: '0' });
@@ -67,7 +67,6 @@ function walk(node: unknown, visit: (n: Record<string, unknown>, path: string) =
 
 describe.each([
   ['compact', true],
-  ['granular', false],
 ])('tools/list wire is provider-portable (%s surface)', (_label, compact) => {
   it('has no root $schema (Gemini rejects the unknown field)', async () => {
     for (const t of await listTools(compact)) {
@@ -109,8 +108,8 @@ describe('array params keep their real shape', () => {
   });
 
   it('the wire carries the declared item shape, not an empty schema', async () => {
-    const tools = await listTools(false);
-    const drag = tools.find(t => t.name === 'mouse_drag');
+    const tools = await listTools(true);
+    const drag = tools.find(t => t.name === 'computer');
     const path = (drag?.inputSchema as any)?.properties?.path;
     expect(path?.type).toBe('array');
     expect(path?.items?.properties).toHaveProperty('x');
@@ -118,9 +117,9 @@ describe('array params keep their real shape', () => {
   });
 
   it('pause_for_user carries choices (array of strings) and input (object with its fields) on the wire', async () => {
-    for (const compact of [false, true]) {
+    for (const compact of [true]) {
       const tools = await listTools(compact);
-      const tool = tools.find(t => t.name === (compact ? 'system' : 'pause_for_user'));
+      const tool = tools.find(t => t.name === 'system');
       const props = (tool?.inputSchema as any)?.properties;
       expect(props?.choices?.type, `compact=${compact}`).toBe('array');
       expect(props?.choices?.items?.type).toBe('string');
@@ -132,12 +131,12 @@ describe('array params keep their real shape', () => {
   });
 
   it('null for an optional array / object param is accepted as "not given" (reaches the handler)', async () => {
-    const { server } = await createMcpServer({ compact: false, ctx: ctx() });
+    const { server } = await createMcpServer({ ctx: ctx() });
     const [a, b] = InMemoryTransport.createLinkedPair();
     await (server as any).connect(a);
     const client = new Client({ name: 'null-test', version: '0' });
     await client.connect(b);
-    const r: any = await client.callTool({ name: 'pause_for_user', arguments: { message: 'Sign in', choices: null, input: null, done_when: null } });
+    const r: any = await client.callTool({ name: 'system', arguments: { action: 'pause_for_user', message: 'Sign in', choices: null, input: null, done_when: null } });
     await client.close();
     const text = JSON.stringify(r);
     expect(text).not.toMatch(/Expected an (array|object)/);

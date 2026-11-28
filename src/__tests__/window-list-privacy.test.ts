@@ -10,7 +10,7 @@ vi.mock('../core/control', async () => {
   return { ...actual, isAgentWindow: (q: { processId?: number }) => q.processId === 300 };
 });
 
-import { buildUnifiedTools } from '../tools/projected/tools';
+import { buildCoreTools } from '../tools/core-tools';
 
 const win = (processName: string, processId: number, title: string) =>
   ({ processName, processId, title, handle: processId * 10, bounds: { x: 0, y: 0, width: 800, height: 600 }, isMinimized: false });
@@ -23,7 +23,7 @@ describe('list_windows', () => {
       win('chrome', 200, 'Inbox - Mail'), win('chrome', 200, 'Bank statement'),
       win('notepad', 300, 'scratch.txt'),
     ];
-    const r = await buildUnifiedTools().find(t => t.name === 'list_windows')!.execute({}, {
+    const r = await buildCoreTools().find(t => t.name === 'get_windows')!.execute({}, {
       platform: { platform: 'win32', listWindows: async () => windows, getActiveWindow: async () => windows[0] }, mcpSurface: true,
     } as never);
     expect(r.text).not.toContain('sk-live');
@@ -36,7 +36,7 @@ describe('list_windows', () => {
   });
 
   const run = (args: Record<string, unknown>, windows: ReturnType<typeof win>[]) =>
-    buildUnifiedTools().find(t => t.name === 'list_windows')!.execute(args, {
+    buildCoreTools().find(t => t.name === 'get_windows')!.execute(args, {
       platform: { platform: 'win32', listWindows: async () => windows, getActiveWindow: async () => windows[0] }, mcpSurface: true,
     } as never);
   const two = [win('chrome', 200, 'Inbox - Mail'), win('chrome', 200, 'Bank statement'), win('winword', 100, `${SECRET}.docx`)];
