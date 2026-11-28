@@ -421,6 +421,7 @@ export function __useTestDoublesForTests(): void {
   readIdle = async () => null;
   readForeground = async () => null;
   readWindows = async () => [];
+  pidAlive = () => true;   // a test's made-up pids do not run on this machine: none of them is "gone" unless a test says so
 }
 
 /** The window in front now, a fresh read; null when it cannot be read. */
@@ -456,6 +457,22 @@ const sameTarget = (a: Foreground, b: Foreground): boolean => {
   // One of them does not know its app yet (still starting): the same window of the same process is the same window.
   return a.handle !== undefined && a.handle === b.handle && a.processId === b.processId;
 };
+
+/** Does this process still run? (A pid the OS reused for another process counts as running: the guard stays shut.) */
+const osPidAlive = (pid: number): boolean => {
+  try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; }
+};
+let pidAlive = osPidAlive;
+export function __setPidAliveForTests(f: (pid: number) => boolean): void { pidAlive = f; }
+const appNameOf = (f: Foreground) => lower(String((f.hostedProcessId ? f.appName : f.processName) ?? ''));
+/**
+ * The app the agent worked in restarted (a reinstall, a crash): its process is gone and a window of the same app, under a new
+ * pid, is in front (live 2026-11-19: ClippyAI restarted and every input was refused for good, while focus could not find
+ * its window). Not a user switch: the old window no longer exists, and the app is the same. Another app, or a second
+ * instance while the first still runs, is still refused.
+ */
+const restarted = (was: Foreground, now: Foreground): boolean =>
+  !!appNameOf(was) && appNameOf(was) === appNameOf(now) && !pidAlive(was.hostedProcessId ?? was.processId);
 
 /**
  * The process an act is about to go to, verified now. `decided` is the fence's own answer when there is a fence. With
@@ -526,7 +543,7 @@ async function before(): Promise<void> {
     pending = null;
     pendingArrived = undefined;
     explicit = !ownDialog;
-  } else if (lease && !sameTarget(lease, now) && !ownMove && !agentSet.some(w => sameTarget(w, now))
+  } else if (lease && !sameTarget(lease, now) && !ownMove && !agentSet.some(w => sameTarget(w, now)) && !restarted(lease, now)
     // A window of the same app with no input from the user since the agent's own: its act opened it (Edge draws its Open
     // dialog in another of its processes, live 2026-11-19), not a switch of the user's.
     && !(lower(lease.processName) === lower(now.processName) && await untouchedSinceOwnInput())) {

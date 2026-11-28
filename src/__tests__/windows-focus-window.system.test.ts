@@ -26,6 +26,9 @@ function Focus([object[]]$wins, [object[]]$owned, [hashtable]$cmd) {
     ',"sent":' + (ConvertTo-Json -InputObject @([FakeSendKeys]::Sent) -Compress) + '}'
 }
 $notepad = Win 'Untitled - Notepad' 100 7
+# The Win32 z-order's window of a pid UIA's desktop children do not list (pid 9: an always-on-top tool window).
+$script:unlisted = Win 'ClippyAI' 500 9
+function Get-PidWindowElement { param($wpid) if ($wpid -eq 9) { return $script:unlisted } return $null }
 $edgeTitle = "CC Test Page - [InPrivate] - Microsoft$([char]0x200b) Edge"
 `;
 
@@ -41,6 +44,8 @@ describe.runIf(process.platform === 'win32')('ps-bridge focus-window (run for re
     typedTitle: `[Win32UIA]::Foreground = 200\nFocus @((Win 'Other' 100 1), (Win $edgeTitle 200 2)) @() @{ title = 'CC Test Page - [InPrivate] - Microsoft Edge' }`,
     pidTitleNoMatch: `[Win32UIA]::Foreground = 100\nFocus @($notepad) @() @{ processId = 7; title = 'Restore pages?' }`,
     typedTitleAndPid: `[Win32UIA]::Foreground = 300\nFocus @((Win 'Other' 100 2), (Win 'Notes' 200 2), (Win $edgeTitle 300 2)) @() @{ processId = 2; title = 'microsoft  EDGE' }`,
+    pidUnlisted: `[Win32UIA]::Foreground = 500\nFocus @($notepad) @() @{ processId = 9 }`,
+    pidUnlistedWithTitle: `[Win32UIA]::Foreground = 500\nFocus @($notepad) @() @{ processId = 9; title = 'ClippyAI' }`,
   };
   const keys = Object.keys(CASES) as Array<keyof typeof CASES>;
   let r: Record<keyof typeof CASES, Run>;
@@ -87,5 +92,17 @@ describe.runIf(process.platform === 'win32')('ps-bridge focus-window (run for re
     expect(r.pidTitleNoMatch.reply).toMatchObject({ success: false });
     expect(r.pidTitleNoMatch.reply.error).toContain('Window not found');
     expect(r.pidTitleNoMatch.calls).toEqual([]);
+  });
+
+  // Live 2026-11-19: ClippyAI's always-on-top window was not among UIA's desktop Window children, so focus by its pid said
+  // "Window not found" and an agent refused for "foreground changed" could not focus its way back.
+  it('by pid alone, a window UIA does not list is taken from the Win32 z-order and focused', () => {
+    expect(r.pidUnlisted.reply).toMatchObject({ success: true, foreground: true, handle: 500 });
+    expect(r.pidUnlisted.calls).toContain('SetForegroundWindow 500');
+  });
+
+  it('a pid with a title still matches by title only: no z-order fallback, nothing raised', () => {
+    expect(r.pidUnlistedWithTitle.reply).toMatchObject({ success: false });
+    expect(r.pidUnlistedWithTitle.calls).toEqual([]);
   });
 });

@@ -1094,6 +1094,16 @@ function Cmd-GetForegroundWindow {
     return $fg
 }
 
+# The pid's own top-level window from the Win32 z-order, as a UIA element: a normal window before a topmost / tool one.
+# $null when it has none. For a window UIA's desktop children do not list as a Window (a frameless, topmost or tool window
+# can report another control type).
+function Get-PidWindowElement {
+    param([int]$wpid)
+    $h = Select-ScopeWindowHandle (Get-PidWindowCandidates $wpid)
+    if ($h -eq [IntPtr]::Zero) { return $null }
+    try { return [System.Windows.Automation.AutomationElement]::FromHandle($h) } catch { return $null }
+}
+
 # ── Command: focus-window ─────────────────────────────────────────────────────
 function Cmd-FocusWindow {
     param($cmd)
@@ -1140,6 +1150,9 @@ function Cmd-FocusWindow {
         foreach ($w in $allWins) {
             try { if ($w.Current.ProcessId -eq $wpid) { $target = $w; break } } catch {}
         }
+        # A window that is not among UIA's desktop Window children (live 2026-11-19: ClippyAI's always-on-top window was
+        # "not found" by its pid, so an agent refused for "foreground changed" could not focus its way back).
+        if ($null -eq $target) { $target = Get-PidWindowElement $wpid }
     } elseif ($title -ne "") {
         $tl = ConvertTo-TitleKey $title
         foreach ($w in $allWins) {
