@@ -38,6 +38,7 @@ import { quoteScreenText } from '../core/untrusted-screen-content';
 import { refusalBefore, afterCall, forgetScreenIfActed, guardedCall } from '../tools/call-guards';
 import { OPAQUE_MARK } from '../tools/blind-hints';
 import { bareStepName } from '../tools/batch';
+import { startPixelEffect, withPixelEffect } from '../tools/pixel-watch';
 
 // ── Typed SDK boundary (#115) ────────────────────────────────────────────────
 //
@@ -370,6 +371,8 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         const wasIn = actedIn();
         // What this call acted on, as the input guard verified it when it sent the act (control.ts actRecord).
         const acted = () => actRecord(wasIn);
+        // Where pixels changed across an acting call, once per batch (CLAWD_PIXEL_EFFECT=1; off otherwise): the frame before.
+        const pixels = isActingCall(tool.name, callAction) || (tool.name === 'batch' && batchActs(params?.steps)) ? await startPixelEffect(ctx) : null;
         const releasePill = controlBanner.hold();  // the call has control until it returns, waits included
         sessionLog.running(tool.name, action, clientInfo());
         // withTurnBudget: the call's waits for the user (control.ts) end before a host's 60 s call limit.
@@ -387,6 +390,10 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
           return { content: [{ type: 'text', text: withOutcome(`${tool.name}: ${msg}`, true) }], isError: true };
         }
         let result = run.result;
+        if (pixels && !result.isError) {
+          const px = await pixels();
+          result = { ...result, text: withPixelEffect(result.text ?? '', px, { compact: !!compact, batch: tool.name === 'batch' }) };
+        }
         const after = await afterCall(call, result, ctx);
         if ('guard' in after) return refuse(after.guard, after.why);
         if (after.screenshotNote) result = { ...result, text: `${result.text}\n${after.screenshotNote}` };

@@ -34,6 +34,7 @@ import { getBatchTools } from './batch';
 import { rewriteOutsideData } from './hint-rewrite';
 import type { ToolDefinition, ToolContext, ToolResult } from './types';
 import { expectRefusal, checkExpect } from '../core/sense/reactive-check';
+import { startRegionWatch } from './pixel-watch';
 import { EXPECT_SCHEMA } from '../core/verify/assertions';
 import { COMPOUND_ROUTE_INDEX, type ActionRoute } from './compact-routes';
 import { COST_CLASS_BY_TOOL } from './cost-class';
@@ -376,6 +377,7 @@ async function dispatchCompound(
   }
 
   if ((granular.safetyTier ?? 0) >= 1) controlBanner.touch();
+  const regions = expectHere ? await startRegionWatch(args.expect, ctx) : null;   // frames of the `expect` regions, before the act
   let result = await granular.handler(forwarded, ctx);
 
   // Granular hints ("Call cdp_connect first") name tools that do not exist
@@ -403,7 +405,7 @@ async function dispatchCompound(
   // `expect` is checked for every action: projected delegates check it themselves; for the rest the same check runs
   // here, after the action — so it is never accepted and silently dropped. Last, so its verdict ends the text.
   if (expectHere) {
-    const checked = await checkExpect(args.expect, { text: result.text ?? '', success: !result.isError }, ctx.platform!);
+    const checked = await checkExpect(args.expect, { text: result.text ?? '', success: !result.isError }, ctx.platform!, regions);
     if (checked) result = { ...result, text: checked.text, isError: !checked.success };
   }
 

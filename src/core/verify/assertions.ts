@@ -16,7 +16,8 @@
  *   out-of-band artifacts   file_exists / file_contains / clipboard_contains
  *   OS window facts         window_title_contains / app_running
  *   UIA element facts       element_exists / element_value_contains
- *   pixel-derived text      ocr_contains  (the only check that touches pixels)
+ *   pixel-derived text      ocr_contains
+ *   pixels                  region_changed / region_unchanged (frames taken around the act: tools/pixel-watch.ts)
  *
  * LAYERING
  * --------
@@ -45,7 +46,20 @@ export type Assertion =
   | { type: 'file_exists'; path: string }
   | { type: 'file_contains'; path: string; value: string }
   | { type: 'ocr_contains'; value: string }
-  | { type: 'file_changed_since_start'; path: string };
+  | { type: 'file_changed_since_start'; path: string }
+  | RegionAssertion;
+
+/** A region of the screen, in image space (the latest screenshot's) unless `space` is "screen" (positions a11y reports). */
+export interface RegionAssertion {
+  type: 'region_changed' | 'region_unchanged';
+  x: number; y: number; width: number; height: number;
+  space?: 'image' | 'screen';
+}
+
+/** Reads the two frames region checks compare: the one taken BEFORE the act, which only the acting tool has. */
+export interface RegionProbe {
+  check(a: RegionAssertion): Promise<{ ok: boolean; detail: string }>;
+}
 
 export interface AssertionDeps {
   adapter: PlatformAdapter;
@@ -53,6 +67,9 @@ export interface AssertionDeps {
    *  check). Left unwired in contexts without an OCR engine; the assertion
    *  then fails with an explanatory detail instead of throwing. */
   ocrText?: () => Promise<string>;
+  /** Frames taken before the act, for region_changed / region_unchanged. Absent where there is no act to compare with
+   *  (`verify`, `done_when`, a precondition): those assertions then fail with that explanation. */
+  regions?: RegionProbe;
 }
 
 /** When the MCP session a tool call runs in started (its agent connected): the start `file_changed_since_start` means. */
@@ -93,7 +110,11 @@ const FIELDS_BY_TYPE: Record<Assertion['type'], readonly string[]> = {
   file_contains: ['path', 'value'],
   ocr_contains: ['value'],
   file_changed_since_start: ['path'],
+  region_changed: [],
+  region_unchanged: [],
 };
+
+const isRegionType = (t: string): t is RegionAssertion['type'] => t === 'region_changed' || t === 'region_unchanged';
 
 // ─── Parsing / validation ────────────────────────────────────────────────────
 
@@ -132,6 +153,14 @@ export function parseAssertions(raw: unknown): { assertions: Assertion[] } | { e
     for (const f of fields) {
       if (typeof a[f] !== 'string' || (a[f] as string).length === 0) {
         return { error: `assertion ${i} (${type}) is missing required string field "${f}".` };
+      }
+    }
+    if (isRegionType(type)) {
+      const bad = ['x', 'y', 'width', 'height'].find(f => typeof a[f] !== 'number' || !Number.isFinite(a[f] as number))
+        ?? (!((a.width as number) > 0) ? 'width' : !((a.height as number) > 0) ? 'height' : undefined);
+      if (bad) return { error: `assertion ${i} (${type}) needs numbers x, y and positive width, height (missing or invalid "${bad}").` };
+      if (a.space !== undefined && a.space !== 'image' && a.space !== 'screen') {
+        return { error: `assertion ${i} (${type}) has space "${String(a.space)}": use "image" (the default) or "screen".` };
       }
     }
     assertions.push(a as unknown as Assertion);
@@ -242,6 +271,11 @@ async function checkOne(a: Assertion, deps: AssertionDeps): Promise<{ ok: boolea
         ? { ok: true, detail: 'visible on screen (OCR)' }
         : { ok: false, detail: `OCR text does not contain "${a.value}"` };
     }
+    case 'region_changed':
+    case 'region_unchanged': {
+      if (!deps.regions) return { ok: false, detail: `${a.type} compares the screen with how it was before the action: pass it as the \`expect\` of the acting call, not to verify` };
+      return deps.regions.check(a);
+    }
     case 'file_changed_since_start': {
       // The proof that a mutating task actually WROTE the file it claims to —
       // catches "claimed success, nothing happened" for file effects (a live
@@ -266,6 +300,7 @@ async function checkOne(a: Assertion, deps: AssertionDeps): Promise<{ ok: boolea
 }
 
 function summarize(a: Assertion): string {
+  if (isRegionType(a.type)) { const r = a as RegionAssertion; return `${r.type}(${r.x},${r.y} ${r.width}x${r.height}${r.space === 'screen' ? ' screen' : ''})`; }
   const args = (FIELDS_BY_TYPE[a.type] as readonly string[])
     .map(f => `"${truncate(String((a as unknown as Record<string, unknown>)[f]), 40)}"`)
     .join(', ');
@@ -305,7 +340,8 @@ export function renderReport(report: VerifyReport): string {
 /** What the `expect` parameter says in a tool's schema: short enough to read from the description alone, with one example. */
 export const EXPECT_DESCRIPTION =
   'Checks run after the action; a failed check returns DEVIATION. Example: [{"type":"window_title_contains","value":"Inbox"}]. ' +
-  'Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed.';
+  'Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed. ' +
+  'region_changed and region_unchanged: x,y,width,height as for screenshot_region (space:"screen" for a11y positions); pixels in the box changed, or not.';
 
 /** The `expect` parameter every acting tool publishes: a list of assertions, one of the types above each. */
 export const EXPECT_SCHEMA = {

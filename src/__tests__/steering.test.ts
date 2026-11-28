@@ -298,7 +298,7 @@ describe('8. expect is usable from its description', () => {
     for (const t of getCompactTools().filter(x => ['computer', 'accessibility', 'window', 'system', 'browser'].includes(x.name))) {
       expect(t.parameters.expect.description, t.name).toBe(EXPECT_DESCRIPTION);
     }
-    expect(EXPECT_DESCRIPTION).toBe('Checks run after the action; a failed check returns DEVIATION. Example: [{"type":"window_title_contains","value":"Inbox"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed.');
+    expect(EXPECT_DESCRIPTION).toBe('Checks run after the action; a failed check returns DEVIATION. Example: [{"type":"window_title_contains","value":"Inbox"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed. region_changed and region_unchanged: x,y,width,height as for screenshot_region (space:"screen" for a11y positions); pixels in the box changed, or not.');
   });
 });
 
