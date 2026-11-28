@@ -24,6 +24,12 @@ describe('claude -p', () => {
   const cmd = claudeTaskCommand({ exe: '/bin/claude', mcpConfigPath: '/tmp/run/mcp.json', task: 'Open Notepad and type hello' });
   const a = cmd.args;
 
+  it('signs in with the owner\'s Claude Code login, never an API key from the environment', () => {
+    const c = claudeTaskCommand({ exe: 'claude', mcpConfigPath: 'm.json', task: 't' });
+    expect(c.unsetEnv).toEqual(expect.arrayContaining(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']));
+    expect(new Set(c.unsetEnv).size).toBe(c.unsetEnv!.length);
+  });
+
   it('streams JSON both ways, in print mode', () => {
     expect(a[0]).toBe('-p');
     expect(flag(a, '--input-format')).toBe('stream-json');

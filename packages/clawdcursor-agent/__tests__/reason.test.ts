@@ -42,6 +42,13 @@ describe('reasonOf: why a run has no PASS/FAIL', () => {
     expect(reason).toBe('claude ended with an error: Failed to authenticate. API Error: 401 OAuth access token is invalid. (sign in again: run `claude`, then /login)');
   });
 
+  it('a Claude Code that is not signed in, or was handed a bad key, says how to sign in', () => {
+    for (const result of ['Invalid API key · Fix external API key', 'Not logged in · Please run /login']) {
+      const lines = [JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result })];
+      expect(reasonOf({ ...base, ...kept(lines.flatMap(claudeEvents)) })).toBe(`claude ended with an error: ${result} (sign in again: run \`claude\`, then /login)`);
+    }
+  });
+
   it('a codex failure (an error event, no last message) says the error, with its sign-in hint for a 401', () => {
     const k = kept([JSON.stringify({ type: 'turn.failed', error: { message: 'unexpected status 401 Unauthorized' } })].flatMap(codexEvents));
     expect(reasonOf({ ...base, runner: 'codex', serverState: undefined, ...k }))

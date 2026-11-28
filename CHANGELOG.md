@@ -2,6 +2,13 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **`clawdcursor task` with Claude Code uses your Claude sign-in (your subscription), never an API key from the
+  environment.** An `ANTHROPIC_API_KEY` in your variables took precedence, so an old key failed every run with "Invalid API
+  key". To use an API key, run `clawdcursor task --with anthropic`. A sign-in error now says how to sign in again.
+
 ## [2.3.0] - 2026-11-20
 
 ### Security
